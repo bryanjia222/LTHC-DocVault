@@ -1,0 +1,13 @@
+[package]
+name = "docvault"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "docvault"
+path = "src/main.rs"
+
+[dependencies]
+docvault-core = { path = "../../crates/core" }
+

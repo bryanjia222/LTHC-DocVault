@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "apps/cli",
+    "crates/core",
+    "crates/jobs",
+    "crates/ooxml",
+    "crates/storage",
+    "shared/types",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
