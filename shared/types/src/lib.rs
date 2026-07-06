@@ -14,11 +14,17 @@ impl DocumentId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
     pub id: DocumentId,
+    pub name: String,
     pub source_path: String,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Version {
     pub id: String,
     pub document_id: DocumentId,
+    pub number: i64,
+    pub original_path: String,
+    pub archive_path: String,
+    pub created_at: i64,
 }

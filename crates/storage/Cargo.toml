@@ -5,4 +5,5 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-
+docvault-types = { path = "../../shared/types" }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
