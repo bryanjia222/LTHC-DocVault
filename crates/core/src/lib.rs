@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use docvault_storage::{StorageError, StorageResult, VaultStorage};
-use docvault_types::{Document, DocumentId, Version};
+use docvault_types::{Document, DocumentId, ImportMetadata, Version};
 
 #[derive(Debug)]
 pub enum CoreError {
@@ -53,13 +53,16 @@ impl DocVault {
         &self,
         source_path: impl AsRef<Path>,
         name: &str,
+        metadata: ImportMetadata,
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
         if !docvault_ooxml::is_supported_ooxml(source_path) {
             return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
         }
 
-        Ok(self.storage.add_document_version(name, source_path)?)
+        Ok(self
+            .storage
+            .add_document_version(name, source_path, metadata)?)
     }
 
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {
@@ -105,7 +108,7 @@ mod tests {
         let vault = DocVault::new(storage);
 
         let error = vault
-            .import_document("notes.txt", "notes")
+            .import_document("notes.txt", "notes", ImportMetadata::default())
             .expect_err("txt files should be rejected");
 
         assert!(matches!(error, CoreError::UnsupportedDocument(_)));

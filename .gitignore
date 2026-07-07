@@ -5,3 +5,5 @@ dist/
 .DS_Store
 example_docs/
 .docvault/
+.docvault-restic-check/
+.docvault-metadata-check/

@@ -11,3 +11,5 @@ path = "src/main.rs"
 [dependencies]
 docvault-core = { path = "../../crates/core" }
 docvault-storage = { path = "../../crates/storage" }
+docvault-types = { path = "../../shared/types" }
+serde_json = "1.0.133"

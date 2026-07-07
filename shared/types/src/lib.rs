@@ -26,5 +26,15 @@ pub struct Version {
     pub number: i64,
     pub original_path: String,
     pub archive_path: String,
+    pub backup_backend: String,
+    pub snapshot_id: Option<String>,
+    pub author: Option<String>,
+    pub note: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportMetadata {
+    pub author: Option<String>,
+    pub note: Option<String>,
 }

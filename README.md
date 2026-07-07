@@ -4,7 +4,7 @@
 
 DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统，用于管理 `.docx / .xlsx / .pptx` 等文档的历史演进版本。
 
-系统通过对 OOXML 文件进行结构化展开与哈希分析，并结合高效的内容去重归档机制，实现稳定、可恢复、可追溯的文档版本管理能力。
+系统通过对 OOXML 文件进行结构化展开，并结合可切换的本地备份后端，实现稳定、可恢复、可追溯的文档版本管理能力。
 
 产品面向个人与团队的本地文档管理场景，并为未来云端协作与托管能力预留演进空间。
 
@@ -20,17 +20,19 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 ### 版本管理
 - 自动生成版本记录
 - 版本历史查看
+- 版本备注与修改人记录
 - 任意版本恢复
 
 ### 归档存储
-- 基于内容去重的归档机制
+- 可切换备份后端（`local-copy` / `restic`）
 - 原始文档完整保存
 - 版本级快照管理
 
 ### OOXML 处理
 - Office 文件结构解析（ZIP 解压）
 - 文件结构展开
-- 内容哈希生成与记录
+- Restic 后端按解包后的 OOXML 目录进行备份
+- 恢复时重新压缩为 `.docx / .xlsx / .pptx`
 
 ### 任务系统
 - 导入与恢复任务异步执行
@@ -66,9 +68,18 @@ docvault/
 ├── Cargo.toml             # workspace 入口
 ```
 
+### 备份后端
+
+当前实现支持两个本地备份后端：
+
+- `restic`：默认后端。导入时先解压 OOXML 包，把解包后的 `package/` 目录交给 Restic 备份；恢复时从 Restic snapshot 还原 `package/` 目录，再重新压缩为 Office 文件。
+- `local-copy`：可选后端。导入时复制原始 Office 文件，恢复时从版本副本复制到输出路径。适合开发、测试和排查问题。
+
+`local-copy` 不提供内容去重、快照仓库校验或 Restic 的压缩能力。`restic` 后端负责版本级快照和内容去重，但仍通过 storage 层暴露同一套 CLI/core 行为。
+
 ### 第三方运行时资产
 
-Restic 作为 v1 固定使用的本地归档运行时，不应直接放在项目根目录。推荐按版本和目标平台存放：
+Restic 作为可选本地归档运行时，不应直接放在项目根目录。推荐按版本和目标平台存放：
 
 ```text
 third_party/
@@ -92,7 +103,7 @@ third_party/
 
 发布桌面端时，可由构建脚本将对应平台的二进制复制到 `apps/desktop/src-tauri/binaries/` 或 Tauri 要求的 sidecar 目录。CLI 发布也应从同一份 `third_party/restic` 资产中选择目标平台文件，避免不同入口使用不同 Restic 版本。
 
-开发和运行时查找 Restic 的优先级建议为：
+开发和运行时查找 Restic 的优先级为：
 
 1. 配置文件中的 `restic_path`
 2. 环境变量 `DOCVAULT_RESTIC_PATH`
@@ -137,20 +148,22 @@ docvault init
 ### 2. 导入文档
 
 ```bash
-docvault import ./report.docx --name "report"
+docvault import ./report.docx --name "report" --author "Bryan" --note "Initial import"
 ```
 
 ### 3. 查看文档列表
 
 ```bash
-docvault list
+docvault list --format table
 ```
 
 ### 4. 查看版本历史
 
 ```bash
-docvault versions report
+docvault versions report --format table
 ```
+
+`list` 和 `versions` 支持 `--format table|json`。默认是 `table`，适合人工查看；`json` 适合脚本或前端调用，避免文件名、备注等字段中的空格影响解析。
 
 ### 5. 恢复版本
 
@@ -165,17 +178,18 @@ docvault restore report --version v2 --output ./restore/
 ### 文档导入流程
 
 ```bash
-docvault import ./contract.docx --name contract
+docvault import ./contract.docx --name contract --author "Bryan" --note "Updated signature page"
 ```
 
 系统将执行以下流程：
 
-1. 复制原始文件至本地存储区域
-2. 解压 OOXML 文件结构
-3. 生成文件结构与哈希记录
-4. 创建版本记录
-5. 执行归档存储
-6. 返回版本 ID
+1. 校验 Office 文件类型
+2. 创建或定位文档记录
+3. 记录版本元数据（author / note）
+4. 按当前备份后端执行归档
+5. 返回版本 ID
+
+`local-copy` 后端会复制原始文件。`restic` 后端会先解压 OOXML 文件结构，再备份解包后的目录。
 
 ------
 
@@ -188,9 +202,10 @@ docvault restore contract --version latest --output ./output
 恢复流程将：
 
 1. 定位版本信息
-2. 获取对应归档快照
-3. 还原文件至临时目录
-4. 输出原始 Office 文件
+2. 按版本记录选择对应备份后端
+3. 从版本副本或 Restic snapshot 还原内容
+4. 对 Restic 后端恢复出的 OOXML 目录重新压缩
+5. 输出 Office 文件
 
 ------
 
@@ -210,6 +225,7 @@ backend = "restic"
 data_dir = "~/.docvault/data"
 repo_dir = "~/.docvault/repo"
 restic_path = ""
+restic_password = "docvault-local-development-password"
 
 [database]
 path = "~/.docvault/db.sqlite"
@@ -227,10 +243,11 @@ file = "~/.docvault/logs/app.log"
 
 | 字段     | 说明                                 |
 | -------- | ------------------------------------ |
-| backend  | 当前归档后端实现（v1 固定为 restic） |
+| backend  | 当前备份后端：`local-copy` 或 `restic` |
 | data_dir | 临时文件与 staging 目录              |
 | repo_dir | 归档仓库存储路径                     |
 | restic_path | 可选 Restic 可执行文件路径；为空时使用内置或自动发现 |
+| restic_password | 本地 Restic 仓库密码；也可用 `DOCVAULT_RESTIC_PASSWORD` 覆盖 |
 
 #### database
 
