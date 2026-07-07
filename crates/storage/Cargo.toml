@@ -9,3 +9,4 @@ docvault-ooxml = { path = "../ooxml" }
 docvault-types = { path = "../../shared/types" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde_json = "1.0.133"
+uuid = { version = "1.11.0", features = ["v4"] }

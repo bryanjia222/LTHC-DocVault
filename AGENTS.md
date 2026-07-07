@@ -240,6 +240,21 @@ If a feature works:
 
 ------
 
+## 3.6 Early-stage compatibility policy
+
+DocVault is in early active development. Agents may make incompatible changes when a model,
+schema, command, or workflow is clearly wrong or blocks a cleaner design.
+
+When doing so:
+
+- Prefer the correct domain model over preserving experimental data
+- Do not add complex migration code only to support old local test vaults
+- Update README / CLI usage examples alongside command or schema changes
+- Keep incompatible changes explicit in the final summary
+- It is acceptable for users to recreate `.docvault*` test directories after breaking schema changes
+
+------
+
 # 4. Testing Requirements
 
 ## 4.1 Required test types

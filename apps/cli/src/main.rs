@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf, process::ExitCode};
 
 use docvault_core::DocVault;
-use docvault_storage::{VaultPaths, VaultStorage};
+use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
 use docvault_types::ImportMetadata;
 use serde_json::json;
 
@@ -44,7 +44,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("import") => {
             let source_path = args.get(1).ok_or_else(|| usage().to_owned())?;
-            let name = parse_import_name(&args).ok_or_else(|| usage().to_owned())?;
+            let document_ref = parse_import_ref(&args)?;
             let metadata = ImportMetadata {
                 author: parse_option_value(&args, "--author"),
                 note: parse_option_value(&args, "--note"),
@@ -53,9 +53,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
             let (_, version) = vault
-                .import_document(source_path, &name, metadata)
+                .import_document(source_path, document_ref.clone(), metadata)
                 .map_err(|error| error.to_string())?;
-            println!("Imported {name} as {}", version.id);
+            println!("Imported {} as {}", document_ref.display_name(), version.id);
             Ok(())
         }
         Some("list") => {
@@ -75,12 +75,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 vec![
                                     document.id.as_str().to_owned(),
                                     document.name.clone(),
+                                    document.current_version_id.clone().unwrap_or_default(),
                                     document.source_path.clone(),
                                     document.created_at.to_string(),
                                 ]
                             })
                             .collect::<Vec<_>>();
-                        print_table(&["ID", "NAME", "SOURCE", "CREATED_AT"], &rows);
+                        print_table(&["ID", "NAME", "CURRENT", "SOURCE", "CREATED_AT"], &rows);
                     }
                 }
                 OutputFormat::Json => {
@@ -90,6 +91,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                             json!({
                                 "id": document.id.as_str(),
                                 "name": document.name,
+                                "current_version_id": document.current_version_id,
                                 "source_path": document.source_path,
                                 "created_at": document.created_at,
                             })
@@ -105,12 +107,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("versions") => {
             let format = OutputFormat::parse(&args)?;
-            let document_name = args.get(1).ok_or_else(|| usage().to_owned())?;
+            let document_ref = parse_document_ref_arg(&args, 1)?;
             let storage =
                 VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
             let versions = vault
-                .list_versions(document_name)
+                .list_versions(&document_ref)
                 .map_err(|error| error.to_string())?;
             match format {
                 OutputFormat::Table => {
@@ -123,6 +125,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 vec![
                                     version.id.clone(),
                                     version.number.to_string(),
+                                    version.parent_version_id.clone().unwrap_or_default(),
                                     version.backup_backend.clone(),
                                     version.original_path.clone(),
                                     version
@@ -139,6 +142,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                             &[
                                 "ID",
                                 "NUMBER",
+                                "PARENT",
                                 "BACKEND",
                                 "SOURCE",
                                 "REFERENCE",
@@ -157,6 +161,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 "id": version.id,
                                 "document_id": version.document_id.as_str(),
                                 "number": version.number,
+                                "parent_version_id": version.parent_version_id,
                                 "original_path": version.original_path,
                                 "archive_path": version.archive_path,
                                 "backup_backend": version.backup_backend,
@@ -175,8 +180,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             Ok(())
         }
-        Some("restore") => {
-            let document_name = args.get(1).ok_or_else(|| usage().to_owned())?;
+        Some("export") | Some("restore") => {
+            let document_ref = parse_document_ref_arg(&args, 1)?;
             let requested_version = parse_option_value(&args, "--version")
                 .or_else(|| {
                     args.get(2)
@@ -190,24 +195,128 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let storage =
                 VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
-            let restored = vault
-                .restore_version(document_name, &requested_version, output_path)
+            let exported = vault
+                .export_version(&document_ref, &requested_version, output_path)
                 .map_err(|error| error.to_string())?;
-            println!("Restored to {}", restored.display());
+            println!("Exported to {}", exported.display());
+            Ok(())
+        }
+        Some("checkout") => {
+            let document_ref = parse_document_ref_arg(&args, 1)?;
+            let requested_version = parse_option_value(&args, "--version")
+                .or_else(|| {
+                    args.get(2)
+                        .filter(|value| !value.starts_with("--"))
+                        .cloned()
+                })
+                .unwrap_or_else(|| "latest".to_owned());
+            let output_path = parse_option_value(&args, "--output").map(PathBuf::from);
+            let storage =
+                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let vault = DocVault::new(storage);
+            let exported = vault
+                .checkout_version(&document_ref, &requested_version, output_path.as_ref())
+                .map_err(|error| error.to_string())?;
+            match exported {
+                Some(path) => println!(
+                    "Checked out {requested_version} and exported to {}",
+                    path.display()
+                ),
+                None => println!("Checked out {requested_version}"),
+            }
+            Ok(())
+        }
+        Some("current") => {
+            let format = OutputFormat::parse(&args)?;
+            let document_ref = parse_document_ref_arg(&args, 1)?;
+            let storage =
+                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let vault = DocVault::new(storage);
+            let current = vault
+                .current_version(&document_ref)
+                .map_err(|error| error.to_string())?;
+            match (format, current) {
+                (OutputFormat::Table, Some(version)) => print_versions_table(&[version]),
+                (OutputFormat::Table, None) => println!("No current version"),
+                (OutputFormat::Json, Some(version)) => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&version_to_json(&version))
+                        .map_err(|error| error.to_string())?
+                ),
+                (OutputFormat::Json, None) => println!("null"),
+            }
             Ok(())
         }
         _ => Err(usage().to_owned()),
     }
 }
 
-fn parse_import_name(args: &[String]) -> Option<String> {
-    parse_option_value(args, "--name").or_else(|| args.get(2).cloned())
+trait DocumentRefDisplay {
+    fn display_name(&self) -> &str;
+}
+
+impl DocumentRefDisplay for DocumentRef {
+    fn display_name(&self) -> &str {
+        match self {
+            DocumentRef::Name(name) => name,
+            DocumentRef::NewName(name) => name,
+            DocumentRef::IdPrefix(id_prefix) => id_prefix,
+            DocumentRef::NameAndIdPrefix { name, .. } => name,
+        }
+    }
+}
+
+fn parse_import_ref(args: &[String]) -> Result<DocumentRef, String> {
+    if let Some(id_prefix) = parse_option_value(args, "--id") {
+        return Ok(DocumentRef::IdPrefix(id_prefix));
+    }
+
+    let value = parse_option_value(args, "--name")
+        .or_else(|| args.get(2).cloned())
+        .ok_or_else(|| usage().to_owned())?;
+    if has_flag(args, "--new") {
+        if value.contains('@') {
+            return Err("--new requires a plain document name".to_owned());
+        }
+        return Ok(DocumentRef::NewName(value));
+    }
+    parse_document_ref_value(&value)
+}
+
+fn parse_document_ref_arg(args: &[String], position: usize) -> Result<DocumentRef, String> {
+    if let Some(id_prefix) = parse_option_value(args, "--id") {
+        return Ok(DocumentRef::IdPrefix(id_prefix));
+    }
+
+    let value = args.get(position).ok_or_else(|| usage().to_owned())?;
+    if value.starts_with("--") {
+        return Err(usage().to_owned());
+    }
+    parse_document_ref_value(value)
+}
+
+fn parse_document_ref_value(value: &str) -> Result<DocumentRef, String> {
+    if let Some((name, id_prefix)) = value.rsplit_once('@') {
+        if name.is_empty() || id_prefix.is_empty() {
+            return Err(format!("Invalid document reference: {value}"));
+        }
+        Ok(DocumentRef::NameAndIdPrefix {
+            name: name.to_owned(),
+            id_prefix: id_prefix.to_owned(),
+        })
+    } else {
+        Ok(DocumentRef::Name(value.to_owned()))
+    }
 }
 
 fn parse_option_value(args: &[String], option: &str) -> Option<String> {
     args.windows(2)
         .find(|window| window[0] == option)
         .map(|window| window[1].clone())
+}
+
+fn has_flag(args: &[String], option: &str) -> bool {
+    args.iter().any(|arg| arg == option)
 }
 
 fn print_table(headers: &[&str], rows: &[Vec<String>]) {
@@ -252,6 +361,57 @@ fn print_table(headers: &[&str], rows: &[Vec<String>]) {
     }
 }
 
+fn print_versions_table(versions: &[docvault_types::Version]) {
+    let rows = versions
+        .iter()
+        .map(|version| {
+            vec![
+                version.id.clone(),
+                version.number.to_string(),
+                version.parent_version_id.clone().unwrap_or_default(),
+                version.backup_backend.clone(),
+                version.original_path.clone(),
+                version
+                    .snapshot_id
+                    .as_deref()
+                    .unwrap_or(version.archive_path.as_str())
+                    .to_owned(),
+                version.author.clone().unwrap_or_default(),
+                version.note.clone().unwrap_or_default(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    print_table(
+        &[
+            "ID",
+            "NUMBER",
+            "PARENT",
+            "BACKEND",
+            "SOURCE",
+            "REFERENCE",
+            "AUTHOR",
+            "NOTE",
+        ],
+        &rows,
+    );
+}
+
+fn version_to_json(version: &docvault_types::Version) -> serde_json::Value {
+    json!({
+        "id": version.id,
+        "document_id": version.document_id.as_str(),
+        "number": version.number,
+        "parent_version_id": version.parent_version_id,
+        "original_path": version.original_path,
+        "archive_path": version.archive_path,
+        "backup_backend": version.backup_backend,
+        "snapshot_id": version.snapshot_id,
+        "author": version.author,
+        "note": version.note,
+        "created_at": version.created_at,
+    })
+}
+
 fn print_table_row(row: &[String], widths: &[usize]) {
     for (index, width) in widths.iter().enumerate() {
         if index > 0 {
@@ -270,9 +430,12 @@ fn normalize_cell(value: &str) -> String {
 fn usage() -> &'static str {
     "Usage:
   docvault init
-  docvault import <path> <name> [--author <name>] [--note <text>]
-  docvault import <path> --name <name> [--author <name>] [--note <text>]
+  docvault import <path> <name|name@id-prefix> [--author <name>] [--note <text>] [--new]
+  docvault import <path> --name <name> [--author <name>] [--note <text>] [--new]
+  docvault import <path> --id <id-prefix> [--author <name>] [--note <text>]
   docvault list [--format table|json]
-  docvault versions <name> [--format table|json]
-  docvault restore <name> [version|--version <version>] --output <path>"
+  docvault versions <name|name@id-prefix|--id <id-prefix>> [--format table|json]
+  docvault current <name|name@id-prefix|--id <id-prefix>> [--format table|json]
+  docvault export <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] --output <path>
+  docvault checkout <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] [--output <path>]"
 }

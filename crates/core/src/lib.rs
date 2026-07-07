@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use docvault_storage::{StorageError, StorageResult, VaultStorage};
+use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
 use docvault_types::{Document, DocumentId, ImportMetadata, Version};
 
 #[derive(Debug)]
@@ -36,6 +36,7 @@ pub fn register_document(name: impl Into<String>, source_path: impl Into<String>
         id: DocumentId::new(name.clone()),
         name,
         source_path: source_path.into(),
+        current_version_id: None,
         created_at: 0,
     }
 }
@@ -52,7 +53,7 @@ impl DocVault {
     pub fn import_document(
         &self,
         source_path: impl AsRef<Path>,
-        name: &str,
+        document_ref: DocumentRef,
         metadata: ImportMetadata,
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
@@ -62,25 +63,42 @@ impl DocVault {
 
         Ok(self
             .storage
-            .add_document_version(name, source_path, metadata)?)
+            .add_document_version(document_ref, source_path, metadata)?)
     }
 
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {
         self.storage.list_documents()
     }
 
-    pub fn list_versions(&self, document_name: &str) -> StorageResult<Vec<Version>> {
-        self.storage.list_versions(document_name)
+    pub fn list_versions(&self, document_ref: &DocumentRef) -> StorageResult<Vec<Version>> {
+        self.storage.list_versions(document_ref)
     }
 
-    pub fn restore_version(
+    pub fn export_version(
         &self,
-        document_name: &str,
+        document_ref: &DocumentRef,
         requested_version: &str,
         output_path: impl AsRef<Path>,
     ) -> StorageResult<PathBuf> {
         self.storage
-            .restore_version(document_name, requested_version, output_path.as_ref())
+            .export_version(document_ref, requested_version, output_path.as_ref())
+    }
+
+    pub fn checkout_version(
+        &self,
+        document_ref: &DocumentRef,
+        requested_version: &str,
+        output_path: Option<impl AsRef<Path>>,
+    ) -> StorageResult<Option<PathBuf>> {
+        self.storage.checkout_version(
+            document_ref,
+            requested_version,
+            output_path.as_ref().map(AsRef::as_ref),
+        )
+    }
+
+    pub fn current_version(&self, document_ref: &DocumentRef) -> StorageResult<Option<Version>> {
+        self.storage.current_version(document_ref)
     }
 }
 
@@ -108,7 +126,11 @@ mod tests {
         let vault = DocVault::new(storage);
 
         let error = vault
-            .import_document("notes.txt", "notes", ImportMetadata::default())
+            .import_document(
+                "notes.txt",
+                DocumentRef::Name("notes".to_owned()),
+                ImportMetadata::default(),
+            )
             .expect_err("txt files should be rejected");
 
         assert!(matches!(error, CoreError::UnsupportedDocument(_)));

@@ -16,12 +16,14 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 - 文档导入与注册
 - 文档列表查看
 - 文档基础信息展示
+- UUID 文档定位与同名文档歧义处理
 
 ### 版本管理
 - 自动生成版本记录
 - 版本历史查看
 - 版本备注与修改人记录
-- 任意版本恢复
+- 当前版本指针切换
+- 任意版本导出
 
 ### 归档存储
 - 可切换备份后端（`local-copy` / `restic`）
@@ -168,7 +170,14 @@ docvault versions report --format table
 ### 5. 恢复版本
 
 ```bash
-docvault restore report --version v2 --output ./restore/
+docvault export report --version v2 --output ./restore/
+```
+
+如果存在多个同名文档，使用 `--id` 或 `name@id-prefix` 精确定位：
+
+```bash
+docvault versions report@550e8400 --format table
+docvault export --id 550e8400 --version v2 --output ./restore/
 ```
 
 ------
@@ -193,19 +202,46 @@ docvault import ./contract.docx --name contract --author "Bryan" --note "Updated
 
 ------
 
-### 版本恢复流程
+### 文档定位
+
+DocVault 允许多个文档使用相同的显示名称。每个文档都会分配一个 UUID 作为稳定 ID。
+
+支持三种定位方式：
+
+- `name`：按显示名称查找；如果匹配多个文档会报错。
+- `name@id-prefix`：人用精确定位，例如 `report@550e8400`。
+- `--id <id-prefix>`：程序或脚本推荐使用。
+
+### 版本导出与 Checkout
+
+`export` 只导出某个版本的文件，不改变文档当前指针：
 
 ```bash
-docvault restore contract --version latest --output ./output
+docvault export contract --version latest --output ./output
 ```
 
-恢复流程将：
+`checkout` 会把指定版本设为当前版本；如果提供 `--output`，也会同时导出文件：
+
+```bash
+docvault checkout contract --version v1
+docvault checkout contract --version v1 --output ./output
+```
+
+`current` 可查看当前版本：
+
+```bash
+docvault current contract --format table
+```
+
+导出流程将：
 
 1. 定位版本信息
 2. 按版本记录选择对应备份后端
 3. 从版本副本或 Restic snapshot 还原内容
 4. 对 Restic 后端恢复出的 OOXML 目录重新压缩
 5. 输出 Office 文件
+
+Checkout 额外会更新 `documents.current_version_id`。后续导入新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
 
 ------
 

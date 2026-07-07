@@ -9,6 +9,7 @@ use docvault_ooxml::OoxmlError;
 use docvault_types::{Document, DocumentId, ImportMetadata, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -17,6 +18,19 @@ pub enum StorageError {
     Sqlite(rusqlite::Error),
     Json(serde_json::Error),
     DocumentNotFound(String),
+    DocumentIdNotFound(String),
+    AmbiguousDocumentName {
+        name: String,
+        matches: Vec<Document>,
+    },
+    AmbiguousDocumentIdPrefix {
+        prefix: String,
+        matches: Vec<Document>,
+    },
+    DocumentReferenceMismatch {
+        requested_name: String,
+        matched: Box<Document>,
+    },
     VersionNotFound {
         document_name: String,
         version: String,
@@ -38,6 +52,26 @@ impl std::fmt::Display for StorageError {
             Self::Sqlite(error) => write!(f, "SQLite error: {error}"),
             Self::Json(error) => write!(f, "JSON error: {error}"),
             Self::DocumentNotFound(name) => write!(f, "document not found: {name}"),
+            Self::DocumentIdNotFound(id) => write!(f, "document id not found: {id}"),
+            Self::AmbiguousDocumentName { name, matches } => {
+                writeln!(f, "document name is ambiguous: {name}")?;
+                write_document_matches(f, matches)
+            }
+            Self::AmbiguousDocumentIdPrefix { prefix, matches } => {
+                writeln!(f, "document id prefix is ambiguous: {prefix}")?;
+                write_document_matches(f, matches)
+            }
+            Self::DocumentReferenceMismatch {
+                requested_name,
+                matched,
+            } => {
+                write!(
+                    f,
+                    "document reference mismatch: requested name {requested_name}, matched {} ({})",
+                    matched.name,
+                    matched.id.as_str()
+                )
+            }
             Self::VersionNotFound {
                 document_name,
                 version,
@@ -84,6 +118,14 @@ impl From<serde_json::Error> for StorageError {
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentRef {
+    Name(String),
+    NewName(String),
+    IdPrefix(String),
+    NameAndIdPrefix { name: String, id_prefix: String },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackupBackend {
@@ -241,25 +283,111 @@ impl VaultStorage {
 
     pub fn add_document_version(
         &self,
-        name: &str,
+        document_ref: DocumentRef,
         source_path: &Path,
         metadata: ImportMetadata,
     ) -> StorageResult<(Document, Version)> {
         let now = unix_timestamp();
-        let document = match self.find_document_by_name(name)? {
-            Some(document) => document,
-            None => {
+        let document = match document_ref {
+            DocumentRef::NewName(name) => {
                 let document = Document {
-                    id: DocumentId::new(slugify(name)),
-                    name: name.to_owned(),
+                    id: DocumentId::new(Uuid::new_v4().to_string()),
+                    name,
                     source_path: source_path.display().to_string(),
+                    current_version_id: None,
                     created_at: now,
                 };
                 self.insert_document(&document)?;
                 document
             }
+            DocumentRef::Name(name) => match self.find_documents_by_name(&name)?.as_slice() {
+                [] => {
+                    if name.contains('@') {
+                        return Err(StorageError::DocumentNotFound(name));
+                    }
+                    let document = Document {
+                        id: DocumentId::new(Uuid::new_v4().to_string()),
+                        name,
+                        source_path: source_path.display().to_string(),
+                        current_version_id: None,
+                        created_at: now,
+                    };
+                    self.insert_document(&document)?;
+                    document
+                }
+                [document] => document.clone(),
+                matches => {
+                    return Err(StorageError::AmbiguousDocumentName {
+                        name,
+                        matches: matches.to_vec(),
+                    });
+                }
+            },
+            other => self.resolve_document_ref(&other)?,
         };
 
+        self.add_version_to_document(document, source_path, metadata, now)
+    }
+
+    pub fn add_document_version_to_name_or_create(
+        &self,
+        name: &str,
+        source_path: &Path,
+        metadata: ImportMetadata,
+    ) -> StorageResult<(Document, Version)> {
+        self.add_document_version(DocumentRef::Name(name.to_owned()), source_path, metadata)
+    }
+
+    pub fn export_version(
+        &self,
+        document_ref: &DocumentRef,
+        requested_version: &str,
+        output_path: &Path,
+    ) -> StorageResult<PathBuf> {
+        let document = self.resolve_document_ref(document_ref)?;
+        let version = self
+            .find_version(document.id.as_str(), requested_version)?
+            .ok_or_else(|| StorageError::VersionNotFound {
+                document_name: document.name.clone(),
+                version: requested_version.to_owned(),
+            })?;
+        self.export_resolved_version(&document, &version, output_path)
+    }
+
+    pub fn checkout_version(
+        &self,
+        document_ref: &DocumentRef,
+        requested_version: &str,
+        output_path: Option<&Path>,
+    ) -> StorageResult<Option<PathBuf>> {
+        let document = self.resolve_document_ref(document_ref)?;
+        let version = self
+            .find_version(document.id.as_str(), requested_version)?
+            .ok_or_else(|| StorageError::VersionNotFound {
+                document_name: document.name.clone(),
+                version: requested_version.to_owned(),
+            })?;
+        self.set_current_version(document.id.as_str(), &version.id)?;
+        output_path
+            .map(|output_path| self.export_resolved_version(&document, &version, output_path))
+            .transpose()
+    }
+
+    pub fn current_version(&self, document_ref: &DocumentRef) -> StorageResult<Option<Version>> {
+        let document = self.resolve_document_ref(document_ref)?;
+        let Some(current_version_id) = document.current_version_id else {
+            return Ok(None);
+        };
+        self.find_version(document.id.as_str(), &current_version_id)
+    }
+
+    fn add_version_to_document(
+        &self,
+        document: Document,
+        source_path: &Path,
+        metadata: ImportMetadata,
+        now: i64,
+    ) -> StorageResult<(Document, Version)> {
         let number = self.next_version_number(document.id.as_str())?;
         let version_id = format!("v{number}");
         let archive = self.archive_source(&document, &version_id, source_path)?;
@@ -271,65 +399,57 @@ impl VaultStorage {
             archive_path: archive.reference.display().to_string(),
             backup_backend: archive.backend.as_str().to_owned(),
             snapshot_id: archive.snapshot_id,
+            parent_version_id: document.current_version_id.clone(),
             author: metadata.author,
             note: metadata.note,
             created_at: now,
         };
         self.insert_version(&version)?;
-        Ok((document, version))
+        self.set_current_version(document.id.as_str(), &version.id)?;
+        let mut updated_document = document;
+        updated_document.current_version_id = Some(version.id.clone());
+        Ok((updated_document, version))
+    }
+
+    pub fn create_document(
+        &self,
+        name: &str,
+        source_path: &Path,
+        now: i64,
+    ) -> StorageResult<Document> {
+        let document = Document {
+            id: DocumentId::new(Uuid::new_v4().to_string()),
+            name: name.to_owned(),
+            source_path: source_path.display().to_string(),
+            current_version_id: None,
+            created_at: now,
+        };
+        self.insert_document(&document)?;
+        Ok(document)
     }
 
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, name, source_path, created_at FROM documents ORDER BY created_at, name",
+            "SELECT id, name, source_path, current_version_id, created_at FROM documents ORDER BY created_at, name, id",
         )?;
         let documents = statement
-            .query_map([], |row| {
-                Ok(Document {
-                    id: DocumentId::new(row.get::<_, String>(0)?),
-                    name: row.get(1)?,
-                    source_path: row.get(2)?,
-                    created_at: row.get(3)?,
-                })
-            })?
+            .query_map([], document_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(documents)
     }
 
-    pub fn list_versions(&self, document_name: &str) -> StorageResult<Vec<Version>> {
-        let document = self
-            .find_document_by_name(document_name)?
-            .ok_or_else(|| StorageError::DocumentNotFound(document_name.to_owned()))?;
+    pub fn list_versions(&self, document_ref: &DocumentRef) -> StorageResult<Vec<Version>> {
+        let document = self.resolve_document_ref(document_ref)?;
         self.versions_for_document(document.id.as_str())
     }
 
     pub fn restore_version(
         &self,
-        document_name: &str,
+        document_ref: &DocumentRef,
         requested_version: &str,
         output_path: &Path,
     ) -> StorageResult<PathBuf> {
-        let document = self
-            .find_document_by_name(document_name)?
-            .ok_or_else(|| StorageError::DocumentNotFound(document_name.to_owned()))?;
-        let version = self
-            .find_version(document.id.as_str(), requested_version)?
-            .ok_or_else(|| StorageError::VersionNotFound {
-                document_name: document_name.to_owned(),
-                version: requested_version.to_owned(),
-            })?;
-        let destination = self.restore_destination(&version, output_path)?;
-
-        match BackupBackend::parse(&version.backup_backend)? {
-            BackupBackend::LocalCopy => {
-                fs::copy(&version.archive_path, &destination)?;
-            }
-            BackupBackend::Restic => {
-                self.restore_restic_version(&document, &version, &destination)?;
-            }
-        }
-
-        Ok(destination)
+        self.export_version(document_ref, requested_version, output_path)
     }
 
     fn migrate(&self) -> StorageResult<()> {
@@ -337,8 +457,9 @@ impl VaultStorage {
             "
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
                 source_path TEXT NOT NULL,
+                current_version_id TEXT,
                 created_at INTEGER NOT NULL
             );
 
@@ -350,6 +471,7 @@ impl VaultStorage {
                 archive_path TEXT NOT NULL,
                 backup_backend TEXT NOT NULL DEFAULT 'local-copy',
                 snapshot_id TEXT,
+                parent_version_id TEXT,
                 author TEXT,
                 note TEXT,
                 created_at INTEGER NOT NULL,
@@ -358,25 +480,17 @@ impl VaultStorage {
             );
             ",
         )?;
-        add_column_if_missing(
-            &self.connection,
-            "versions",
-            "backup_backend",
-            "TEXT NOT NULL DEFAULT 'local-copy'",
-        )?;
-        add_column_if_missing(&self.connection, "versions", "snapshot_id", "TEXT")?;
-        add_column_if_missing(&self.connection, "versions", "author", "TEXT")?;
-        add_column_if_missing(&self.connection, "versions", "note", "TEXT")?;
         Ok(())
     }
 
     fn insert_document(&self, document: &Document) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO documents (id, name, source_path, created_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO documents (id, name, source_path, current_version_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 document.id.as_str(),
                 document.name,
                 document.source_path,
+                document.current_version_id,
                 document.created_at
             ],
         )?;
@@ -386,9 +500,9 @@ impl VaultStorage {
     fn insert_version(&self, version: &Version) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO versions (
-                id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, author, note, created_at
+                id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 version.id,
                 version.document_id.as_str(),
@@ -397,6 +511,7 @@ impl VaultStorage {
                 version.archive_path,
                 version.backup_backend,
                 version.snapshot_id,
+                version.parent_version_id,
                 version.author,
                 version.note,
                 version.created_at
@@ -405,22 +520,67 @@ impl VaultStorage {
         Ok(())
     }
 
-    fn find_document_by_name(&self, name: &str) -> StorageResult<Option<Document>> {
-        self.connection
-            .query_row(
-                "SELECT id, name, source_path, created_at FROM documents WHERE name = ?1",
-                [name],
-                |row| {
-                    Ok(Document {
-                        id: DocumentId::new(row.get::<_, String>(0)?),
-                        name: row.get(1)?,
-                        source_path: row.get(2)?,
-                        created_at: row.get(3)?,
+    fn find_documents_by_name(&self, name: &str) -> StorageResult<Vec<Document>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, name, source_path, current_version_id, created_at FROM documents WHERE name = ?1 ORDER BY created_at, id",
+        )?;
+        let documents = statement
+            .query_map([name], document_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(documents)
+    }
+
+    fn resolve_document_ref(&self, document_ref: &DocumentRef) -> StorageResult<Document> {
+        match document_ref {
+            DocumentRef::Name(name) => match self.find_documents_by_name(name)?.as_slice() {
+                [] => Err(StorageError::DocumentNotFound(name.clone())),
+                [document] => Ok(document.clone()),
+                matches => Err(StorageError::AmbiguousDocumentName {
+                    name: name.clone(),
+                    matches: matches.to_vec(),
+                }),
+            },
+            DocumentRef::NewName(name) => Err(StorageError::DocumentNotFound(name.clone())),
+            DocumentRef::IdPrefix(prefix) => self.resolve_document_id_prefix(prefix),
+            DocumentRef::NameAndIdPrefix { name, id_prefix } => {
+                let document = self.resolve_document_id_prefix(id_prefix)?;
+                if document.name == *name {
+                    Ok(document)
+                } else {
+                    Err(StorageError::DocumentReferenceMismatch {
+                        requested_name: name.clone(),
+                        matched: Box::new(document),
                     })
-                },
-            )
-            .optional()
-            .map_err(StorageError::from)
+                }
+            }
+        }
+    }
+
+    fn resolve_document_id_prefix(&self, prefix: &str) -> StorageResult<Document> {
+        let pattern = format!("{prefix}%");
+        let mut statement = self.connection.prepare(
+            "SELECT id, name, source_path, current_version_id, created_at FROM documents WHERE id LIKE ?1 ORDER BY created_at, id",
+        )?;
+        let documents = statement
+            .query_map([pattern], document_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        match documents.as_slice() {
+            [] => Err(StorageError::DocumentIdNotFound(prefix.to_owned())),
+            [document] => Ok(document.clone()),
+            matches => Err(StorageError::AmbiguousDocumentIdPrefix {
+                prefix: prefix.to_owned(),
+                matches: matches.to_vec(),
+            }),
+        }
+    }
+
+    fn set_current_version(&self, document_id: &str, version_id: &str) -> StorageResult<()> {
+        self.connection.execute(
+            "UPDATE documents SET current_version_id = ?1 WHERE id = ?2",
+            params![version_id, document_id],
+        )?;
+        Ok(())
     }
 
     fn next_version_number(&self, document_id: &str) -> StorageResult<i64> {
@@ -434,7 +594,7 @@ impl VaultStorage {
 
     fn versions_for_document(&self, document_id: &str) -> StorageResult<Vec<Version>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, author, note, created_at
+            "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
              FROM versions WHERE document_id = ?1 ORDER BY number",
         )?;
         let versions = statement
@@ -466,7 +626,7 @@ impl VaultStorage {
 
         self.connection
             .query_row(
-                "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, author, note, created_at
+                "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
                  FROM versions WHERE document_id = ?1 AND id = ?2",
                 params![document_id, version_id],
                 version_from_row,
@@ -545,6 +705,24 @@ impl VaultStorage {
                 })?;
             Ok(output_path.join(source_name))
         }
+    }
+
+    fn export_resolved_version(
+        &self,
+        document: &Document,
+        version: &Version,
+        output_path: &Path,
+    ) -> StorageResult<PathBuf> {
+        let destination = self.restore_destination(version, output_path)?;
+        match BackupBackend::parse(&version.backup_backend)? {
+            BackupBackend::LocalCopy => {
+                fs::copy(&version.archive_path, &destination)?;
+            }
+            BackupBackend::Restic => {
+                self.restore_restic_version(document, version, &destination)?;
+            }
+        }
+        Ok(destination)
     }
 
     fn restore_restic_version(
@@ -679,32 +857,38 @@ fn version_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         archive_path: row.get(4)?,
         backup_backend: row.get(5)?,
         snapshot_id: row.get(6)?,
-        author: row.get(7)?,
-        note: row.get(8)?,
-        created_at: row.get(9)?,
+        parent_version_id: row.get(7)?,
+        author: row.get(8)?,
+        note: row.get(9)?,
+        created_at: row.get(10)?,
     })
 }
 
-fn add_column_if_missing(
-    connection: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> StorageResult<()> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let exists = statement
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .any(|name| name == column);
+fn document_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
+    Ok(Document {
+        id: DocumentId::new(row.get::<_, String>(0)?),
+        name: row.get(1)?,
+        source_path: row.get(2)?,
+        current_version_id: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
 
-    if !exists {
-        connection.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-            [],
+fn write_document_matches(
+    f: &mut std::fmt::Formatter<'_>,
+    matches: &[Document],
+) -> std::fmt::Result {
+    writeln!(f, "matches:")?;
+    for document in matches {
+        writeln!(
+            f,
+            "  {}  {}  {}",
+            document.id.as_str(),
+            document.name,
+            document.source_path
         )?;
     }
-    Ok(())
+    write!(f, "use --id <document_id> or name@<id-prefix>")
 }
 
 fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings> {
@@ -830,27 +1014,6 @@ fn default_config(paths: &VaultPaths) -> String {
     )
 }
 
-fn slugify(value: &str) -> String {
-    let slug = value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_owned();
-
-    if slug.is_empty() {
-        "document".to_owned()
-    } else {
-        slug
-    }
-}
-
 fn unix_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -896,7 +1059,7 @@ mod tests {
         let storage = VaultStorage::init(paths.clone()).unwrap();
         let (_, version) = storage
             .add_document_version(
-                "report",
+                DocumentRef::Name("report".to_owned()),
                 &source,
                 ImportMetadata {
                     author: Some("Bryan".to_owned()),
@@ -911,12 +1074,18 @@ mod tests {
         assert_eq!(version.author.as_deref(), Some("Bryan"));
         assert_eq!(version.note.as_deref(), Some("Initial import"));
         assert_eq!(storage.list_documents().unwrap()[0].name, "report");
-        let versions = storage.list_versions("report").unwrap();
+        let versions = storage
+            .list_versions(&DocumentRef::Name("report".to_owned()))
+            .unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].author.as_deref(), Some("Bryan"));
 
         let restored = storage
-            .restore_version("report", "latest", &paths.root_dir.join("restored"))
+            .restore_version(
+                &DocumentRef::Name("report".to_owned()),
+                "latest",
+                &paths.root_dir.join("restored"),
+            )
             .unwrap();
         assert_eq!(fs::read(restored).unwrap(), b"version one");
     }

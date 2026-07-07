@@ -16,6 +16,7 @@ pub struct Document {
     pub id: DocumentId,
     pub name: String,
     pub source_path: String,
+    pub current_version_id: Option<String>,
     pub created_at: i64,
 }
 
@@ -28,6 +29,7 @@ pub struct Version {
     pub archive_path: String,
     pub backup_backend: String,
     pub snapshot_id: Option<String>,
+    pub parent_version_id: Option<String>,
     pub author: Option<String>,
     pub note: Option<String>,
     pub created_at: i64,
