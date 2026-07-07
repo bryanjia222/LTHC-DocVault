@@ -8,3 +8,4 @@ example_docs/
 .docvault-restic-check/
 .docvault-metadata-check/
 .docvault-ref-check/
+.docvault-track-check/

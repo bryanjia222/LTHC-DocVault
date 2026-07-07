@@ -1,12 +1,15 @@
 use std::{
-    env, fs, io,
+    env, fs,
+    hash::Hasher,
+    io,
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use docvault_ooxml::OoxmlError;
-use docvault_types::{Document, DocumentId, ImportMetadata, Version};
+use docvault_types::{Document, DocumentId, ImportMetadata, TrackedPath, TrackedScan, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
@@ -42,6 +45,7 @@ pub enum StorageError {
         stderr: String,
     },
     ResticSnapshotMissing,
+    TrackedPathNotFound(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -87,6 +91,7 @@ impl std::fmt::Display for StorageError {
                 write!(f, "restic command failed ({command}): {stderr}")
             }
             Self::ResticSnapshotMissing => write!(f, "restic backup did not return a snapshot id"),
+            Self::TrackedPathNotFound(path) => write!(f, "tracked path not found: {path}"),
         }
     }
 }
@@ -381,6 +386,71 @@ impl VaultStorage {
         self.find_version(document.id.as_str(), &current_version_id)
     }
 
+    pub fn track_path(
+        &self,
+        path: &Path,
+        document_ref: Option<&DocumentRef>,
+    ) -> StorageResult<TrackedPath> {
+        let document_id = document_ref
+            .map(|document_ref| self.resolve_document_ref(document_ref))
+            .transpose()?
+            .map(|document| document.id);
+        self.track_document_path(path, document_id.as_ref())
+    }
+
+    pub fn track_document_path(
+        &self,
+        path: &Path,
+        document_id: Option<&DocumentId>,
+    ) -> StorageResult<TrackedPath> {
+        let now = unix_timestamp();
+        let path = absolute_path(path.to_path_buf()).display().to_string();
+        let existing = self.find_tracked_path_by_path(&path)?;
+        match existing {
+            Some(mut tracked_path) => {
+                self.connection.execute(
+                    "UPDATE tracked_paths SET document_id = ?1 WHERE id = ?2",
+                    params![
+                        document_id.map(DocumentId::as_str),
+                        tracked_path.id.as_str()
+                    ],
+                )?;
+                tracked_path.document_id = document_id.cloned();
+                Ok(tracked_path)
+            }
+            None => {
+                let tracked_path = TrackedPath {
+                    id: Uuid::new_v4().to_string(),
+                    document_id: document_id.cloned(),
+                    path,
+                    fingerprint: None,
+                    last_scanned_at: None,
+                    created_at: now,
+                };
+                self.insert_tracked_path(&tracked_path)?;
+                Ok(tracked_path)
+            }
+        }
+    }
+
+    pub fn list_tracked_paths(&self) -> StorageResult<Vec<TrackedPath>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, document_id, path, fingerprint, last_scanned_at, created_at FROM tracked_paths ORDER BY created_at, path, id",
+        )?;
+        let tracked_paths = statement
+            .query_map([], tracked_path_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(tracked_paths)
+    }
+
+    pub fn scan_tracked_paths(&self) -> StorageResult<Vec<TrackedScan>> {
+        let tracked_paths = self.list_tracked_paths()?;
+        tracked_paths
+            .into_iter()
+            .map(|tracked_path| self.scan_tracked_path(tracked_path))
+            .collect()
+    }
+
     fn add_version_to_document(
         &self,
         document: Document,
@@ -478,6 +548,16 @@ impl VaultStorage {
                 PRIMARY KEY (document_id, id),
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             );
+
+            CREATE TABLE IF NOT EXISTS tracked_paths (
+                id TEXT PRIMARY KEY,
+                document_id TEXT,
+                path TEXT NOT NULL UNIQUE,
+                fingerprint TEXT,
+                last_scanned_at INTEGER,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (document_id) REFERENCES documents(id)
+            );
             ",
         )?;
         Ok(())
@@ -495,6 +575,58 @@ impl VaultStorage {
             ],
         )?;
         Ok(())
+    }
+
+    fn insert_tracked_path(&self, tracked_path: &TrackedPath) -> StorageResult<()> {
+        self.connection.execute(
+            "INSERT INTO tracked_paths (id, document_id, path, fingerprint, last_scanned_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                tracked_path.id,
+                tracked_path.document_id.as_ref().map(DocumentId::as_str),
+                tracked_path.path,
+                tracked_path.fingerprint,
+                tracked_path.last_scanned_at,
+                tracked_path.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn find_tracked_path_by_path(&self, path: &str) -> StorageResult<Option<TrackedPath>> {
+        self.connection
+            .query_row(
+                "SELECT id, document_id, path, fingerprint, last_scanned_at, created_at FROM tracked_paths WHERE path = ?1",
+                [path],
+                tracked_path_from_row,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    }
+
+    fn scan_tracked_path(&self, mut tracked_path: TrackedPath) -> StorageResult<TrackedScan> {
+        let previous_fingerprint = tracked_path.fingerprint.clone();
+        let scanned_at = unix_timestamp();
+        let path = PathBuf::from(&tracked_path.path);
+        let fingerprint = if path.is_file() {
+            Some(file_fingerprint(&path)?)
+        } else {
+            None
+        };
+        let exists = fingerprint.is_some();
+        let changed = fingerprint != previous_fingerprint;
+        self.connection.execute(
+            "UPDATE tracked_paths SET fingerprint = ?1, last_scanned_at = ?2 WHERE id = ?3",
+            params![fingerprint, scanned_at, tracked_path.id],
+        )?;
+        tracked_path.fingerprint = fingerprint.clone();
+        tracked_path.last_scanned_at = Some(scanned_at);
+        Ok(TrackedScan {
+            tracked_path,
+            fingerprint,
+            changed,
+            exists,
+            scanned_at,
+        })
     }
 
     fn insert_version(&self, version: &Version) -> StorageResult<()> {
@@ -874,6 +1006,17 @@ fn document_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     })
 }
 
+fn tracked_path_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrackedPath> {
+    Ok(TrackedPath {
+        id: row.get(0)?,
+        document_id: row.get::<_, Option<String>>(1)?.map(DocumentId::new),
+        path: row.get(2)?,
+        fingerprint: row.get(3)?,
+        last_scanned_at: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
 fn write_document_matches(
     f: &mut std::fmt::Formatter<'_>,
     matches: &[Document],
@@ -1005,6 +1148,45 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
     Err(StorageError::ResticSnapshotMissing)
 }
 
+fn file_fingerprint(path: &Path) -> StorageResult<String> {
+    let metadata = fs::metadata(path)?;
+    let mut hasher = Fnv1a64::new();
+    hasher.write_u64(metadata.len());
+
+    let mut file = fs::File::open(path)?;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.write(&buffer[..bytes_read]);
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+#[derive(Debug, Clone)]
+struct Fnv1a64(u64);
+
+impl Fnv1a64 {
+    fn new() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for Fnv1a64 {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+    }
+}
+
 fn default_config(paths: &VaultPaths) -> String {
     format!(
         "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"\"\nrestic_password = \"docvault-local-development-password\"\n\n[database]\npath = \"{}\"\n\n[logging]\nlevel = \"info\"\n",
@@ -1088,6 +1270,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read(restored).unwrap(), b"version one");
+    }
+
+    #[test]
+    fn scans_tracked_paths_and_detects_changes() {
+        let paths = unique_test_paths("track");
+        fs::create_dir_all(&paths.root_dir).unwrap();
+        fs::write(
+            &paths.config_path,
+            format!(
+                "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
+                paths.data_dir.display(),
+                paths.repo_dir.display(),
+                paths.db_path.display()
+            ),
+        )
+        .unwrap();
+        let source = paths.root_dir.join("tracked.docx");
+        fs::write(&source, b"version one").unwrap();
+
+        let storage = VaultStorage::init(paths).unwrap();
+        let tracked_path = storage.track_path(&source, None).unwrap();
+
+        assert_eq!(tracked_path.document_id, None);
+        let first_scan = storage.scan_tracked_paths().unwrap();
+        assert_eq!(first_scan.len(), 1);
+        assert!(first_scan[0].changed);
+        assert!(first_scan[0].exists);
+        assert!(first_scan[0].fingerprint.is_some());
+
+        let second_scan = storage.scan_tracked_paths().unwrap();
+        assert!(!second_scan[0].changed);
+
+        fs::write(&source, b"version two").unwrap();
+        let third_scan = storage.scan_tracked_paths().unwrap();
+        assert!(third_scan[0].changed);
     }
 
     #[test]

@@ -17,6 +17,7 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 - 文档列表查看
 - 文档基础信息展示
 - UUID 文档定位与同名文档歧义处理
+- 本地文档路径追踪与指纹扫描
 
 ### 版本管理
 - 自动生成版本记录
@@ -242,6 +243,39 @@ docvault current contract --format table
 5. 输出 Office 文件
 
 Checkout 额外会更新 `documents.current_version_id`。后续导入新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
+
+------
+
+### 文档追踪
+
+`track` 用于登记一个本地文件路径。只登记路径时，追踪项可以暂时不绑定文档：
+
+```bash
+docvault track ./report.docx
+```
+
+如果要在登记追踪路径时完成首次导入，使用 `--import`。未指定名称时，CLI 会使用文件名 stem 作为文档名：
+
+```bash
+docvault track ./report.docx --import --author "Bryan" --note "Initial tracked import"
+docvault track ./report.docx --name report --import
+```
+
+也可以把路径绑定到已有文档：
+
+```bash
+docvault track ./report.docx report@550e8400
+docvault track ./report.docx --id 550e8400
+```
+
+`scan` 会遍历所有追踪项，计算当前文件 fingerprint，写回最新扫描结果，并输出状态：
+
+```bash
+docvault scan --format table
+docvault scan --format json
+```
+
+当前 `scan` 只负责检测路径是否存在、计算 fingerprint、判断相对上次扫描是否 changed。发现 changed 后自动导入新版本属于下一步工作流，不在本阶段自动执行。
 
 ------
 

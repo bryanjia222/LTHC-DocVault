@@ -40,3 +40,22 @@ pub struct ImportMetadata {
     pub author: Option<String>,
     pub note: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedPath {
+    pub id: String,
+    pub document_id: Option<DocumentId>,
+    pub path: String,
+    pub fingerprint: Option<String>,
+    pub last_scanned_at: Option<i64>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedScan {
+    pub tracked_path: TrackedPath,
+    pub fingerprint: Option<String>,
+    pub changed: bool,
+    pub exists: bool,
+    pub scanned_at: i64,
+}
