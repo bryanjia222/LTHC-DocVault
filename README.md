@@ -13,7 +13,7 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 ## 功能说明
 
 ### 文档管理
-- 文档导入与注册
+- 文档版本提交与注册
 - 文档列表查看
 - 文档基础信息展示
 - UUID 文档定位与同名文档歧义处理
@@ -38,7 +38,7 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 - 恢复时重新压缩为 `.docx / .xlsx / .pptx`
 
 ### 任务系统
-- 导入与恢复任务异步执行
+- 提交与恢复任务异步执行
 - 任务进度追踪
 - 任务状态持久化
 
@@ -55,7 +55,7 @@ docvault/
 │   ├── core/              # 核心业务逻辑（文档/版本/任务）
 │   ├── storage/           # 本地存储与归档适配层
 │   ├── ooxml/             # OOXML 解压与结构处理
-│   ├── jobs/              # 任务系统（导入/恢复/校验）
+│   ├── jobs/              # 任务系统（提交/恢复/校验）
 │
 ├── apps/
 │   ├── cli/               # 命令行工具
@@ -75,8 +75,8 @@ docvault/
 
 当前实现支持两个本地备份后端：
 
-- `restic`：默认后端。导入时先解压 OOXML 包，把解包后的 `package/` 目录交给 Restic 备份；恢复时从 Restic snapshot 还原 `package/` 目录，再重新压缩为 Office 文件。
-- `local-copy`：可选后端。导入时复制原始 Office 文件，恢复时从版本副本复制到输出路径。适合开发、测试和排查问题。
+- `restic`：默认后端。提交版本时先解压 OOXML 包，把解包后的 `package/` 目录交给 Restic 备份；恢复时从 Restic snapshot 还原 `package/` 目录，再重新压缩为 Office 文件。
+- `local-copy`：可选后端。提交版本时复制原始 Office 文件，恢复时从版本副本复制到输出路径。适合开发、测试和排查问题。
 
 `local-copy` 不提供内容去重、快照仓库校验或 Restic 的压缩能力。`restic` 后端负责版本级快照和内容去重，但仍通过 storage 层暴露同一套 CLI/core 行为。
 
@@ -148,10 +148,10 @@ cargo install --path apps/cli
 docvault init
 ```
 
-### 2. 导入文档
+### 2. 提交文档版本
 
 ```bash
-docvault import ./report.docx --name "report" --author "Bryan" --note "Initial import"
+docvault commit ./report.docx --name "report" --author "Bryan" --note "Initial commit"
 ```
 
 ### 3. 查看文档列表
@@ -185,10 +185,10 @@ docvault export --id 550e8400 --version v2 --output ./restore/
 
 ## 使用示例
 
-### 文档导入流程
+### 文档版本提交流程
 
 ```bash
-docvault import ./contract.docx --name contract --author "Bryan" --note "Updated signature page"
+docvault commit ./contract.docx --name contract --author "Bryan" --note "Updated signature page"
 ```
 
 系统将执行以下流程：
@@ -200,6 +200,12 @@ docvault import ./contract.docx --name contract --author "Bryan" --note "Updated
 5. 返回版本 ID
 
 `local-copy` 后端会复制原始文件。`restic` 后端会先解压 OOXML 文件结构，再备份解包后的目录。
+
+如果希望提交后立即开始追踪源文件路径，可加 `--track`：
+
+```bash
+docvault commit ./contract.docx --name contract --track
+```
 
 ------
 
@@ -242,7 +248,7 @@ docvault current contract --format table
 4. 对 Restic 后端恢复出的 OOXML 目录重新压缩
 5. 输出 Office 文件
 
-Checkout 额外会更新 `documents.current_version_id`。后续导入新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
+Checkout 额外会更新 `documents.current_version_id`。后续提交新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
 
 ------
 
@@ -254,11 +260,11 @@ Checkout 额外会更新 `documents.current_version_id`。后续导入新版本�
 docvault track ./report.docx
 ```
 
-如果要在登记追踪路径时完成首次导入，使用 `--import`。未指定名称时，CLI 会使用文件名 stem 作为文档名：
+如果要在登记追踪路径时完成首次提交，使用 `--commit`。未指定名称时，CLI 会使用文件名 stem 作为文档名：
 
 ```bash
-docvault track ./report.docx --import --author "Bryan" --note "Initial tracked import"
-docvault track ./report.docx --name report --import
+docvault track ./report.docx --commit --author "Bryan" --note "Initial tracked commit"
+docvault track ./report.docx --name report --commit
 ```
 
 也可以把路径绑定到已有文档：
@@ -287,7 +293,7 @@ docvault scan --format json
 docvault scan --deep --format table
 ```
 
-`--deep` 会读取完整文件内容并计算 `content_fingerprint`。这适合归档前确认或排查状态，但不适合对大文件高频执行。发现 `maybe_changed` 或 `changed` 后自动导入新版本属于下一步工作流，不在本阶段自动执行。
+`--deep` 会读取完整文件内容并计算 `content_fingerprint`。这适合归档前确认或排查状态，但不适合对大文件高频执行。发现 `maybe_changed` 或 `changed` 后自动提交新版本属于下一步工作流，不在本阶段自动执行。
 
 ------
 

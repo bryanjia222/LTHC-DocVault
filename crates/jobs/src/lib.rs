@@ -7,12 +7,12 @@ pub enum JobStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportJob {
+pub struct CommitJob {
     pub document_name: String,
     pub status: JobStatus,
 }
 
-impl ImportJob {
+impl CommitJob {
     pub fn pending(document_name: impl Into<String>) -> Self {
         Self {
             document_name: document_name.into(),
@@ -26,8 +26,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creates_pending_import_job() {
-        let job = ImportJob::pending("contract");
+    fn creates_pending_commit_job() {
+        let job = CommitJob::pending("contract");
 
         assert_eq!(job.document_name, "contract");
         assert_eq!(job.status, JobStatus::Pending);

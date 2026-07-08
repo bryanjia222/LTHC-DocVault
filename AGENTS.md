@@ -68,7 +68,7 @@ Prefer domain-oriented naming:
 
 - Document
 - Version
-- ImportJob
+- CommitJob
 - RestoreJob
 
 ✖ Avoid:
@@ -85,7 +85,7 @@ Prefer domain-oriented naming:
 
 ```
 crates/
-  core/        → business logic (import / restore / versioning)
+  core/        → business logic (commit / restore / versioning)
   storage/     → SQLite + Restic integration
   ooxml/       → OOXML parsing + manifest generation
   jobs/        → async job system
@@ -279,7 +279,7 @@ cargo test
 
 Must cover:
 
-- Import workflow
+- Commit workflow
 - Restore workflow
 - SQLite persistence consistency
 - Restic snapshot creation (mock or test repo)
@@ -297,7 +297,7 @@ cargo test --tests
 Basic CLI behavior must be verified:
 
 ```bash
-cargo run --bin docvault -- import ./sample.docx
+cargo run --bin docvault -- commit ./sample.docx --name sample
 cargo run --bin docvault -- list
 cargo run --bin docvault -- restore <id>
 ```
@@ -357,7 +357,7 @@ If not set, defaults are used from config.toml.
 
 ## 5.3 File system rules
 
-- All original files are immutable after import
+- All original files are immutable after commit
 - Temporary files must be stored in staging directory
 - Restore operations must write to explicit output path
 
@@ -465,7 +465,7 @@ Any change must preserve:
 
 - Deterministic behavior
 - Recoverability of data
-- Compatibility with existing imports and versions
+- Compatibility with existing commits and versions
 
 ------
 

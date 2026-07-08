@@ -36,7 +36,7 @@ pub struct Version {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ImportMetadata {
+pub struct CommitMetadata {
     pub author: Option<String>,
     pub note: Option<String>,
 }

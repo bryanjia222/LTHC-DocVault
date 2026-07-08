@@ -6,7 +6,7 @@ use std::{
 
 use docvault_core::DocVault;
 use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
-use docvault_types::ImportMetadata;
+use docvault_types::CommitMetadata;
 use serde_json::json;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,20 +46,36 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
             Ok(())
         }
-        Some("import") => {
+        Some("commit") => {
             let source_path = args.get(1).ok_or_else(|| usage().to_owned())?;
-            let document_ref = parse_import_ref(&args)?;
-            let metadata = ImportMetadata {
+            let document_ref = parse_commit_ref(&args)?;
+            let metadata = CommitMetadata {
                 author: parse_option_value(&args, "--author"),
                 note: parse_option_value(&args, "--note"),
             };
             let storage =
                 VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
-            let (_, version) = vault
-                .import_document(source_path, document_ref.clone(), metadata)
+            let (document, version) = vault
+                .commit_document(source_path, document_ref.clone(), metadata)
                 .map_err(|error| error.to_string())?;
-            println!("Imported {} as {}", document_ref.display_name(), version.id);
+            if has_flag(&args, "--track") {
+                let tracked = vault
+                    .track_document_path(source_path, Some(&document.id))
+                    .map_err(|error| error.to_string())?;
+                println!(
+                    "Committed {} as {} and tracked {}",
+                    document_ref.display_name(),
+                    version.id,
+                    tracked.path
+                );
+            } else {
+                println!(
+                    "Committed {} as {}",
+                    document_ref.display_name(),
+                    version.id
+                );
+            }
             Ok(())
         }
         Some("list") => {
@@ -254,8 +270,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("track") => {
             let source_path = PathBuf::from(args.get(1).ok_or_else(|| usage().to_owned())?);
             let format = OutputFormat::parse(&args)?;
-            let import_first = has_flag(&args, "--import");
-            let metadata = ImportMetadata {
+            if has_flag(&args, "--import") {
+                return Err("--import was replaced by --commit".to_owned());
+            }
+            let commit_first = has_flag(&args, "--commit");
+            let metadata = CommitMetadata {
                 author: parse_option_value(&args, "--author"),
                 note: parse_option_value(&args, "--note"),
             };
@@ -263,25 +282,25 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
 
-            let tracked = if import_first {
+            let tracked = if commit_first {
                 let document_ref = parse_track_document_ref(&args, &source_path)?
                     .unwrap_or_else(|| default_track_document_ref(&source_path));
                 let (document, version) = vault
-                    .import_document(&source_path, document_ref, metadata)
+                    .commit_document(&source_path, document_ref, metadata)
                     .map_err(|error| error.to_string())?;
                 let tracked = vault
                     .track_document_path(&source_path, Some(&document.id))
                     .map_err(|error| error.to_string())?;
                 match format {
                     OutputFormat::Table => {
-                        println!("Imported {} as {}", document.name, version.id);
+                        println!("Committed {} as {}", document.name, version.id);
                     }
                     OutputFormat::Json => {}
                 }
                 tracked
             } else {
                 if has_flag(&args, "--new") {
-                    return Err("--new requires --import for track".to_owned());
+                    return Err("--new requires --commit for track".to_owned());
                 }
                 let document_ref = parse_track_document_ref(&args, &source_path)?;
                 vault
@@ -345,7 +364,7 @@ impl DocumentRefDisplay for DocumentRef {
     }
 }
 
-fn parse_import_ref(args: &[String]) -> Result<DocumentRef, String> {
+fn parse_commit_ref(args: &[String]) -> Result<DocumentRef, String> {
     if let Some(id_prefix) = parse_option_value(args, "--id") {
         return Ok(DocumentRef::IdPrefix(id_prefix));
     }
@@ -651,14 +670,14 @@ fn normalize_cell(value: &str) -> String {
 fn usage() -> &'static str {
     "Usage:
   docvault init
-  docvault import <path> <name|name@id-prefix> [--author <name>] [--note <text>] [--new]
-  docvault import <path> --name <name> [--author <name>] [--note <text>] [--new]
-  docvault import <path> --id <id-prefix> [--author <name>] [--note <text>]
+  docvault commit <path> <name|name@id-prefix> [--author <name>] [--note <text>] [--new] [--track]
+  docvault commit <path> --name <name> [--author <name>] [--note <text>] [--new] [--track]
+  docvault commit <path> --id <id-prefix> [--author <name>] [--note <text>] [--track]
   docvault list [--format table|json]
   docvault versions <name|name@id-prefix|--id <id-prefix>> [--format table|json]
   docvault current <name|name@id-prefix|--id <id-prefix>> [--format table|json]
   docvault export <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] --output <path>
   docvault checkout <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] [--output <path>]
-  docvault track <path> [name|name@id-prefix|--name <name>|--id <id-prefix>] [--import] [--author <name>] [--note <text>] [--new] [--format table|json]
+  docvault track <path> [name|name@id-prefix|--name <name>|--id <id-prefix>] [--commit] [--author <name>] [--note <text>] [--new] [--format table|json]
   docvault scan [--deep] [--format table|json]"
 }

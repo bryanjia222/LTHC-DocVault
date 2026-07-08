@@ -9,7 +9,7 @@ use std::{
 };
 
 use docvault_ooxml::OoxmlError;
-use docvault_types::{Document, DocumentId, ImportMetadata, TrackedPath, TrackedScan, Version};
+use docvault_types::{CommitMetadata, Document, DocumentId, TrackedPath, TrackedScan, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
@@ -290,7 +290,7 @@ impl VaultStorage {
         &self,
         document_ref: DocumentRef,
         source_path: &Path,
-        metadata: ImportMetadata,
+        metadata: CommitMetadata,
     ) -> StorageResult<(Document, Version)> {
         let now = unix_timestamp();
         let document = match document_ref {
@@ -338,7 +338,7 @@ impl VaultStorage {
         &self,
         name: &str,
         source_path: &Path,
-        metadata: ImportMetadata,
+        metadata: CommitMetadata,
     ) -> StorageResult<(Document, Version)> {
         self.add_document_version(DocumentRef::Name(name.to_owned()), source_path, metadata)
     }
@@ -457,7 +457,7 @@ impl VaultStorage {
         &self,
         document: Document,
         source_path: &Path,
-        metadata: ImportMetadata,
+        metadata: CommitMetadata,
         now: i64,
     ) -> StorageResult<(Document, Version)> {
         let number = self.next_version_number(document.id.as_str())?;
@@ -1306,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn imports_lists_and_restores_versions_with_local_copy() {
+    fn commits_lists_and_restores_versions_with_local_copy() {
         let paths = unique_test_paths("storage");
         fs::create_dir_all(&paths.root_dir).unwrap();
         fs::write(
@@ -1329,9 +1329,9 @@ mod tests {
             .add_document_version(
                 DocumentRef::Name("report".to_owned()),
                 &source,
-                ImportMetadata {
+                CommitMetadata {
                     author: Some("Bryan".to_owned()),
-                    note: Some("Initial import".to_owned()),
+                    note: Some("Initial commit".to_owned()),
                 },
             )
             .unwrap();
@@ -1340,7 +1340,7 @@ mod tests {
         assert_eq!(version.id, "v1");
         assert_eq!(version.backup_backend, "local-copy");
         assert_eq!(version.author.as_deref(), Some("Bryan"));
-        assert_eq!(version.note.as_deref(), Some("Initial import"));
+        assert_eq!(version.note.as_deref(), Some("Initial commit"));
         assert_eq!(storage.list_documents().unwrap()[0].name, "report");
         let versions = storage
             .list_versions(&DocumentRef::Name("report".to_owned()))

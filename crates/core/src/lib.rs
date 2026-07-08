@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
-use docvault_types::{Document, DocumentId, ImportMetadata, TrackedPath, TrackedScan, Version};
+use docvault_types::{CommitMetadata, Document, DocumentId, TrackedPath, TrackedScan, Version};
 
 #[derive(Debug)]
 pub enum CoreError {
@@ -50,11 +50,11 @@ impl DocVault {
         Self { storage }
     }
 
-    pub fn import_document(
+    pub fn commit_document(
         &self,
         source_path: impl AsRef<Path>,
         document_ref: DocumentRef,
-        metadata: ImportMetadata,
+        metadata: CommitMetadata,
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
         if !docvault_ooxml::is_supported_ooxml(source_path) {
@@ -146,10 +146,10 @@ mod tests {
         let vault = DocVault::new(storage);
 
         let error = vault
-            .import_document(
+            .commit_document(
                 "notes.txt",
                 DocumentRef::Name("notes".to_owned()),
-                ImportMetadata::default(),
+                CommitMetadata::default(),
             )
             .expect_err("txt files should be rejected");
 
