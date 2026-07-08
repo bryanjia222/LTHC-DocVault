@@ -13,7 +13,7 @@ fn help_lists_core_commands() {
         .success()
         .stdout(contains("init"))
         .stdout(contains("import"))
-        .stdout(contains("restore"));
+        .stdout(contains("checkout"));
 }
 
 #[test]
@@ -24,7 +24,9 @@ fn init_then_list_empty_vault() {
         .arg("init")
         .assert()
         .success()
-        .stdout(contains("DocVault initialized"));
+        .stdout(contains("DocVault initialized"))
+        .stdout(contains("Backend: local-copy"))
+        .stdout(contains("Repository:"));
 
     docvault(temp_dir.path())
         .arg("list")
@@ -67,6 +69,10 @@ fn commit_list_versions_and_export_workflow() {
     );
     assert_eq!(versions[0]["id"], "v1");
     assert_eq!(versions[0]["original_filename"], "report.docx");
+    assert_eq!(
+        versions[0]["manifest"]["entries"][0]["path"],
+        "[Content_Types].xml"
+    );
 
     docvault(temp_dir.path())
         .args([
@@ -80,9 +86,27 @@ fn commit_list_versions_and_export_workflow() {
         .success()
         .stdout(contains("Exported to"));
     assert_eq!(
-        fs::read(export_dir.join("report.docx")).unwrap(),
+        read_document_xml(&export_dir.join("report.docx")),
         b"version one"
     );
+}
+
+#[test]
+fn config_show_outputs_effective_paths_as_json() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    docvault(temp_dir.path()).arg("init").assert().success();
+
+    let config = json_stdout(
+        docvault(temp_dir.path())
+            .args(["config", "show", "--format", "json"])
+            .output()
+            .unwrap(),
+    );
+
+    assert_eq!(config["backend"], "local-copy");
+    assert!(config["data_dir"].as_str().unwrap().contains("data"));
+    assert!(config["repo_dir"].as_str().unwrap().contains("repo"));
+    assert!(config["db_path"].as_str().unwrap().contains("db.sqlite"));
 }
 
 #[test]
@@ -189,9 +213,19 @@ fn docvault(root: &Path) -> Command {
 }
 
 fn write_source(root: &Path, file_name: &str, contents: &[u8]) -> std::path::PathBuf {
+    let source_dir = root.join("package-source").join(file_name);
+    fs::create_dir_all(source_dir.join("word")).unwrap();
+    fs::write(source_dir.join("[Content_Types].xml"), b"types").unwrap();
+    fs::write(source_dir.join("word").join("document.xml"), contents).unwrap();
     let path = root.join(file_name);
-    fs::write(&path, contents).unwrap();
+    docvault_ooxml::pack_package(source_dir, &path).unwrap();
     path
+}
+
+fn read_document_xml(package_path: &Path) -> Vec<u8> {
+    let temp_dir = tempfile::tempdir().unwrap();
+    docvault_ooxml::unpack_package(package_path, temp_dir.path()).unwrap();
+    fs::read(temp_dir.path().join("word").join("document.xml")).unwrap()
 }
 
 fn json_stdout(output: std::process::Output) -> Value {

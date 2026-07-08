@@ -20,9 +20,13 @@ pub enum StorageError {
     TomlDecode(#[from] toml::de::Error),
     #[error("TOML encode error: {0}")]
     TomlEncode(#[from] toml::ser::Error),
-    #[error("document not found: {0}")]
+    #[error(
+        "document not found: {0}\nRun `docvault list` to see documents, or use `docvault commit <path> --name {0}` to create it."
+    )]
     DocumentNotFound(String),
-    #[error("document id not found: {0}")]
+    #[error(
+        "document id not found: {0}\nRun `docvault list --format table` and retry with a longer `--id <id-prefix>`."
+    )]
     DocumentIdNotFound(String),
     #[error(
         "document name is ambiguous: {name}\n{}",
@@ -45,7 +49,9 @@ pub enum StorageError {
         requested_name: String,
         matched: Box<Document>,
     },
-    #[error("version {version} not found for document {document_name}")]
+    #[error(
+        "version {version} not found for document {document_name}\nRun `docvault versions {document_name}` to see available versions. Use `latest` for the highest version number or `current` for the current pointer."
+    )]
     VersionNotFound {
         document_name: String,
         version: String,

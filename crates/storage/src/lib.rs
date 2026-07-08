@@ -36,7 +36,7 @@ pub enum BackupBackend {
 }
 
 impl BackupBackend {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::LocalCopy => "local-copy",
             Self::Restic => "restic",
@@ -111,6 +111,10 @@ impl VaultStorage {
         self.settings.backend
     }
 
+    pub fn restic_path(&self) -> &Path {
+        &self.settings.restic_path
+    }
+
     pub fn add_document_version(
         &self,
         document_ref: DocumentRef,
@@ -174,12 +178,7 @@ impl VaultStorage {
         output_path: &Path,
     ) -> StorageResult<PathBuf> {
         let document = self.resolve_document_ref(document_ref)?;
-        let version = self
-            .find_version(document.id.as_str(), requested_version)?
-            .ok_or_else(|| StorageError::VersionNotFound {
-                document_name: document.name.clone(),
-                version: requested_version.to_owned(),
-            })?;
+        let version = self.resolve_requested_version(&document, requested_version)?;
         info!(
             document_id = document.id.as_str(),
             version_id = version.id.as_str(),
@@ -196,12 +195,7 @@ impl VaultStorage {
         output_path: Option<&Path>,
     ) -> StorageResult<Option<PathBuf>> {
         let document = self.resolve_document_ref(document_ref)?;
-        let version = self
-            .find_version(document.id.as_str(), requested_version)?
-            .ok_or_else(|| StorageError::VersionNotFound {
-                document_name: document.name.clone(),
-                version: requested_version.to_owned(),
-            })?;
+        let version = self.resolve_requested_version(&document, requested_version)?;
         info!(
             document_id = document.id.as_str(),
             version_id = version.id.as_str(),
@@ -235,6 +229,7 @@ impl VaultStorage {
             version_id = version_id.as_str(),
             "archiving source for document version"
         );
+        let manifest = docvault_ooxml::package_manifest(source_path)?;
         let archive = self.archive_source(&document, &version_id, source_path)?;
         let original_filename = source_path
             .file_name()
@@ -249,6 +244,7 @@ impl VaultStorage {
             archive_reference: archive.reference,
             backup_backend: archive.backend.as_str().to_owned(),
             snapshot_id: archive.snapshot_id,
+            manifest,
             parent_version_id: document.current_version_id.clone(),
             author: metadata.author,
             note: metadata.note,
@@ -287,13 +283,23 @@ impl VaultStorage {
         self.versions_for_document(document.id.as_str())
     }
 
-    pub fn restore_version(
+    fn resolve_requested_version(
         &self,
-        document_ref: &DocumentRef,
+        document: &Document,
         requested_version: &str,
-        output_path: &Path,
-    ) -> StorageResult<PathBuf> {
-        self.export_version(document_ref, requested_version, output_path)
+    ) -> StorageResult<Version> {
+        let resolved = if requested_version == "current" {
+            match document.current_version_id.as_deref() {
+                Some(version_id) => self.find_version(document.id.as_str(), version_id)?,
+                None => None,
+            }
+        } else {
+            self.find_version(document.id.as_str(), requested_version)?
+        };
+        resolved.ok_or_else(|| StorageError::VersionNotFound {
+            document_name: document.name.clone(),
+            version: requested_version.to_owned(),
+        })
     }
 }
 
@@ -341,10 +347,20 @@ mod tests {
 
     fn write_source(root: &Path, name: &str, contents: &[u8]) -> PathBuf {
         let source_dir = root.join("sources");
+        let package_dir = root.join("package-source").join(name);
+        fs::create_dir_all(package_dir.join("word")).unwrap();
+        fs::write(package_dir.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(package_dir.join("word").join("document.xml"), contents).unwrap();
         fs::create_dir_all(&source_dir).unwrap();
         let source = source_dir.join(name);
-        fs::write(&source, contents).unwrap();
+        docvault_ooxml::pack_package(package_dir, &source).unwrap();
         source
+    }
+
+    fn read_document_xml(package_path: &Path) -> Vec<u8> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        docvault_ooxml::unpack_package(package_path, temp_dir.path()).unwrap();
+        fs::read(temp_dir.path().join("word").join("document.xml")).unwrap()
     }
 
     fn commit(
@@ -358,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn commits_lists_and_restores_versions_with_local_copy() {
+    fn commits_lists_and_exports_versions_with_local_copy() {
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         write_local_copy_config(&paths);
@@ -381,6 +397,9 @@ mod tests {
         assert_eq!(version.backup_backend, "local-copy");
         assert_eq!(version.original_filename, "report.docx");
         assert!(!Path::new(&version.archive_reference).is_absolute());
+        assert!(version.manifest.entries.iter().any(|entry| {
+            entry.path == "word/document.xml" && entry.size == "version one".len() as u64
+        }));
         assert_eq!(version.author.as_deref(), Some("Bryan"));
         assert_eq!(version.note.as_deref(), Some("Initial commit"));
         assert_eq!(storage.list_documents().unwrap()[0].name, "report");
@@ -391,13 +410,13 @@ mod tests {
         assert_eq!(versions[0].author.as_deref(), Some("Bryan"));
 
         let restored = storage
-            .restore_version(
+            .export_version(
                 &DocumentRef::Name("report".to_owned()),
                 "latest",
                 &paths.root_dir.join("restored"),
             )
             .unwrap();
-        assert_eq!(fs::read(restored).unwrap(), b"version one");
+        assert_eq!(read_document_xml(&restored), b"version one");
     }
 
     #[test]
@@ -518,7 +537,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(fs::read(exported).unwrap(), b"version one");
+        assert_eq!(read_document_xml(&exported), b"version one");
         let current = storage
             .current_version(&DocumentRef::Name("report".to_owned()))
             .unwrap()

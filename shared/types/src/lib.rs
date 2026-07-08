@@ -32,10 +32,26 @@ pub struct Version {
     pub archive_reference: String,
     pub backup_backend: String,
     pub snapshot_id: Option<String>,
+    #[serde(default)]
+    pub manifest: OoxmlManifest,
     pub parent_version_id: Option<String>,
     pub author: Option<String>,
     pub note: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OoxmlManifest {
+    pub entries: Vec<OoxmlManifestEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OoxmlManifestEntry {
+    pub path: String,
+    pub size: u64,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

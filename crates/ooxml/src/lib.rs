@@ -1,9 +1,11 @@
 use std::{
     fs::{self, File},
-    io::{self, Read, Seek, Write},
+    io::{self, Seek, Write},
     path::{Component, Path, PathBuf},
 };
 
+use docvault_types::{OoxmlManifest, OoxmlManifestEntry};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info};
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -95,6 +97,35 @@ pub fn pack_package(
     Ok(())
 }
 
+pub fn package_manifest(source_path: impl AsRef<Path>) -> OoxmlResult<OoxmlManifest> {
+    let source_path = source_path.as_ref();
+    info!(source = %source_path.display(), "generating OOXML package manifest");
+    let file = File::open(source_path)?;
+    let mut archive = ZipArchive::new(file)?;
+    let mut entries = Vec::new();
+
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let entry_name = entry.name().to_owned();
+        let relative_path = safe_relative_path(&entry_name)?;
+        let path = relative_path.to_string_lossy().replace('\\', "/");
+        let mut hasher = Sha256::new();
+        let size = io::copy(&mut entry, &mut HashWriter(&mut hasher))?;
+        entries.push(OoxmlManifestEntry {
+            path,
+            size,
+            sha256: format!("{:x}", hasher.finalize()),
+            content_type: None,
+        });
+    }
+
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(OoxmlManifest { entries })
+}
+
 fn add_directory_to_zip<W: Write + Seek>(
     base_dir: &Path,
     current_dir: &Path,
@@ -115,13 +146,24 @@ fn add_directory_to_zip<W: Write + Seek>(
             let zip_name = relative_path.to_string_lossy().replace('\\', "/");
             writer.start_file(zip_name, options)?;
             let mut file = File::open(&path)?;
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)?;
-            writer.write_all(&buffer)?;
+            io::copy(&mut file, writer)?;
         }
     }
 
     Ok(())
+}
+
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl Write for HashWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.update(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn safe_relative_path(entry_name: &str) -> OoxmlResult<PathBuf> {
@@ -190,6 +232,27 @@ mod tests {
             fs::read(unpacked.join("word").join("document.xml")).unwrap(),
             b"document"
         );
+    }
+
+    #[test]
+    fn package_manifest_lists_entries_with_hashes() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let source = root.join("source");
+        let package = root.join("sample.docx");
+        fs::create_dir_all(source.join("word")).unwrap();
+        fs::write(source.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(source.join("word").join("document.xml"), b"document").unwrap();
+        pack_package(&source, &package).unwrap();
+
+        let manifest = package_manifest(&package).unwrap();
+
+        assert_eq!(manifest.entries.len(), 2);
+        assert_eq!(manifest.entries[0].path, "[Content_Types].xml");
+        assert_eq!(manifest.entries[0].size, 5);
+        assert_eq!(manifest.entries[0].sha256.len(), 64);
+        assert_eq!(manifest.entries[1].path, "word/document.xml");
+        assert_eq!(manifest.entries[1].size, 8);
     }
 
     #[test]

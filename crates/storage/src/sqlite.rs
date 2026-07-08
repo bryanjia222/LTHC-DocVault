@@ -22,6 +22,7 @@ impl VaultStorage {
                 archive_reference TEXT NOT NULL,
                 backup_backend TEXT NOT NULL DEFAULT 'local-copy',
                 snapshot_id TEXT,
+                manifest_json TEXT NOT NULL DEFAULT '{\"entries\":[]}',
                 parent_version_id TEXT,
                 author TEXT,
                 note TEXT,
@@ -31,6 +32,10 @@ impl VaultStorage {
             );
             ",
         )?;
+        let _ = self.connection.execute(
+            "ALTER TABLE versions ADD COLUMN manifest_json TEXT NOT NULL DEFAULT '{\"entries\":[]}'",
+            [],
+        );
         Ok(())
     }
 
@@ -50,9 +55,9 @@ impl VaultStorage {
     pub(crate) fn insert_version(&self, version: &Version) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO versions (
-                id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+                id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 version.id,
                 version.document_id.as_str(),
@@ -61,6 +66,7 @@ impl VaultStorage {
                 version.archive_reference,
                 version.backup_backend,
                 version.snapshot_id,
+                serde_json::to_string(&version.manifest)?,
                 version.parent_version_id,
                 version.author,
                 version.note,
@@ -161,7 +167,7 @@ impl VaultStorage {
 
     pub(crate) fn versions_for_document(&self, document_id: &str) -> StorageResult<Vec<Version>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
              FROM versions WHERE document_id = ?1 ORDER BY number",
         )?;
         let versions = statement
@@ -193,7 +199,7 @@ impl VaultStorage {
 
         self.connection
             .query_row(
-                "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+                "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
                  FROM versions WHERE document_id = ?1 AND id = ?2",
                 params![document_id, version_id],
                 version_from_row,
@@ -212,10 +218,17 @@ fn version_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         archive_reference: row.get(4)?,
         backup_backend: row.get(5)?,
         snapshot_id: row.get(6)?,
-        parent_version_id: row.get(7)?,
-        author: row.get(8)?,
-        note: row.get(9)?,
-        created_at: row.get(10)?,
+        manifest: serde_json::from_str(&row.get::<_, String>(7)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        parent_version_id: row.get(8)?,
+        author: row.get(9)?,
+        note: row.get(10)?,
+        created_at: row.get(11)?,
     })
 }
 

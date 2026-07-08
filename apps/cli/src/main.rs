@@ -25,9 +25,17 @@ enum Command {
     List(FormatArgs),
     Versions(DocumentFormatArgs),
     Current(DocumentFormatArgs),
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
     Export(VersionOutputArgs),
-    Restore(VersionOutputArgs),
     Checkout(CheckoutArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    Show(FormatArgs),
 }
 
 #[derive(Debug, Args)]
@@ -130,7 +138,10 @@ fn run(cli: Cli) -> Result<()> {
         Command::List(args) => list_documents(args.format),
         Command::Versions(args) => list_versions(args),
         Command::Current(args) => show_current(args),
-        Command::Export(args) | Command::Restore(args) => export_version(args),
+        Command::Config { command } => match command {
+            ConfigCommand::Show(args) => show_config(args.format),
+        },
+        Command::Export(args) => export_version(args),
         Command::Checkout(args) => checkout_version(args),
     }
 }
@@ -141,6 +152,11 @@ fn init_vault() -> Result<()> {
         "DocVault initialized at {}",
         storage.paths().root_dir.display()
     );
+    println!("Backend: {}", storage.backend().as_str());
+    println!("Config: {}", storage.paths().config_path.display());
+    println!("Data: {}", storage.paths().data_dir.display());
+    println!("Database: {}", storage.paths().db_path.display());
+    println!("Repository: {}", storage.paths().repo_dir.display());
     Ok(())
 }
 
@@ -242,6 +258,48 @@ fn show_current(args: DocumentFormatArgs) -> Result<()> {
     Ok(())
 }
 
+fn show_config(format: OutputFormat) -> Result<()> {
+    let storage = VaultStorage::open(VaultPaths::from_env())?;
+    let paths = storage.paths();
+    match format {
+        OutputFormat::Table => {
+            print_table(
+                &["KEY", "VALUE"],
+                &[
+                    vec!["backend".to_owned(), storage.backend().as_str().to_owned()],
+                    vec![
+                        "config_path".to_owned(),
+                        paths.config_path.display().to_string(),
+                    ],
+                    vec!["root_dir".to_owned(), paths.root_dir.display().to_string()],
+                    vec!["data_dir".to_owned(), paths.data_dir.display().to_string()],
+                    vec!["db_path".to_owned(), paths.db_path.display().to_string()],
+                    vec!["repo_dir".to_owned(), paths.repo_dir.display().to_string()],
+                    vec![
+                        "restic_path".to_owned(),
+                        storage.restic_path().display().to_string(),
+                    ],
+                ],
+            );
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "backend": storage.backend().as_str(),
+                    "config_path": paths.config_path.display().to_string(),
+                    "root_dir": paths.root_dir.display().to_string(),
+                    "data_dir": paths.data_dir.display().to_string(),
+                    "db_path": paths.db_path.display().to_string(),
+                    "repo_dir": paths.repo_dir.display().to_string(),
+                    "restic_path": storage.restic_path().display().to_string(),
+                }))?
+            );
+        }
+    }
+    Ok(())
+}
+
 fn export_version(args: VersionOutputArgs) -> Result<()> {
     let document_ref = args.document.document_ref()?;
     let requested_version = requested_version(args.version, args.version_id);
@@ -261,10 +319,10 @@ fn checkout_version(args: CheckoutArgs) -> Result<()> {
         vault.checkout_version(&document_ref, &requested_version, args.output.as_ref())?;
     match exported {
         Some(path) => println!(
-            "Checked out {requested_version} and exported to {}",
+            "Checked out {requested_version} as current and exported to {}",
             path.display()
         ),
-        None => println!("Checked out {requested_version}"),
+        None => println!("Checked out {requested_version} as current"),
     }
     Ok(())
 }
@@ -441,6 +499,7 @@ fn version_to_json(version: &docvault_types::Version) -> serde_json::Value {
         "archive_reference": version.archive_reference,
         "backup_backend": version.backup_backend,
         "snapshot_id": version.snapshot_id,
+        "manifest": version.manifest,
         "author": version.author,
         "note": version.note,
         "created_at": version.created_at,

@@ -181,12 +181,35 @@ docvault list --format table
 docvault versions report --format table
 ```
 
-`list` 和 `versions` 支持 `--format table|json`。默认是 `table`，适合人工查看；`json` 适合脚本或前端调用，避免文件名、备注等字段中的空格影响解析。
+`list`、`versions`、`current` 和 `config show` 支持 `--format table|json`。默认是 `table`，适合人工查看；`json` 适合脚本或前端调用，避免文件名、备注等字段中的空格影响解析。
 
-### 5. 恢复版本
+### 5. 查看当前版本指针
+
+```bash
+docvault current report --format table
+```
+
+### 6. 导出版本
 
 ```bash
 docvault export report --version v2 --output ./restore/
+```
+
+`export` 只写出文件，不改变 DocVault 内部的当前版本指针。
+
+### 7. 切换当前版本
+
+```bash
+docvault checkout report --version v1
+docvault checkout report --version v1 --output ./restore/
+```
+
+`checkout` 会把指定版本设为文档的当前版本；带 `--output` 时会同时导出该版本。
+
+### 8. 查看有效配置
+
+```bash
+docvault config show --format table
 ```
 
 如果存在多个同名文档，使用 `--id` 或 `name@id-prefix` 精确定位：
@@ -230,10 +253,16 @@ DocVault 允许多个文档使用相同的显示名称。每个文档都会分�
 
 ### 版本导出与 Checkout
 
+DocVault 区分两个版本选择词：
+
+- `latest`：最高版本号。即使 checkout 到旧版本，`latest` 仍然指向编号最大的版本。
+- `current`：当前版本指针。默认每次 commit 后指向新版本，checkout 后会指向被 checkout 的版本。
+
 `export` 只导出某个版本的文件，不改变文档当前指针：
 
 ```bash
 docvault export contract --version latest --output ./output
+docvault export contract --version current --output ./output
 ```
 
 `checkout` 会把指定版本设为当前版本；如果提供 `--output`，也会同时导出文件：
@@ -258,6 +287,23 @@ docvault current contract --format table
 5. 输出 Office 文件
 
 Checkout 额外会更新 `documents.current_version_id`。后续提交新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
+
+`restore` 不再作为 CLI 命令使用。需要写出历史文件时使用 `export`；需要改变当前版本指针时使用 `checkout`。
+
+------
+
+### OOXML Manifest
+
+每次 commit 会为 Office 包生成版本 manifest，并随版本记录持久化。当前 manifest 字段为：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| path | 包内相对路径 |
+| size | entry 字节大小 |
+| sha256 | entry 内容 SHA-256 |
+| content_type | 可选内容类型；当前 MVP 暂为空 |
+
+`versions --format json` 会返回 manifest，便于 CLI 脚本和后续 GUI 展示版本内文件清单。
 
 ------
 
