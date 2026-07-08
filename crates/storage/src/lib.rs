@@ -423,8 +423,10 @@ impl VaultStorage {
                     id: Uuid::new_v4().to_string(),
                     document_id: document_id.cloned(),
                     path,
-                    fingerprint: None,
+                    stat_fingerprint: None,
+                    content_fingerprint: None,
                     last_scanned_at: None,
+                    last_deep_scanned_at: None,
                     created_at: now,
                 };
                 self.insert_tracked_path(&tracked_path)?;
@@ -435,7 +437,7 @@ impl VaultStorage {
 
     pub fn list_tracked_paths(&self) -> StorageResult<Vec<TrackedPath>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, document_id, path, fingerprint, last_scanned_at, created_at FROM tracked_paths ORDER BY created_at, path, id",
+            "SELECT id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at FROM tracked_paths ORDER BY created_at, path, id",
         )?;
         let tracked_paths = statement
             .query_map([], tracked_path_from_row)?
@@ -443,11 +445,11 @@ impl VaultStorage {
         Ok(tracked_paths)
     }
 
-    pub fn scan_tracked_paths(&self) -> StorageResult<Vec<TrackedScan>> {
+    pub fn scan_tracked_paths(&self, deep: bool) -> StorageResult<Vec<TrackedScan>> {
         let tracked_paths = self.list_tracked_paths()?;
         tracked_paths
             .into_iter()
-            .map(|tracked_path| self.scan_tracked_path(tracked_path))
+            .map(|tracked_path| self.scan_tracked_path(tracked_path, deep))
             .collect()
     }
 
@@ -553,8 +555,10 @@ impl VaultStorage {
                 id TEXT PRIMARY KEY,
                 document_id TEXT,
                 path TEXT NOT NULL UNIQUE,
-                fingerprint TEXT,
+                stat_fingerprint TEXT,
+                content_fingerprint TEXT,
                 last_scanned_at INTEGER,
+                last_deep_scanned_at INTEGER,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             );
@@ -579,13 +583,15 @@ impl VaultStorage {
 
     fn insert_tracked_path(&self, tracked_path: &TrackedPath) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO tracked_paths (id, document_id, path, fingerprint, last_scanned_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO tracked_paths (id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 tracked_path.id,
                 tracked_path.document_id.as_ref().map(DocumentId::as_str),
                 tracked_path.path,
-                tracked_path.fingerprint,
+                tracked_path.stat_fingerprint,
+                tracked_path.content_fingerprint,
                 tracked_path.last_scanned_at,
+                tracked_path.last_deep_scanned_at,
                 tracked_path.created_at,
             ],
         )?;
@@ -595,7 +601,7 @@ impl VaultStorage {
     fn find_tracked_path_by_path(&self, path: &str) -> StorageResult<Option<TrackedPath>> {
         self.connection
             .query_row(
-                "SELECT id, document_id, path, fingerprint, last_scanned_at, created_at FROM tracked_paths WHERE path = ?1",
+                "SELECT id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at FROM tracked_paths WHERE path = ?1",
                 [path],
                 tracked_path_from_row,
             )
@@ -603,28 +609,66 @@ impl VaultStorage {
             .map_err(StorageError::from)
     }
 
-    fn scan_tracked_path(&self, mut tracked_path: TrackedPath) -> StorageResult<TrackedScan> {
-        let previous_fingerprint = tracked_path.fingerprint.clone();
+    fn scan_tracked_path(
+        &self,
+        mut tracked_path: TrackedPath,
+        deep: bool,
+    ) -> StorageResult<TrackedScan> {
+        let previous_stat_fingerprint = tracked_path.stat_fingerprint.clone();
+        let previous_content_fingerprint = tracked_path.content_fingerprint.clone();
         let scanned_at = unix_timestamp();
         let path = PathBuf::from(&tracked_path.path);
-        let fingerprint = if path.is_file() {
-            Some(file_fingerprint(&path)?)
+        let stat_fingerprint = if path.is_file() {
+            Some(stat_fingerprint(&path)?)
         } else {
             None
         };
-        let exists = fingerprint.is_some();
-        let changed = fingerprint != previous_fingerprint;
-        self.connection.execute(
-            "UPDATE tracked_paths SET fingerprint = ?1, last_scanned_at = ?2 WHERE id = ?3",
-            params![fingerprint, scanned_at, tracked_path.id],
-        )?;
-        tracked_path.fingerprint = fingerprint.clone();
+        let exists = stat_fingerprint.is_some();
+        let content_fingerprint = if deep && exists {
+            Some(file_fingerprint(&path)?)
+        } else {
+            tracked_path.content_fingerprint.clone()
+        };
+        let status = scan_status(
+            exists,
+            deep,
+            previous_stat_fingerprint.as_deref(),
+            stat_fingerprint.as_deref(),
+            previous_content_fingerprint.as_deref(),
+            content_fingerprint.as_deref(),
+        );
+        let changed = matches!(status.as_str(), "changed" | "maybe_changed" | "missing");
+
+        if deep {
+            self.connection.execute(
+                "UPDATE tracked_paths SET stat_fingerprint = ?1, content_fingerprint = ?2, last_scanned_at = ?3, last_deep_scanned_at = ?4 WHERE id = ?5",
+                params![
+                    stat_fingerprint,
+                    content_fingerprint,
+                    scanned_at,
+                    scanned_at,
+                    tracked_path.id
+                ],
+            )?;
+            tracked_path.last_deep_scanned_at = Some(scanned_at);
+        } else {
+            self.connection.execute(
+                "UPDATE tracked_paths SET stat_fingerprint = ?1, last_scanned_at = ?2 WHERE id = ?3",
+                params![stat_fingerprint, scanned_at, tracked_path.id],
+            )?;
+        }
+
+        tracked_path.stat_fingerprint = stat_fingerprint.clone();
+        tracked_path.content_fingerprint = content_fingerprint.clone();
         tracked_path.last_scanned_at = Some(scanned_at);
         Ok(TrackedScan {
             tracked_path,
-            fingerprint,
+            stat_fingerprint,
+            content_fingerprint,
+            status,
             changed,
             exists,
+            deep,
             scanned_at,
         })
     }
@@ -1011,9 +1055,11 @@ fn tracked_path_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrackedPat
         id: row.get(0)?,
         document_id: row.get::<_, Option<String>>(1)?.map(DocumentId::new),
         path: row.get(2)?,
-        fingerprint: row.get(3)?,
-        last_scanned_at: row.get(4)?,
-        created_at: row.get(5)?,
+        stat_fingerprint: row.get(3)?,
+        content_fingerprint: row.get(4)?,
+        last_scanned_at: row.get(5)?,
+        last_deep_scanned_at: row.get(6)?,
+        created_at: row.get(7)?,
     })
 }
 
@@ -1165,6 +1211,46 @@ fn file_fingerprint(path: &Path) -> StorageResult<String> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
+fn stat_fingerprint(path: &Path) -> StorageResult<String> {
+    let metadata = fs::metadata(path)?;
+    let mut hasher = Fnv1a64::new();
+    hasher.write_u64(metadata.len());
+    if let Ok(modified) = metadata.modified()
+        && let Ok(duration) = modified.duration_since(UNIX_EPOCH)
+    {
+        hasher.write_u64(duration.as_secs());
+        hasher.write_u32(duration.subsec_nanos());
+    }
+    hasher.write_u8(u8::from(metadata.permissions().readonly()));
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+fn scan_status(
+    exists: bool,
+    deep: bool,
+    previous_stat_fingerprint: Option<&str>,
+    stat_fingerprint: Option<&str>,
+    previous_content_fingerprint: Option<&str>,
+    content_fingerprint: Option<&str>,
+) -> String {
+    if !exists {
+        return "missing".to_owned();
+    }
+    if deep {
+        if previous_content_fingerprint.is_some()
+            && previous_content_fingerprint == content_fingerprint
+        {
+            "unchanged".to_owned()
+        } else {
+            "changed".to_owned()
+        }
+    } else if previous_stat_fingerprint.is_some() && previous_stat_fingerprint == stat_fingerprint {
+        "unchanged".to_owned()
+    } else {
+        "maybe_changed".to_owned()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Fnv1a64(u64);
 
@@ -1293,18 +1379,31 @@ mod tests {
         let tracked_path = storage.track_path(&source, None).unwrap();
 
         assert_eq!(tracked_path.document_id, None);
-        let first_scan = storage.scan_tracked_paths().unwrap();
+        let first_scan = storage.scan_tracked_paths(false).unwrap();
         assert_eq!(first_scan.len(), 1);
         assert!(first_scan[0].changed);
+        assert_eq!(first_scan[0].status, "maybe_changed");
         assert!(first_scan[0].exists);
-        assert!(first_scan[0].fingerprint.is_some());
+        assert!(first_scan[0].stat_fingerprint.is_some());
+        assert!(first_scan[0].content_fingerprint.is_none());
 
-        let second_scan = storage.scan_tracked_paths().unwrap();
+        let second_scan = storage.scan_tracked_paths(false).unwrap();
         assert!(!second_scan[0].changed);
+        assert_eq!(second_scan[0].status, "unchanged");
 
         fs::write(&source, b"version two").unwrap();
-        let third_scan = storage.scan_tracked_paths().unwrap();
+        let third_scan = storage.scan_tracked_paths(false).unwrap();
         assert!(third_scan[0].changed);
+        assert_eq!(third_scan[0].status, "maybe_changed");
+
+        let deep_scan = storage.scan_tracked_paths(true).unwrap();
+        assert!(deep_scan[0].changed);
+        assert_eq!(deep_scan[0].status, "changed");
+        assert!(deep_scan[0].content_fingerprint.is_some());
+
+        let second_deep_scan = storage.scan_tracked_paths(true).unwrap();
+        assert!(!second_deep_scan[0].changed);
+        assert_eq!(second_deep_scan[0].status, "unchanged");
     }
 
     #[test]

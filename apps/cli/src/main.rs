@@ -301,11 +301,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("scan") => {
             let format = OutputFormat::parse(&args)?;
+            let deep = has_flag(&args, "--deep");
             let storage =
                 VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
             let scans = vault
-                .scan_tracked_paths()
+                .scan_tracked_paths(deep)
                 .map_err(|error| error.to_string())?;
             match format {
                 OutputFormat::Table => {
@@ -526,9 +527,14 @@ fn print_tracked_paths_table(tracked_paths: &[docvault_types::TrackedPath]) {
                     .map(|id| id.as_str().to_owned())
                     .unwrap_or_default(),
                 tracked_path.path.clone(),
-                tracked_path.fingerprint.clone().unwrap_or_default(),
+                tracked_path.stat_fingerprint.clone().unwrap_or_default(),
+                tracked_path.content_fingerprint.clone().unwrap_or_default(),
                 tracked_path
                     .last_scanned_at
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
+                tracked_path
+                    .last_deep_scanned_at
                     .map(|value| value.to_string())
                     .unwrap_or_default(),
                 tracked_path.created_at.to_string(),
@@ -540,8 +546,10 @@ fn print_tracked_paths_table(tracked_paths: &[docvault_types::TrackedPath]) {
             "ID",
             "DOCUMENT_ID",
             "PATH",
-            "FINGERPRINT",
+            "STAT_FINGERPRINT",
+            "CONTENT_FINGERPRINT",
             "LAST_SCANNED_AT",
+            "LAST_DEEP_SCANNED_AT",
             "CREATED_AT",
         ],
         &rows,
@@ -552,13 +560,6 @@ fn print_tracked_scans_table(scans: &[docvault_types::TrackedScan]) {
     let rows = scans
         .iter()
         .map(|scan| {
-            let status = if !scan.exists {
-                "missing"
-            } else if scan.changed {
-                "changed"
-            } else {
-                "unchanged"
-            };
             vec![
                 scan.tracked_path.id.clone(),
                 scan.tracked_path
@@ -567,8 +568,10 @@ fn print_tracked_scans_table(scans: &[docvault_types::TrackedScan]) {
                     .map(|id| id.as_str().to_owned())
                     .unwrap_or_default(),
                 scan.tracked_path.path.clone(),
-                status.to_owned(),
-                scan.fingerprint.clone().unwrap_or_default(),
+                scan.status.clone(),
+                scan.stat_fingerprint.clone().unwrap_or_default(),
+                scan.content_fingerprint.clone().unwrap_or_default(),
+                scan.deep.to_string(),
                 scan.scanned_at.to_string(),
             ]
         })
@@ -579,7 +582,9 @@ fn print_tracked_scans_table(scans: &[docvault_types::TrackedScan]) {
             "DOCUMENT_ID",
             "PATH",
             "STATUS",
-            "FINGERPRINT",
+            "STAT_FINGERPRINT",
+            "CONTENT_FINGERPRINT",
+            "DEEP",
             "SCANNED_AT",
         ],
         &rows,
@@ -607,8 +612,10 @@ fn tracked_path_to_json(tracked_path: &docvault_types::TrackedPath) -> serde_jso
         "id": tracked_path.id,
         "document_id": tracked_path.document_id.as_ref().map(|id| id.as_str()),
         "path": tracked_path.path,
-        "fingerprint": tracked_path.fingerprint,
+        "stat_fingerprint": tracked_path.stat_fingerprint,
+        "content_fingerprint": tracked_path.content_fingerprint,
         "last_scanned_at": tracked_path.last_scanned_at,
+        "last_deep_scanned_at": tracked_path.last_deep_scanned_at,
         "created_at": tracked_path.created_at,
     })
 }
@@ -616,9 +623,12 @@ fn tracked_path_to_json(tracked_path: &docvault_types::TrackedPath) -> serde_jso
 fn tracked_scan_to_json(scan: &docvault_types::TrackedScan) -> serde_json::Value {
     json!({
         "tracked_path": tracked_path_to_json(&scan.tracked_path),
-        "fingerprint": scan.fingerprint,
+        "stat_fingerprint": scan.stat_fingerprint,
+        "content_fingerprint": scan.content_fingerprint,
+        "status": scan.status,
         "changed": scan.changed,
         "exists": scan.exists,
+        "deep": scan.deep,
         "scanned_at": scan.scanned_at,
     })
 }
@@ -650,5 +660,5 @@ fn usage() -> &'static str {
   docvault export <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] --output <path>
   docvault checkout <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] [--output <path>]
   docvault track <path> [name|name@id-prefix|--name <name>|--id <id-prefix>] [--import] [--author <name>] [--note <text>] [--new] [--format table|json]
-  docvault scan [--format table|json]"
+  docvault scan [--deep] [--format table|json]"
 }

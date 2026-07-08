@@ -268,14 +268,26 @@ docvault track ./report.docx report@550e8400
 docvault track ./report.docx --id 550e8400
 ```
 
-`scan` 会遍历所有追踪项，计算当前文件 fingerprint，写回最新扫描结果，并输出状态：
+`scan` 会遍历所有追踪项，默认只读取文件元数据并计算 `stat_fingerprint`，不会读取完整文件内容：
 
 ```bash
 docvault scan --format table
 docvault scan --format json
 ```
 
-当前 `scan` 只负责检测路径是否存在、计算 fingerprint、判断相对上次扫描是否 changed。发现 changed 后自动导入新版本属于下一步工作流，不在本阶段自动执行。
+默认扫描适合频繁运行。它会检测路径是否存在，并用文件大小、修改时间等 stat 信息判断状态：
+
+- `unchanged`：stat fingerprint 与上次一致。
+- `maybe_changed`：stat fingerprint 与上次不同，文件可能变更，但内容尚未读取确认。
+- `missing`：追踪路径不存在。
+
+需要强确认时使用深度扫描：
+
+```bash
+docvault scan --deep --format table
+```
+
+`--deep` 会读取完整文件内容并计算 `content_fingerprint`。这适合归档前确认或排查状态，但不适合对大文件高频执行。发现 `maybe_changed` 或 `changed` 后自动导入新版本属于下一步工作流，不在本阶段自动执行。
 
 ------
 

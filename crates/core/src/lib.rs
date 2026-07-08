@@ -117,8 +117,8 @@ impl DocVault {
         self.storage.track_document_path(path.as_ref(), document_id)
     }
 
-    pub fn scan_tracked_paths(&self) -> StorageResult<Vec<TrackedScan>> {
-        self.storage.scan_tracked_paths()
+    pub fn scan_tracked_paths(&self, deep: bool) -> StorageResult<Vec<TrackedScan>> {
+        self.storage.scan_tracked_paths(deep)
     }
 }
 
