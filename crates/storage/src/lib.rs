@@ -1,15 +1,12 @@
 use std::{
-    env, fs,
-    hash::Hasher,
-    io,
-    io::Read,
+    env, fs, io,
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use docvault_ooxml::OoxmlError;
-use docvault_types::{CommitMetadata, Document, DocumentId, TrackedPath, TrackedScan, Version};
+use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
@@ -45,7 +42,6 @@ pub enum StorageError {
         stderr: String,
     },
     ResticSnapshotMissing,
-    TrackedPathNotFound(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -91,7 +87,6 @@ impl std::fmt::Display for StorageError {
                 write!(f, "restic command failed ({command}): {stderr}")
             }
             Self::ResticSnapshotMissing => write!(f, "restic backup did not return a snapshot id"),
-            Self::TrackedPathNotFound(path) => write!(f, "tracked path not found: {path}"),
         }
     }
 }
@@ -298,7 +293,6 @@ impl VaultStorage {
                 let document = Document {
                     id: DocumentId::new(Uuid::new_v4().to_string()),
                     name,
-                    source_path: source_path.display().to_string(),
                     current_version_id: None,
                     created_at: now,
                 };
@@ -313,7 +307,6 @@ impl VaultStorage {
                     let document = Document {
                         id: DocumentId::new(Uuid::new_v4().to_string()),
                         name,
-                        source_path: source_path.display().to_string(),
                         current_version_id: None,
                         created_at: now,
                     };
@@ -386,73 +379,6 @@ impl VaultStorage {
         self.find_version(document.id.as_str(), &current_version_id)
     }
 
-    pub fn track_path(
-        &self,
-        path: &Path,
-        document_ref: Option<&DocumentRef>,
-    ) -> StorageResult<TrackedPath> {
-        let document_id = document_ref
-            .map(|document_ref| self.resolve_document_ref(document_ref))
-            .transpose()?
-            .map(|document| document.id);
-        self.track_document_path(path, document_id.as_ref())
-    }
-
-    pub fn track_document_path(
-        &self,
-        path: &Path,
-        document_id: Option<&DocumentId>,
-    ) -> StorageResult<TrackedPath> {
-        let now = unix_timestamp();
-        let path = absolute_path(path.to_path_buf()).display().to_string();
-        let existing = self.find_tracked_path_by_path(&path)?;
-        match existing {
-            Some(mut tracked_path) => {
-                self.connection.execute(
-                    "UPDATE tracked_paths SET document_id = ?1 WHERE id = ?2",
-                    params![
-                        document_id.map(DocumentId::as_str),
-                        tracked_path.id.as_str()
-                    ],
-                )?;
-                tracked_path.document_id = document_id.cloned();
-                Ok(tracked_path)
-            }
-            None => {
-                let tracked_path = TrackedPath {
-                    id: Uuid::new_v4().to_string(),
-                    document_id: document_id.cloned(),
-                    path,
-                    stat_fingerprint: None,
-                    content_fingerprint: None,
-                    last_scanned_at: None,
-                    last_deep_scanned_at: None,
-                    created_at: now,
-                };
-                self.insert_tracked_path(&tracked_path)?;
-                Ok(tracked_path)
-            }
-        }
-    }
-
-    pub fn list_tracked_paths(&self) -> StorageResult<Vec<TrackedPath>> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at FROM tracked_paths ORDER BY created_at, path, id",
-        )?;
-        let tracked_paths = statement
-            .query_map([], tracked_path_from_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(tracked_paths)
-    }
-
-    pub fn scan_tracked_paths(&self, deep: bool) -> StorageResult<Vec<TrackedScan>> {
-        let tracked_paths = self.list_tracked_paths()?;
-        tracked_paths
-            .into_iter()
-            .map(|tracked_path| self.scan_tracked_path(tracked_path, deep))
-            .collect()
-    }
-
     fn add_version_to_document(
         &self,
         document: Document,
@@ -463,12 +389,17 @@ impl VaultStorage {
         let number = self.next_version_number(document.id.as_str())?;
         let version_id = format!("v{number}");
         let archive = self.archive_source(&document, &version_id, source_path)?;
+        let original_filename = source_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| StorageError::InvalidFileName(source_path.to_path_buf()))?
+            .to_owned();
         let version = Version {
             id: version_id,
             document_id: document.id.clone(),
             number,
-            original_path: source_path.display().to_string(),
-            archive_path: archive.reference.display().to_string(),
+            original_filename,
+            archive_reference: archive.reference,
             backup_backend: archive.backend.as_str().to_owned(),
             snapshot_id: archive.snapshot_id,
             parent_version_id: document.current_version_id.clone(),
@@ -483,16 +414,10 @@ impl VaultStorage {
         Ok((updated_document, version))
     }
 
-    pub fn create_document(
-        &self,
-        name: &str,
-        source_path: &Path,
-        now: i64,
-    ) -> StorageResult<Document> {
+    pub fn create_document(&self, name: &str, now: i64) -> StorageResult<Document> {
         let document = Document {
             id: DocumentId::new(Uuid::new_v4().to_string()),
             name: name.to_owned(),
-            source_path: source_path.display().to_string(),
             current_version_id: None,
             created_at: now,
         };
@@ -502,7 +427,7 @@ impl VaultStorage {
 
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, name, source_path, current_version_id, created_at FROM documents ORDER BY created_at, name, id",
+            "SELECT id, name, current_version_id, created_at FROM documents ORDER BY created_at, name, id",
         )?;
         let documents = statement
             .query_map([], document_from_row)?
@@ -530,7 +455,6 @@ impl VaultStorage {
             CREATE TABLE IF NOT EXISTS documents (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                source_path TEXT NOT NULL,
                 current_version_id TEXT,
                 created_at INTEGER NOT NULL
             );
@@ -539,8 +463,8 @@ impl VaultStorage {
                 id TEXT NOT NULL,
                 document_id TEXT NOT NULL,
                 number INTEGER NOT NULL,
-                original_path TEXT NOT NULL,
-                archive_path TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                archive_reference TEXT NOT NULL,
                 backup_backend TEXT NOT NULL DEFAULT 'local-copy',
                 snapshot_id TEXT,
                 parent_version_id TEXT,
@@ -550,18 +474,6 @@ impl VaultStorage {
                 PRIMARY KEY (document_id, id),
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             );
-
-            CREATE TABLE IF NOT EXISTS tracked_paths (
-                id TEXT PRIMARY KEY,
-                document_id TEXT,
-                path TEXT NOT NULL UNIQUE,
-                stat_fingerprint TEXT,
-                content_fingerprint TEXT,
-                last_scanned_at INTEGER,
-                last_deep_scanned_at INTEGER,
-                created_at INTEGER NOT NULL,
-                FOREIGN KEY (document_id) REFERENCES documents(id)
-            );
             ",
         )?;
         Ok(())
@@ -569,11 +481,10 @@ impl VaultStorage {
 
     fn insert_document(&self, document: &Document) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO documents (id, name, source_path, current_version_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO documents (id, name, current_version_id, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![
                 document.id.as_str(),
                 document.name,
-                document.source_path,
                 document.current_version_id,
                 document.created_at
             ],
@@ -581,110 +492,18 @@ impl VaultStorage {
         Ok(())
     }
 
-    fn insert_tracked_path(&self, tracked_path: &TrackedPath) -> StorageResult<()> {
-        self.connection.execute(
-            "INSERT INTO tracked_paths (id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                tracked_path.id,
-                tracked_path.document_id.as_ref().map(DocumentId::as_str),
-                tracked_path.path,
-                tracked_path.stat_fingerprint,
-                tracked_path.content_fingerprint,
-                tracked_path.last_scanned_at,
-                tracked_path.last_deep_scanned_at,
-                tracked_path.created_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    fn find_tracked_path_by_path(&self, path: &str) -> StorageResult<Option<TrackedPath>> {
-        self.connection
-            .query_row(
-                "SELECT id, document_id, path, stat_fingerprint, content_fingerprint, last_scanned_at, last_deep_scanned_at, created_at FROM tracked_paths WHERE path = ?1",
-                [path],
-                tracked_path_from_row,
-            )
-            .optional()
-            .map_err(StorageError::from)
-    }
-
-    fn scan_tracked_path(
-        &self,
-        mut tracked_path: TrackedPath,
-        deep: bool,
-    ) -> StorageResult<TrackedScan> {
-        let previous_stat_fingerprint = tracked_path.stat_fingerprint.clone();
-        let previous_content_fingerprint = tracked_path.content_fingerprint.clone();
-        let scanned_at = unix_timestamp();
-        let path = PathBuf::from(&tracked_path.path);
-        let stat_fingerprint = if path.is_file() {
-            Some(stat_fingerprint(&path)?)
-        } else {
-            None
-        };
-        let exists = stat_fingerprint.is_some();
-        let content_fingerprint = if deep && exists {
-            Some(file_fingerprint(&path)?)
-        } else {
-            tracked_path.content_fingerprint.clone()
-        };
-        let status = scan_status(
-            exists,
-            deep,
-            previous_stat_fingerprint.as_deref(),
-            stat_fingerprint.as_deref(),
-            previous_content_fingerprint.as_deref(),
-            content_fingerprint.as_deref(),
-        );
-        let changed = matches!(status.as_str(), "changed" | "maybe_changed" | "missing");
-
-        if deep {
-            self.connection.execute(
-                "UPDATE tracked_paths SET stat_fingerprint = ?1, content_fingerprint = ?2, last_scanned_at = ?3, last_deep_scanned_at = ?4 WHERE id = ?5",
-                params![
-                    stat_fingerprint,
-                    content_fingerprint,
-                    scanned_at,
-                    scanned_at,
-                    tracked_path.id
-                ],
-            )?;
-            tracked_path.last_deep_scanned_at = Some(scanned_at);
-        } else {
-            self.connection.execute(
-                "UPDATE tracked_paths SET stat_fingerprint = ?1, last_scanned_at = ?2 WHERE id = ?3",
-                params![stat_fingerprint, scanned_at, tracked_path.id],
-            )?;
-        }
-
-        tracked_path.stat_fingerprint = stat_fingerprint.clone();
-        tracked_path.content_fingerprint = content_fingerprint.clone();
-        tracked_path.last_scanned_at = Some(scanned_at);
-        Ok(TrackedScan {
-            tracked_path,
-            stat_fingerprint,
-            content_fingerprint,
-            status,
-            changed,
-            exists,
-            deep,
-            scanned_at,
-        })
-    }
-
     fn insert_version(&self, version: &Version) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO versions (
-                id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+                id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 version.id,
                 version.document_id.as_str(),
                 version.number,
-                version.original_path,
-                version.archive_path,
+                version.original_filename,
+                version.archive_reference,
                 version.backup_backend,
                 version.snapshot_id,
                 version.parent_version_id,
@@ -698,7 +517,7 @@ impl VaultStorage {
 
     fn find_documents_by_name(&self, name: &str) -> StorageResult<Vec<Document>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, name, source_path, current_version_id, created_at FROM documents WHERE name = ?1 ORDER BY created_at, id",
+            "SELECT id, name, current_version_id, created_at FROM documents WHERE name = ?1 ORDER BY created_at, id",
         )?;
         let documents = statement
             .query_map([name], document_from_row)?
@@ -735,7 +554,7 @@ impl VaultStorage {
     fn resolve_document_id_prefix(&self, prefix: &str) -> StorageResult<Document> {
         let pattern = format!("{prefix}%");
         let mut statement = self.connection.prepare(
-            "SELECT id, name, source_path, current_version_id, created_at FROM documents WHERE id LIKE ?1 ORDER BY created_at, id",
+            "SELECT id, name, current_version_id, created_at FROM documents WHERE id LIKE ?1 ORDER BY created_at, id",
         )?;
         let documents = statement
             .query_map([pattern], document_from_row)?
@@ -770,7 +589,7 @@ impl VaultStorage {
 
     fn versions_for_document(&self, document_id: &str) -> StorageResult<Vec<Version>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
              FROM versions WHERE document_id = ?1 ORDER BY number",
         )?;
         let versions = statement
@@ -802,7 +621,7 @@ impl VaultStorage {
 
         self.connection
             .query_row(
-                "SELECT id, document_id, number, original_path, archive_path, backup_backend, snapshot_id, parent_version_id, author, note, created_at
+                "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, parent_version_id, author, note, created_at
                  FROM versions WHERE document_id = ?1 AND id = ?2",
                 params![document_id, version_id],
                 version_from_row,
@@ -840,9 +659,14 @@ impl VaultStorage {
         fs::create_dir_all(&version_dir)?;
         let archive_path = version_dir.join(source_name);
         fs::copy(source_path, &archive_path)?;
+        let archive_reference = PathBuf::from(document.id.as_str())
+            .join(version_id)
+            .join(source_name)
+            .display()
+            .to_string();
         Ok(ArchiveReference {
             backend: BackupBackend::LocalCopy,
-            reference: archive_path,
+            reference: archive_reference,
             snapshot_id: None,
         })
     }
@@ -861,7 +685,7 @@ impl VaultStorage {
         let snapshot_id = self.restic_backup(document, version_id, &package_dir)?;
         Ok(ArchiveReference {
             backend: BackupBackend::Restic,
-            reference: package_dir,
+            reference: format!("restic:{}:{version_id}", document.id.as_str()),
             snapshot_id: Some(snapshot_id),
         })
     }
@@ -874,12 +698,7 @@ impl VaultStorage {
             Ok(output_path.to_path_buf())
         } else {
             fs::create_dir_all(output_path)?;
-            let source_name = Path::new(&version.original_path)
-                .file_name()
-                .ok_or_else(|| {
-                    StorageError::InvalidFileName(PathBuf::from(&version.original_path))
-                })?;
-            Ok(output_path.join(source_name))
+            Ok(output_path.join(&version.original_filename))
         }
     }
 
@@ -892,7 +711,10 @@ impl VaultStorage {
         let destination = self.restore_destination(version, output_path)?;
         match BackupBackend::parse(&version.backup_backend)? {
             BackupBackend::LocalCopy => {
-                fs::copy(&version.archive_path, &destination)?;
+                fs::copy(
+                    self.paths.versions_dir.join(&version.archive_reference),
+                    &destination,
+                )?;
             }
             BackupBackend::Restic => {
                 self.restore_restic_version(document, version, &destination)?;
@@ -1020,7 +842,7 @@ impl VaultStorage {
 #[derive(Debug, Clone)]
 struct ArchiveReference {
     backend: BackupBackend,
-    reference: PathBuf,
+    reference: String,
     snapshot_id: Option<String>,
 }
 
@@ -1029,8 +851,8 @@ fn version_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         id: row.get(0)?,
         document_id: DocumentId::new(row.get::<_, String>(1)?),
         number: row.get(2)?,
-        original_path: row.get(3)?,
-        archive_path: row.get(4)?,
+        original_filename: row.get(3)?,
+        archive_reference: row.get(4)?,
         backup_backend: row.get(5)?,
         snapshot_id: row.get(6)?,
         parent_version_id: row.get(7)?,
@@ -1044,22 +866,8 @@ fn document_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     Ok(Document {
         id: DocumentId::new(row.get::<_, String>(0)?),
         name: row.get(1)?,
-        source_path: row.get(2)?,
-        current_version_id: row.get(3)?,
-        created_at: row.get(4)?,
-    })
-}
-
-fn tracked_path_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TrackedPath> {
-    Ok(TrackedPath {
-        id: row.get(0)?,
-        document_id: row.get::<_, Option<String>>(1)?.map(DocumentId::new),
-        path: row.get(2)?,
-        stat_fingerprint: row.get(3)?,
-        content_fingerprint: row.get(4)?,
-        last_scanned_at: row.get(5)?,
-        last_deep_scanned_at: row.get(6)?,
-        created_at: row.get(7)?,
+        current_version_id: row.get(2)?,
+        created_at: row.get(3)?,
     })
 }
 
@@ -1069,13 +877,7 @@ fn write_document_matches(
 ) -> std::fmt::Result {
     writeln!(f, "matches:")?;
     for document in matches {
-        writeln!(
-            f,
-            "  {}  {}  {}",
-            document.id.as_str(),
-            document.name,
-            document.source_path
-        )?;
+        writeln!(f, "  {}  {}", document.id.as_str(), document.name)?;
     }
     write!(f, "use --id <document_id> or name@<id-prefix>")
 }
@@ -1194,85 +996,6 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
     Err(StorageError::ResticSnapshotMissing)
 }
 
-fn file_fingerprint(path: &Path) -> StorageResult<String> {
-    let metadata = fs::metadata(path)?;
-    let mut hasher = Fnv1a64::new();
-    hasher.write_u64(metadata.len());
-
-    let mut file = fs::File::open(path)?;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let bytes_read = file.read(&mut buffer)?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.write(&buffer[..bytes_read]);
-    }
-    Ok(format!("{:016x}", hasher.finish()))
-}
-
-fn stat_fingerprint(path: &Path) -> StorageResult<String> {
-    let metadata = fs::metadata(path)?;
-    let mut hasher = Fnv1a64::new();
-    hasher.write_u64(metadata.len());
-    if let Ok(modified) = metadata.modified()
-        && let Ok(duration) = modified.duration_since(UNIX_EPOCH)
-    {
-        hasher.write_u64(duration.as_secs());
-        hasher.write_u32(duration.subsec_nanos());
-    }
-    hasher.write_u8(u8::from(metadata.permissions().readonly()));
-    Ok(format!("{:016x}", hasher.finish()))
-}
-
-fn scan_status(
-    exists: bool,
-    deep: bool,
-    previous_stat_fingerprint: Option<&str>,
-    stat_fingerprint: Option<&str>,
-    previous_content_fingerprint: Option<&str>,
-    content_fingerprint: Option<&str>,
-) -> String {
-    if !exists {
-        return "missing".to_owned();
-    }
-    if deep {
-        if previous_content_fingerprint.is_some()
-            && previous_content_fingerprint == content_fingerprint
-        {
-            "unchanged".to_owned()
-        } else {
-            "changed".to_owned()
-        }
-    } else if previous_stat_fingerprint.is_some() && previous_stat_fingerprint == stat_fingerprint {
-        "unchanged".to_owned()
-    } else {
-        "maybe_changed".to_owned()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Fnv1a64(u64);
-
-impl Fnv1a64 {
-    fn new() -> Self {
-        Self(0xcbf29ce484222325)
-    }
-}
-
-impl Hasher for Fnv1a64 {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.0 ^= u64::from(*byte);
-            self.0 = self.0.wrapping_mul(0x100000001b3);
-        }
-    }
-}
-
 fn default_config(paths: &VaultPaths) -> String {
     format!(
         "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"\"\nrestic_password = \"docvault-local-development-password\"\n\n[database]\npath = \"{}\"\n\n[logging]\nlevel = \"info\"\n",
@@ -1339,6 +1062,8 @@ mod tests {
         assert_eq!(storage.backend(), BackupBackend::LocalCopy);
         assert_eq!(version.id, "v1");
         assert_eq!(version.backup_backend, "local-copy");
+        assert_eq!(version.original_filename, "report.docx");
+        assert!(!Path::new(&version.archive_reference).is_absolute());
         assert_eq!(version.author.as_deref(), Some("Bryan"));
         assert_eq!(version.note.as_deref(), Some("Initial commit"));
         assert_eq!(storage.list_documents().unwrap()[0].name, "report");
@@ -1356,54 +1081,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read(restored).unwrap(), b"version one");
-    }
-
-    #[test]
-    fn scans_tracked_paths_and_detects_changes() {
-        let paths = unique_test_paths("track");
-        fs::create_dir_all(&paths.root_dir).unwrap();
-        fs::write(
-            &paths.config_path,
-            format!(
-                "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
-                paths.data_dir.display(),
-                paths.repo_dir.display(),
-                paths.db_path.display()
-            ),
-        )
-        .unwrap();
-        let source = paths.root_dir.join("tracked.docx");
-        fs::write(&source, b"version one").unwrap();
-
-        let storage = VaultStorage::init(paths).unwrap();
-        let tracked_path = storage.track_path(&source, None).unwrap();
-
-        assert_eq!(tracked_path.document_id, None);
-        let first_scan = storage.scan_tracked_paths(false).unwrap();
-        assert_eq!(first_scan.len(), 1);
-        assert!(first_scan[0].changed);
-        assert_eq!(first_scan[0].status, "maybe_changed");
-        assert!(first_scan[0].exists);
-        assert!(first_scan[0].stat_fingerprint.is_some());
-        assert!(first_scan[0].content_fingerprint.is_none());
-
-        let second_scan = storage.scan_tracked_paths(false).unwrap();
-        assert!(!second_scan[0].changed);
-        assert_eq!(second_scan[0].status, "unchanged");
-
-        fs::write(&source, b"version two").unwrap();
-        let third_scan = storage.scan_tracked_paths(false).unwrap();
-        assert!(third_scan[0].changed);
-        assert_eq!(third_scan[0].status, "maybe_changed");
-
-        let deep_scan = storage.scan_tracked_paths(true).unwrap();
-        assert!(deep_scan[0].changed);
-        assert_eq!(deep_scan[0].status, "changed");
-        assert!(deep_scan[0].content_fingerprint.is_some());
-
-        let second_deep_scan = storage.scan_tracked_paths(true).unwrap();
-        assert!(!second_deep_scan[0].changed);
-        assert_eq!(second_deep_scan[0].status, "unchanged");
     }
 
     #[test]

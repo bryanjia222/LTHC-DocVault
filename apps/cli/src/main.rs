@@ -1,8 +1,4 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::{env, path::PathBuf, process::ExitCode};
 
 use docvault_core::DocVault;
 use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
@@ -47,6 +43,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             Ok(())
         }
         Some("commit") => {
+            if has_flag(&args, "--track") {
+                return Err("--track was removed from commit".to_owned());
+            }
             let source_path = args.get(1).ok_or_else(|| usage().to_owned())?;
             let document_ref = parse_commit_ref(&args)?;
             let metadata = CommitMetadata {
@@ -56,26 +55,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let storage =
                 VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
             let vault = DocVault::new(storage);
-            let (document, version) = vault
+            let (_, version) = vault
                 .commit_document(source_path, document_ref.clone(), metadata)
                 .map_err(|error| error.to_string())?;
-            if has_flag(&args, "--track") {
-                let tracked = vault
-                    .track_document_path(source_path, Some(&document.id))
-                    .map_err(|error| error.to_string())?;
-                println!(
-                    "Committed {} as {} and tracked {}",
-                    document_ref.display_name(),
-                    version.id,
-                    tracked.path
-                );
-            } else {
-                println!(
-                    "Committed {} as {}",
-                    document_ref.display_name(),
-                    version.id
-                );
-            }
+            println!(
+                "Committed {} as {}",
+                document_ref.display_name(),
+                version.id
+            );
             Ok(())
         }
         Some("list") => {
@@ -96,12 +83,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                     document.id.as_str().to_owned(),
                                     document.name.clone(),
                                     document.current_version_id.clone().unwrap_or_default(),
-                                    document.source_path.clone(),
                                     document.created_at.to_string(),
                                 ]
                             })
                             .collect::<Vec<_>>();
-                        print_table(&["ID", "NAME", "CURRENT", "SOURCE", "CREATED_AT"], &rows);
+                        print_table(&["ID", "NAME", "CURRENT", "CREATED_AT"], &rows);
                     }
                 }
                 OutputFormat::Json => {
@@ -112,7 +98,6 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 "id": document.id.as_str(),
                                 "name": document.name,
                                 "current_version_id": document.current_version_id,
-                                "source_path": document.source_path,
                                 "created_at": document.created_at,
                             })
                         })
@@ -147,11 +132,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                     version.number.to_string(),
                                     version.parent_version_id.clone().unwrap_or_default(),
                                     version.backup_backend.clone(),
-                                    version.original_path.clone(),
+                                    version.original_filename.clone(),
                                     version
                                         .snapshot_id
                                         .as_deref()
-                                        .unwrap_or(version.archive_path.as_str())
+                                        .unwrap_or(version.archive_reference.as_str())
                                         .to_owned(),
                                     version.author.clone().unwrap_or_default(),
                                     version.note.clone().unwrap_or_default(),
@@ -164,7 +149,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 "NUMBER",
                                 "PARENT",
                                 "BACKEND",
-                                "SOURCE",
+                                "FILENAME",
                                 "REFERENCE",
                                 "AUTHOR",
                                 "NOTE",
@@ -182,8 +167,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                                 "document_id": version.document_id.as_str(),
                                 "number": version.number,
                                 "parent_version_id": version.parent_version_id,
-                                "original_path": version.original_path,
-                                "archive_path": version.archive_path,
+                                "original_filename": version.original_filename,
+                                "archive_reference": version.archive_reference,
                                 "backup_backend": version.backup_backend,
                                 "snapshot_id": version.snapshot_id,
                                 "author": version.author,
@@ -267,84 +252,6 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             Ok(())
         }
-        Some("track") => {
-            let source_path = PathBuf::from(args.get(1).ok_or_else(|| usage().to_owned())?);
-            let format = OutputFormat::parse(&args)?;
-            if has_flag(&args, "--import") {
-                return Err("--import was replaced by --commit".to_owned());
-            }
-            let commit_first = has_flag(&args, "--commit");
-            let metadata = CommitMetadata {
-                author: parse_option_value(&args, "--author"),
-                note: parse_option_value(&args, "--note"),
-            };
-            let storage =
-                VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
-            let vault = DocVault::new(storage);
-
-            let tracked = if commit_first {
-                let document_ref = parse_track_document_ref(&args, &source_path)?
-                    .unwrap_or_else(|| default_track_document_ref(&source_path));
-                let (document, version) = vault
-                    .commit_document(&source_path, document_ref, metadata)
-                    .map_err(|error| error.to_string())?;
-                let tracked = vault
-                    .track_document_path(&source_path, Some(&document.id))
-                    .map_err(|error| error.to_string())?;
-                match format {
-                    OutputFormat::Table => {
-                        println!("Committed {} as {}", document.name, version.id);
-                    }
-                    OutputFormat::Json => {}
-                }
-                tracked
-            } else {
-                if has_flag(&args, "--new") {
-                    return Err("--new requires --commit for track".to_owned());
-                }
-                let document_ref = parse_track_document_ref(&args, &source_path)?;
-                vault
-                    .track_path(&source_path, document_ref.as_ref())
-                    .map_err(|error| error.to_string())?
-            };
-
-            match format {
-                OutputFormat::Table => print_tracked_paths_table(&[tracked]),
-                OutputFormat::Json => println!(
-                    "{}",
-                    serde_json::to_string_pretty(&tracked_path_to_json(&tracked))
-                        .map_err(|error| error.to_string())?
-                ),
-            }
-            Ok(())
-        }
-        Some("scan") => {
-            let format = OutputFormat::parse(&args)?;
-            let deep = has_flag(&args, "--deep");
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
-            let vault = DocVault::new(storage);
-            let scans = vault
-                .scan_tracked_paths(deep)
-                .map_err(|error| error.to_string())?;
-            match format {
-                OutputFormat::Table => {
-                    if scans.is_empty() {
-                        println!("No tracked paths found");
-                    } else {
-                        print_tracked_scans_table(&scans);
-                    }
-                }
-                OutputFormat::Json => {
-                    let rows = scans.iter().map(tracked_scan_to_json).collect::<Vec<_>>();
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&rows).map_err(|error| error.to_string())?
-                    );
-                }
-            }
-            Ok(())
-        }
         _ => Err(usage().to_owned()),
     }
 }
@@ -405,46 +312,6 @@ fn parse_document_ref_value(value: &str) -> Result<DocumentRef, String> {
     } else {
         Ok(DocumentRef::Name(value.to_owned()))
     }
-}
-
-fn parse_track_document_ref(
-    args: &[String],
-    source_path: &Path,
-) -> Result<Option<DocumentRef>, String> {
-    if let Some(id_prefix) = parse_option_value(args, "--id") {
-        return Ok(Some(DocumentRef::IdPrefix(id_prefix)));
-    }
-
-    let value = parse_option_value(args, "--name").or_else(|| {
-        args.get(2)
-            .filter(|value| !value.starts_with("--"))
-            .cloned()
-    });
-    let Some(value) = value else {
-        return Ok(None);
-    };
-
-    if has_flag(args, "--new") {
-        if value.contains('@') {
-            return Err("--new requires a plain document name".to_owned());
-        }
-        return Ok(Some(DocumentRef::NewName(value)));
-    }
-
-    if value == source_path.display().to_string() {
-        return Ok(None);
-    }
-    parse_document_ref_value(&value).map(Some)
-}
-
-fn default_track_document_ref(source_path: &Path) -> DocumentRef {
-    let name = source_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("document")
-        .to_owned();
-    DocumentRef::Name(name)
 }
 
 fn parse_option_value(args: &[String], option: &str) -> Option<String> {
@@ -508,11 +375,11 @@ fn print_versions_table(versions: &[docvault_types::Version]) {
                 version.number.to_string(),
                 version.parent_version_id.clone().unwrap_or_default(),
                 version.backup_backend.clone(),
-                version.original_path.clone(),
+                version.original_filename.clone(),
                 version
                     .snapshot_id
                     .as_deref()
-                    .unwrap_or(version.archive_path.as_str())
+                    .unwrap_or(version.archive_reference.as_str())
                     .to_owned(),
                 version.author.clone().unwrap_or_default(),
                 version.note.clone().unwrap_or_default(),
@@ -534,121 +401,19 @@ fn print_versions_table(versions: &[docvault_types::Version]) {
     );
 }
 
-fn print_tracked_paths_table(tracked_paths: &[docvault_types::TrackedPath]) {
-    let rows = tracked_paths
-        .iter()
-        .map(|tracked_path| {
-            vec![
-                tracked_path.id.clone(),
-                tracked_path
-                    .document_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_owned())
-                    .unwrap_or_default(),
-                tracked_path.path.clone(),
-                tracked_path.stat_fingerprint.clone().unwrap_or_default(),
-                tracked_path.content_fingerprint.clone().unwrap_or_default(),
-                tracked_path
-                    .last_scanned_at
-                    .map(|value| value.to_string())
-                    .unwrap_or_default(),
-                tracked_path
-                    .last_deep_scanned_at
-                    .map(|value| value.to_string())
-                    .unwrap_or_default(),
-                tracked_path.created_at.to_string(),
-            ]
-        })
-        .collect::<Vec<_>>();
-    print_table(
-        &[
-            "ID",
-            "DOCUMENT_ID",
-            "PATH",
-            "STAT_FINGERPRINT",
-            "CONTENT_FINGERPRINT",
-            "LAST_SCANNED_AT",
-            "LAST_DEEP_SCANNED_AT",
-            "CREATED_AT",
-        ],
-        &rows,
-    );
-}
-
-fn print_tracked_scans_table(scans: &[docvault_types::TrackedScan]) {
-    let rows = scans
-        .iter()
-        .map(|scan| {
-            vec![
-                scan.tracked_path.id.clone(),
-                scan.tracked_path
-                    .document_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_owned())
-                    .unwrap_or_default(),
-                scan.tracked_path.path.clone(),
-                scan.status.clone(),
-                scan.stat_fingerprint.clone().unwrap_or_default(),
-                scan.content_fingerprint.clone().unwrap_or_default(),
-                scan.deep.to_string(),
-                scan.scanned_at.to_string(),
-            ]
-        })
-        .collect::<Vec<_>>();
-    print_table(
-        &[
-            "ID",
-            "DOCUMENT_ID",
-            "PATH",
-            "STATUS",
-            "STAT_FINGERPRINT",
-            "CONTENT_FINGERPRINT",
-            "DEEP",
-            "SCANNED_AT",
-        ],
-        &rows,
-    );
-}
-
 fn version_to_json(version: &docvault_types::Version) -> serde_json::Value {
     json!({
         "id": version.id,
         "document_id": version.document_id.as_str(),
         "number": version.number,
         "parent_version_id": version.parent_version_id,
-        "original_path": version.original_path,
-        "archive_path": version.archive_path,
+        "original_filename": version.original_filename,
+        "archive_reference": version.archive_reference,
         "backup_backend": version.backup_backend,
         "snapshot_id": version.snapshot_id,
         "author": version.author,
         "note": version.note,
         "created_at": version.created_at,
-    })
-}
-
-fn tracked_path_to_json(tracked_path: &docvault_types::TrackedPath) -> serde_json::Value {
-    json!({
-        "id": tracked_path.id,
-        "document_id": tracked_path.document_id.as_ref().map(|id| id.as_str()),
-        "path": tracked_path.path,
-        "stat_fingerprint": tracked_path.stat_fingerprint,
-        "content_fingerprint": tracked_path.content_fingerprint,
-        "last_scanned_at": tracked_path.last_scanned_at,
-        "last_deep_scanned_at": tracked_path.last_deep_scanned_at,
-        "created_at": tracked_path.created_at,
-    })
-}
-
-fn tracked_scan_to_json(scan: &docvault_types::TrackedScan) -> serde_json::Value {
-    json!({
-        "tracked_path": tracked_path_to_json(&scan.tracked_path),
-        "stat_fingerprint": scan.stat_fingerprint,
-        "content_fingerprint": scan.content_fingerprint,
-        "status": scan.status,
-        "changed": scan.changed,
-        "exists": scan.exists,
-        "deep": scan.deep,
-        "scanned_at": scan.scanned_at,
     })
 }
 
@@ -670,14 +435,12 @@ fn normalize_cell(value: &str) -> String {
 fn usage() -> &'static str {
     "Usage:
   docvault init
-  docvault commit <path> <name|name@id-prefix> [--author <name>] [--note <text>] [--new] [--track]
-  docvault commit <path> --name <name> [--author <name>] [--note <text>] [--new] [--track]
-  docvault commit <path> --id <id-prefix> [--author <name>] [--note <text>] [--track]
+  docvault commit <path> <name|name@id-prefix> [--author <name>] [--note <text>] [--new]
+  docvault commit <path> --name <name> [--author <name>] [--note <text>] [--new]
+  docvault commit <path> --id <id-prefix> [--author <name>] [--note <text>]
   docvault list [--format table|json]
   docvault versions <name|name@id-prefix|--id <id-prefix>> [--format table|json]
   docvault current <name|name@id-prefix|--id <id-prefix>> [--format table|json]
   docvault export <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] --output <path>
-  docvault checkout <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] [--output <path>]
-  docvault track <path> [name|name@id-prefix|--name <name>|--id <id-prefix>] [--commit] [--author <name>] [--note <text>] [--new] [--format table|json]
-  docvault scan [--deep] [--format table|json]"
+  docvault checkout <name|name@id-prefix|--id <id-prefix>> [version|--version <version>] [--output <path>]"
 }

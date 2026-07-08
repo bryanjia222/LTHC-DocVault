@@ -360,6 +360,8 @@ If not set, defaults are used from config.toml.
 - All original files are immutable after commit
 - Temporary files must be stored in staging directory
 - Restore operations must write to explicit output path
+- The DocVault database must not persist local filesystem paths; source paths are command inputs only
+- Persist `original_filename` rather than full source paths when a default export filename is needed
 
 ------
 

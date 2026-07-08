@@ -17,7 +17,6 @@ DocVault 是一个面向 Office / WPS 文档的本地优先版本化归档系统
 - 文档列表查看
 - 文档基础信息展示
 - UUID 文档定位与同名文档歧义处理
-- 本地文档路径追踪与指纹扫描
 
 ### 版本管理
 - 自动生成版本记录
@@ -79,6 +78,8 @@ docvault/
 - `local-copy`：可选后端。提交版本时复制原始 Office 文件，恢复时从版本副本复制到输出路径。适合开发、测试和排查问题。
 
 `local-copy` 不提供内容去重、快照仓库校验或 Restic 的压缩能力。`restic` 后端负责版本级快照和内容去重，但仍通过 storage 层暴露同一套 CLI/core 行为。
+
+DocVault 主数据库不保存本地文件路径。提交时传入的路径只用于读取当前文件内容；持久化元数据只保留文档 ID、显示名称、版本关系、归档引用和 `original_filename` 等跨设备仍然有意义的信息。
 
 ### 第三方运行时资产
 
@@ -201,12 +202,6 @@ docvault commit ./contract.docx --name contract --author "Bryan" --note "Updated
 
 `local-copy` 后端会复制原始文件。`restic` 后端会先解压 OOXML 文件结构，再备份解包后的目录。
 
-如果希望提交后立即开始追踪源文件路径，可加 `--track`：
-
-```bash
-docvault commit ./contract.docx --name contract --track
-```
-
 ------
 
 ### 文档定位
@@ -249,51 +244,6 @@ docvault current contract --format table
 5. 输出 Office 文件
 
 Checkout 额外会更新 `documents.current_version_id`。后续提交新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
-
-------
-
-### 文档追踪
-
-`track` 用于登记一个本地文件路径。只登记路径时，追踪项可以暂时不绑定文档：
-
-```bash
-docvault track ./report.docx
-```
-
-如果要在登记追踪路径时完成首次提交，使用 `--commit`。未指定名称时，CLI 会使用文件名 stem 作为文档名：
-
-```bash
-docvault track ./report.docx --commit --author "Bryan" --note "Initial tracked commit"
-docvault track ./report.docx --name report --commit
-```
-
-也可以把路径绑定到已有文档：
-
-```bash
-docvault track ./report.docx report@550e8400
-docvault track ./report.docx --id 550e8400
-```
-
-`scan` 会遍历所有追踪项，默认只读取文件元数据并计算 `stat_fingerprint`，不会读取完整文件内容：
-
-```bash
-docvault scan --format table
-docvault scan --format json
-```
-
-默认扫描适合频繁运行。它会检测路径是否存在，并用文件大小、修改时间等 stat 信息判断状态：
-
-- `unchanged`：stat fingerprint 与上次一致。
-- `maybe_changed`：stat fingerprint 与上次不同，文件可能变更，但内容尚未读取确认。
-- `missing`：追踪路径不存在。
-
-需要强确认时使用深度扫描：
-
-```bash
-docvault scan --deep --format table
-```
-
-`--deep` 会读取完整文件内容并计算 `content_fingerprint`。这适合归档前确认或排查状态，但不适合对大文件高频执行。发现 `maybe_changed` 或 `changed` 后自动提交新版本属于下一步工作流，不在本阶段自动执行。
 
 ------
 

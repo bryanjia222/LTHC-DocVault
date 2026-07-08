@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
-use docvault_types::{CommitMetadata, Document, DocumentId, TrackedPath, TrackedScan, Version};
+use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 
 #[derive(Debug)]
 pub enum CoreError {
@@ -30,12 +30,11 @@ impl From<StorageError> for CoreError {
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
-pub fn register_document(name: impl Into<String>, source_path: impl Into<String>) -> Document {
+pub fn register_document(name: impl Into<String>) -> Document {
     let name = name.into();
     Document {
         id: DocumentId::new(name.clone()),
         name,
-        source_path: source_path.into(),
         current_version_id: None,
         created_at: 0,
     }
@@ -100,26 +99,6 @@ impl DocVault {
     pub fn current_version(&self, document_ref: &DocumentRef) -> StorageResult<Option<Version>> {
         self.storage.current_version(document_ref)
     }
-
-    pub fn track_path(
-        &self,
-        path: impl AsRef<Path>,
-        document_ref: Option<&DocumentRef>,
-    ) -> StorageResult<TrackedPath> {
-        self.storage.track_path(path.as_ref(), document_ref)
-    }
-
-    pub fn track_document_path(
-        &self,
-        path: impl AsRef<Path>,
-        document_id: Option<&DocumentId>,
-    ) -> StorageResult<TrackedPath> {
-        self.storage.track_document_path(path.as_ref(), document_id)
-    }
-
-    pub fn scan_tracked_paths(&self, deep: bool) -> StorageResult<Vec<TrackedScan>> {
-        self.storage.scan_tracked_paths(deep)
-    }
 }
 
 #[cfg(test)]
@@ -128,11 +107,10 @@ mod tests {
 
     #[test]
     fn registers_document_with_domain_id() {
-        let document = register_document("report", "./report.docx");
+        let document = register_document("report");
 
         assert_eq!(document.id.as_str(), "report");
         assert_eq!(document.name, "report");
-        assert_eq!(document.source_path, "./report.docx");
     }
 
     #[test]
