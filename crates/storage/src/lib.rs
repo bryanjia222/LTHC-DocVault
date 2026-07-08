@@ -5,8 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use directories::ProjectDirs;
 use docvault_ooxml::OoxmlError;
-use docvault_types::{CommitMetadata, Document, DocumentId, Version};
+use docvault_types::{CommitMetadata, Document, DocumentId, VaultConfig, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use thiserror::Error;
@@ -23,6 +24,10 @@ pub enum StorageError {
     Database(#[from] DatabaseError),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("TOML decode error: {0}")]
+    TomlDecode(#[from] toml::de::Error),
+    #[error("TOML encode error: {0}")]
+    TomlEncode(#[from] toml::ser::Error),
     #[error("document not found: {0}")]
     DocumentNotFound(String),
     #[error("document id not found: {0}")]
@@ -130,15 +135,31 @@ impl VaultPaths {
     pub fn from_env() -> Self {
         let root_dir = env::var_os("DOCVAULT_ROOT_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(".docvault"));
+            .unwrap_or_else(default_root_dir);
+        let config_path = absolute_path(root_dir.join("config.toml"));
+        let config = read_config_file(&config_path).ok();
         let data_dir = env::var_os("DOCVAULT_DATA_DIR")
             .map(PathBuf::from)
+            .or_else(|| {
+                config
+                    .as_ref()
+                    .map(|config| PathBuf::from(&config.storage.data_dir))
+            })
             .unwrap_or_else(|| root_dir.join("data"));
         let db_path = env::var_os("DOCVAULT_DB_PATH")
             .map(PathBuf::from)
+            .or_else(|| {
+                config
+                    .as_ref()
+                    .map(|config| PathBuf::from(&config.database.path))
+            })
             .unwrap_or_else(|| root_dir.join("db.sqlite"));
+        let repo_dir = config
+            .as_ref()
+            .map(|config| PathBuf::from(&config.storage.repo_dir))
+            .unwrap_or_else(|| root_dir.join("repo"));
 
-        Self::new(root_dir, data_dir, db_path)
+        Self::new_with_repo(root_dir, data_dir, repo_dir, db_path)
     }
 
     pub fn new(
@@ -146,14 +167,26 @@ impl VaultPaths {
         data_dir: impl Into<PathBuf>,
         db_path: impl Into<PathBuf>,
     ) -> Self {
+        let root_dir = root_dir.into();
+        let repo_dir = root_dir.join("repo");
+        Self::new_with_repo(root_dir, data_dir, repo_dir, db_path)
+    }
+
+    pub fn new_with_repo(
+        root_dir: impl Into<PathBuf>,
+        data_dir: impl Into<PathBuf>,
+        repo_dir: impl Into<PathBuf>,
+        db_path: impl Into<PathBuf>,
+    ) -> Self {
         let root_dir = absolute_path(root_dir.into());
         let data_dir = absolute_path(data_dir.into());
+        let repo_dir = absolute_path(repo_dir.into());
         let db_path = absolute_path(db_path.into());
         Self {
             staging_dir: data_dir.join("staging"),
             versions_dir: data_dir.join("versions"),
             cache_dir: root_dir.join("cache"),
-            repo_dir: root_dir.join("repo"),
+            repo_dir,
             config_path: root_dir.join("config.toml"),
             root_dir,
             data_dir,
@@ -209,7 +242,7 @@ impl VaultStorage {
         }
 
         if !paths.config_path.exists() {
-            fs::write(&paths.config_path, default_config(&paths))?;
+            fs::write(&paths.config_path, default_config(&paths)?)?;
         }
 
         let settings = read_settings(&paths)?;
@@ -918,23 +951,24 @@ fn format_document_matches(matches: &[Document]) -> String {
 }
 
 fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings> {
-    let config = fs::read_to_string(&paths.config_path).unwrap_or_default();
+    let config = read_config(paths)?;
     let backend = env::var("DOCVAULT_BACKUP_BACKEND")
         .ok()
-        .or_else(|| config_value(&config, "backend"))
-        .unwrap_or_else(|| "restic".to_owned());
+        .unwrap_or_else(|| config.storage.backend.clone());
     let restic_path = env::var_os("DOCVAULT_RESTIC_PATH")
         .map(PathBuf::from)
         .or_else(|| {
-            config_value(&config, "restic_path")
+            config
+                .storage
+                .restic_path
+                .clone()
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
         })
         .unwrap_or_else(|| bundled_or_system_restic(paths));
     let restic_password = env::var("DOCVAULT_RESTIC_PASSWORD")
         .ok()
-        .or_else(|| config_value(&config, "restic_password"))
-        .unwrap_or_else(|| "docvault-local-development-password".to_owned());
+        .unwrap_or_else(|| config.storage.restic_password.clone());
 
     Ok(StorageSettings {
         backend: BackupBackend::parse(&backend)?,
@@ -943,15 +977,21 @@ fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings> {
     })
 }
 
-fn config_value(config: &str, key: &str) -> Option<String> {
-    config.lines().find_map(|line| {
-        let line = line.trim();
-        let (candidate, value) = line.split_once('=')?;
-        if candidate.trim() != key {
-            return None;
-        }
-        Some(value.trim().trim_matches('"').to_owned())
-    })
+fn read_config(paths: &VaultPaths) -> StorageResult<VaultConfig> {
+    if paths.config_path.exists() {
+        read_config_file(&paths.config_path)
+    } else {
+        Ok(VaultConfig::for_paths(
+            paths.data_dir.clone(),
+            paths.repo_dir.clone(),
+            paths.db_path.clone(),
+        ))
+    }
+}
+
+fn read_config_file(path: &Path) -> StorageResult<VaultConfig> {
+    let config = fs::read_to_string(path)?;
+    Ok(toml::from_str(&config)?)
 }
 
 fn bundled_or_system_restic(paths: &VaultPaths) -> PathBuf {
@@ -979,6 +1019,12 @@ fn absolute_path(path: PathBuf) -> PathBuf {
             .map(|current_dir| current_dir.join(&path))
             .unwrap_or(path)
     }
+}
+
+fn default_root_dir() -> PathBuf {
+    ProjectDirs::from("com", "LTHC", "DocVault")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(".docvault"))
 }
 
 fn target_triple() -> &'static str {
@@ -1032,13 +1078,12 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
     Err(ResticError::SnapshotMissing.into())
 }
 
-fn default_config(paths: &VaultPaths) -> String {
-    format!(
-        "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"\"\nrestic_password = \"docvault-local-development-password\"\n\n[database]\npath = \"{}\"\n\n[logging]\nlevel = \"info\"\n",
-        paths.data_dir.display(),
-        paths.repo_dir.display(),
-        paths.db_path.display()
-    )
+fn default_config(paths: &VaultPaths) -> StorageResult<String> {
+    Ok(toml::to_string_pretty(&VaultConfig::for_paths(
+        paths.data_dir.clone(),
+        paths.repo_dir.clone(),
+        paths.db_path.clone(),
+    ))?)
 }
 
 fn unix_timestamp() -> i64 {
@@ -1072,9 +1117,9 @@ mod tests {
             &paths.config_path,
             format!(
                 "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
-                paths.data_dir.display(),
-                paths.repo_dir.display(),
-                paths.db_path.display()
+                config_path(&paths.data_dir),
+                config_path(&paths.repo_dir),
+                config_path(&paths.db_path)
             ),
         )
         .unwrap();
@@ -1126,5 +1171,9 @@ mod tests {
 "#;
 
         assert_eq!(snapshot_id_from_backup_json(output).unwrap(), "abc123");
+    }
+
+    fn config_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
     }
 }

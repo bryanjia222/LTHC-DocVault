@@ -249,10 +249,12 @@ Checkout 额外会更新 `documents.current_version_id`。后续提交新版本�
 
 ## 配置说明（基础层）
 
-系统基础配置存储于本地配置文件：
+系统基础配置存储于本地配置文件。默认位置由系统配置目录决定，也可以用 `DOCVAULT_ROOT_DIR` 覆盖：
 
 ```text
-~/.docvault/config.toml
+Windows: %APPDATA%/DocVault/config.toml 或 %LOCALAPPDATA% 对应的应用配置目录
+macOS: ~/Library/Application Support/com.LTHC.DocVault/config.toml
+Linux: ~/.config/docvault/config.toml
 ```
 
 ### 示例配置
@@ -260,17 +262,15 @@ Checkout 额外会更新 `documents.current_version_id`。后续提交新版本�
 ```toml
 [storage]
 backend = "restic"
-data_dir = "~/.docvault/data"
-repo_dir = "~/.docvault/repo"
-restic_path = ""
+data_dir = "C:/Users/<user>/AppData/Roaming/DocVault/data"
+repo_dir = "C:/Users/<user>/AppData/Roaming/DocVault/repo"
 restic_password = "docvault-local-development-password"
 
 [database]
-path = "~/.docvault/db.sqlite"
+path = "C:/Users/<user>/AppData/Roaming/DocVault/db.sqlite"
 
 [logging]
 level = "info"
-file = "~/.docvault/logs/app.log"
 ```
 
 ------
