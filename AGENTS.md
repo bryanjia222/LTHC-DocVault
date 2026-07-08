@@ -70,7 +70,8 @@ Recommended:
 Document
 Version
 CommitJob
-RestoreJob
+ExportJob
+CheckoutJob
 ```
 
 Avoid vague technical names:
@@ -90,7 +91,7 @@ CommonHelper
 
 ```
 crates/
-  core/        → business logic (commit / restore / versioning)
+  core/        → business logic (commit / export / checkout / versioning)
   storage/     → SQLite + Restic integration
   ooxml/       → OOXML parsing + manifest generation
   jobs/        → async job system
@@ -328,7 +329,7 @@ storage.rs
 - Restic execution
 - filesystem helpers
 - backup workflow
-- restore workflow
+- export workflow
 ```
 
 Preferred:
@@ -353,12 +354,14 @@ Preferred:
 core/
   document/
     commit.rs
-    restore.rs
+    export.rs
+    checkout.rs
     version.rs
 
   jobs/
     commit_job.rs
-    restore_job.rs
+    export_job.rs
+    checkout_job.rs
 ```
 
 Avoid organizing only by technical categories:
@@ -446,7 +449,8 @@ cargo test
 Must cover:
 
 * Commit workflow
-* Restore workflow
+* Export workflow
+* Checkout workflow
 * SQLite persistence consistency
 * Restic snapshot creation (mock or test repository)
 
@@ -465,7 +469,8 @@ Verify:
 ```bash
 cargo run --bin docvault -- commit ./sample.docx --name sample
 cargo run --bin docvault -- list
-cargo run --bin docvault -- restore <id>
+cargo run --bin docvault -- export sample --version latest --output ./out
+cargo run --bin docvault -- checkout sample --version v1
 ```
 
 ---
@@ -527,7 +532,7 @@ Defaults are loaded from config.toml.
 
 * Original files are immutable after commit.
 * Temporary files must be stored in staging directory.
-* Restore operations must write to explicit output paths.
+* Export operations must write to explicit output paths.
 * Database must not persist local filesystem paths.
 * Persist original_filename instead of source paths.
 
@@ -647,6 +652,10 @@ Any change must preserve:
 
 * Deterministic behavior.
 * Data recoverability.
-* Compatibility with existing commits and versions.
+* A clear current schema and command model.
+
+DocVault is in early active development. Do not add compatibility shims, aliases, or migrations
+for obsolete experimental commands or schemas unless explicitly requested. Prefer updating docs
+and tests to the current model and recreating local test vaults after breaking schema changes.
 
 ---

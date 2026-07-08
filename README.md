@@ -192,7 +192,7 @@ docvault current report --format table
 ### 6. 导出版本
 
 ```bash
-docvault export report --version v2 --output ./restore/
+docvault export report --version v2 --output ./exports/
 ```
 
 `export` 只写出文件，不改变 DocVault 内部的当前版本指针。
@@ -201,7 +201,7 @@ docvault export report --version v2 --output ./restore/
 
 ```bash
 docvault checkout report --version v1
-docvault checkout report --version v1 --output ./restore/
+docvault checkout report --version v1 --output ./exports/
 ```
 
 `checkout` 会把指定版本设为文档的当前版本；带 `--output` 时会同时导出该版本。
@@ -216,7 +216,7 @@ docvault config show --format table
 
 ```bash
 docvault versions report@550e8400 --format table
-docvault export --id 550e8400 --version v2 --output ./restore/
+docvault export --id 550e8400 --version v2 --output ./exports/
 ```
 
 ------
@@ -287,10 +287,6 @@ docvault current contract --format table
 5. 输出 Office 文件
 
 Checkout 额外会更新 `documents.current_version_id`。后续提交新版本时，新版本的 `parent_version_id` 会指向 checkout 后的当前版本。
-
-`restore` 不再作为 CLI 命令使用。需要写出历史文件时使用 `export`；需要改变当前版本指针时使用 `checkout`。
-
-------
 
 ### OOXML Manifest
 

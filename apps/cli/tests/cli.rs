@@ -12,7 +12,7 @@ fn help_lists_core_commands() {
         .assert()
         .success()
         .stdout(contains("init"))
-        .stdout(contains("import"))
+        .stdout(contains("commit"))
         .stdout(contains("checkout"));
 }
 

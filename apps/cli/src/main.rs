@@ -20,7 +20,6 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Init,
-    Import(CommitArgs),
     Commit(CommitArgs),
     List(FormatArgs),
     Versions(DocumentFormatArgs),
@@ -134,7 +133,7 @@ fn init_tracing() {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Init => init_vault(),
-        Command::Import(args) | Command::Commit(args) => commit_document(args),
+        Command::Commit(args) => commit_document(args),
         Command::List(args) => list_documents(args.format),
         Command::Versions(args) => list_versions(args),
         Command::Current(args) => show_current(args),

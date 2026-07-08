@@ -32,10 +32,6 @@ impl VaultStorage {
             );
             ",
         )?;
-        let _ = self.connection.execute(
-            "ALTER TABLE versions ADD COLUMN manifest_json TEXT NOT NULL DEFAULT '{\"entries\":[]}'",
-            [],
-        );
         Ok(())
     }
 
