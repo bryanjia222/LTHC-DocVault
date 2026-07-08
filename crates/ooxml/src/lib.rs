@@ -160,7 +160,8 @@ mod tests {
 
     #[test]
     fn packs_and_unpacks_package_contents() {
-        let root = std::env::temp_dir().join(format!("docvault-ooxml-{}", std::process::id()));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
         let source = root.join("source");
         let unpacked = root.join("unpacked");
         let package = root.join("sample.docx");

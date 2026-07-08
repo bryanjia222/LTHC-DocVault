@@ -108,13 +108,10 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_documents() {
-        let root =
-            std::env::temp_dir().join(format!("docvault-core-reject-{}", std::process::id()));
-        let paths = docvault_storage::VaultPaths::new(
-            root.clone(),
-            root.join("data"),
-            root.join("db.sqlite"),
-        );
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let paths =
+            docvault_storage::VaultPaths::new(root, root.join("data"), root.join("db.sqlite"));
         std::fs::create_dir_all(&paths.root_dir).unwrap();
         std::fs::write(
             &paths.config_path,

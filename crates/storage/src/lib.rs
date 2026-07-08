@@ -315,20 +315,20 @@ pub(crate) fn format_document_matches(matches: &[Document]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::Path};
+    use std::{fs, path::Path};
 
     use docvault_types::CommitMetadata;
 
     use super::*;
 
-    fn unique_test_paths(name: &str) -> VaultPaths {
-        let root = env::temp_dir().join(format!("docvault-{name}-{}", unix_timestamp()));
-        VaultPaths::new(root.clone(), root.join("data"), root.join("db.sqlite"))
+    fn temp_paths(root: &Path) -> VaultPaths {
+        VaultPaths::new(root, root.join("data"), root.join("db.sqlite"))
     }
 
     #[test]
     fn commits_lists_and_restores_versions_with_local_copy() {
-        let paths = unique_test_paths("storage");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
         fs::create_dir_all(&paths.root_dir).unwrap();
         fs::write(
             &paths.config_path,

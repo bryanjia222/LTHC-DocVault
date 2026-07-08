@@ -10,3 +10,6 @@ docvault-storage = { path = "../storage" }
 docvault-types = { path = "../../shared/types" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
