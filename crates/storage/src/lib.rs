@@ -325,10 +325,7 @@ mod tests {
         VaultPaths::new(root, root.join("data"), root.join("db.sqlite"))
     }
 
-    #[test]
-    fn commits_lists_and_restores_versions_with_local_copy() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let paths = temp_paths(temp_dir.path());
+    fn write_local_copy_config(paths: &VaultPaths) {
         fs::create_dir_all(&paths.root_dir).unwrap();
         fs::write(
             &paths.config_path,
@@ -340,10 +337,32 @@ mod tests {
             ),
         )
         .unwrap();
-        let source_dir = paths.root_dir.join("sources");
+    }
+
+    fn write_source(root: &Path, name: &str, contents: &[u8]) -> PathBuf {
+        let source_dir = root.join("sources");
         fs::create_dir_all(&source_dir).unwrap();
-        let source = source_dir.join("report.docx");
-        fs::write(&source, b"version one").unwrap();
+        let source = source_dir.join(name);
+        fs::write(&source, contents).unwrap();
+        source
+    }
+
+    fn commit(
+        storage: &VaultStorage,
+        document_ref: DocumentRef,
+        source_path: &Path,
+    ) -> (Document, Version) {
+        storage
+            .add_document_version(document_ref, source_path, CommitMetadata::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn commits_lists_and_restores_versions_with_local_copy() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
 
         let storage = VaultStorage::init(paths.clone()).unwrap();
         let (_, version) = storage
@@ -379,6 +398,132 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read(restored).unwrap(), b"version one");
+    }
+
+    #[test]
+    fn duplicate_document_names_are_ambiguous_by_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+        storage.create_document("report", 1).unwrap();
+        storage.create_document("report", 2).unwrap();
+
+        let error = storage
+            .list_versions(&DocumentRef::Name("report".to_owned()))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StorageError::AmbiguousDocumentName { name, matches } if name == "report" && matches.len() == 2
+        ));
+    }
+
+    #[test]
+    fn id_prefix_and_name_at_id_prefix_resolve_duplicate_names() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths).unwrap();
+        let first = storage.create_document("report", 1).unwrap();
+        let second = storage.create_document("report", 2).unwrap();
+        commit(
+            &storage,
+            DocumentRef::IdPrefix(first.id.as_str()[..8].to_owned()),
+            &source,
+        );
+        commit(
+            &storage,
+            DocumentRef::NameAndIdPrefix {
+                name: "report".to_owned(),
+                id_prefix: second.id.as_str()[..8].to_owned(),
+            },
+            &source,
+        );
+
+        let first_versions = storage
+            .list_versions(&DocumentRef::IdPrefix(first.id.as_str()[..8].to_owned()))
+            .unwrap();
+        let second_versions = storage
+            .list_versions(&DocumentRef::NameAndIdPrefix {
+                name: "report".to_owned(),
+                id_prefix: second.id.as_str()[..8].to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(first_versions[0].document_id, first.id);
+        assert_eq!(second_versions[0].document_id, second.id);
+    }
+
+    #[test]
+    fn checkout_changes_current_pointer() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let first = write_source(&paths.root_dir, "report.docx", b"version one");
+        let second = write_source(&paths.root_dir, "report-2.docx", b"version two");
+        let storage = VaultStorage::init(paths).unwrap();
+        commit(&storage, DocumentRef::Name("report".to_owned()), &first);
+        commit(&storage, DocumentRef::Name("report".to_owned()), &second);
+
+        storage
+            .checkout_version(&DocumentRef::Name("report".to_owned()), "v1", None)
+            .unwrap();
+
+        let current = storage
+            .current_version(&DocumentRef::Name("report".to_owned()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.id, "v1");
+    }
+
+    #[test]
+    fn commit_after_checkout_uses_checked_out_version_as_parent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let first = write_source(&paths.root_dir, "report.docx", b"version one");
+        let second = write_source(&paths.root_dir, "report-2.docx", b"version two");
+        let third = write_source(&paths.root_dir, "report-3.docx", b"version three");
+        let storage = VaultStorage::init(paths).unwrap();
+        commit(&storage, DocumentRef::Name("report".to_owned()), &first);
+        commit(&storage, DocumentRef::Name("report".to_owned()), &second);
+        storage
+            .checkout_version(&DocumentRef::Name("report".to_owned()), "v1", None)
+            .unwrap();
+
+        let (_, version) = commit(&storage, DocumentRef::Name("report".to_owned()), &third);
+
+        assert_eq!(version.id, "v3");
+        assert_eq!(version.parent_version_id.as_deref(), Some("v1"));
+    }
+
+    #[test]
+    fn export_does_not_change_current_pointer() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let first = write_source(&paths.root_dir, "report.docx", b"version one");
+        let second = write_source(&paths.root_dir, "report-2.docx", b"version two");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+        commit(&storage, DocumentRef::Name("report".to_owned()), &first);
+        commit(&storage, DocumentRef::Name("report".to_owned()), &second);
+
+        let exported = storage
+            .export_version(
+                &DocumentRef::Name("report".to_owned()),
+                "v1",
+                &paths.root_dir.join("exports"),
+            )
+            .unwrap();
+
+        assert_eq!(fs::read(exported).unwrap(), b"version one");
+        let current = storage
+            .current_version(&DocumentRef::Name("report".to_owned()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.id, "v2");
     }
 
     fn config_path(path: &Path) -> String {

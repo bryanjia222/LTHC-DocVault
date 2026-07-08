@@ -141,6 +141,12 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::Path};
+
+    use docvault_types::CommitMetadata;
+
+    use crate::{BackupBackend, DocumentRef, VaultPaths};
+
     use super::*;
 
     #[test]
@@ -150,5 +156,165 @@ mod tests {
 "#;
 
         assert_eq!(snapshot_id_from_backup_json(output).unwrap(), "abc123");
+    }
+
+    #[test]
+    fn restic_backup_uses_expected_args_and_records_snapshot_id() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let (_, version) = storage
+            .add_document_version(
+                DocumentRef::Name("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+
+        assert_eq!(storage.backend(), BackupBackend::Restic);
+        assert_eq!(version.snapshot_id.as_deref(), Some("snap123"));
+        let log = fs::read_to_string(log_path).unwrap();
+        assert!(log.contains("-r"));
+        assert!(log.contains("backup"));
+        assert!(log.contains("--json"));
+        assert!(log.contains("--tag"));
+        assert!(log.contains("docvault:"));
+        assert!(log.contains("--host"));
+        assert!(log.contains("package"));
+    }
+
+    #[test]
+    fn restic_backup_failure_is_propagated() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::BackupFails);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let error = storage
+            .add_document_version(
+                DocumentRef::Name("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            StorageError::Restic(ResticError::Failed { command, stderr })
+                if command == "backup" && stderr.contains("mock backup failed")
+        ));
+    }
+
+    enum MockRestic {
+        Success,
+        BackupFails,
+    }
+
+    fn temp_paths(root: &Path) -> VaultPaths {
+        VaultPaths::new(root, root.join("data"), root.join("db.sqlite"))
+    }
+
+    fn write_restic_config(paths: &VaultPaths, restic_path: &Path) {
+        fs::create_dir_all(&paths.root_dir).unwrap();
+        fs::write(
+            &paths.config_path,
+            format!(
+                "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"{}\"\nrestic_password = \"test-password\"\n\n[database]\npath = \"{}\"\n",
+                config_path(&paths.data_dir),
+                config_path(&paths.repo_dir),
+                config_path(restic_path),
+                config_path(&paths.db_path)
+            ),
+        )
+        .unwrap();
+    }
+
+    fn write_ooxml_package(root: &Path, file_name: &str) -> std::path::PathBuf {
+        let source_dir = root.join("package-source");
+        fs::create_dir_all(source_dir.join("word")).unwrap();
+        fs::write(source_dir.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(source_dir.join("word").join("document.xml"), b"document").unwrap();
+        let package = root.join(file_name);
+        docvault_ooxml::pack_package(&source_dir, &package).unwrap();
+        package
+    }
+
+    fn write_mock_restic(root: &Path, log_path: &Path, behavior: MockRestic) -> std::path::PathBuf {
+        let script_path = root.join(mock_restic_name());
+        fs::write(&script_path, mock_restic_script(log_path, behavior)).unwrap();
+        make_executable(&script_path);
+        script_path
+    }
+
+    #[cfg(windows)]
+    fn mock_restic_name() -> &'static str {
+        "mock-restic.cmd"
+    }
+
+    #[cfg(not(windows))]
+    fn mock_restic_name() -> &'static str {
+        "mock-restic.sh"
+    }
+
+    #[cfg(windows)]
+    fn mock_restic_script(log_path: &Path, behavior: MockRestic) -> String {
+        let failure = match behavior {
+            MockRestic::Success => "",
+            MockRestic::BackupFails => {
+                "if \"%3\"==\"backup\" (\n  echo mock backup failed 1>&2\n  exit /b 9\n)\n"
+            }
+        };
+        format!(
+            "@echo off\n\
+             echo %*>>\"{}\"\n\
+             {}\n\
+             if \"%3\"==\"backup\" echo {{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}\n\
+             exit /b 0\n",
+            log_path.display(),
+            failure
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn mock_restic_script(log_path: &Path, behavior: MockRestic) -> String {
+        let failure = match behavior {
+            MockRestic::Success => "",
+            MockRestic::BackupFails => {
+                "if [ \"$3\" = \"backup\" ]; then echo mock backup failed >&2; exit 9; fi\n"
+            }
+        };
+        format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' \"$*\" >> '{}'\n\
+             {}\
+             if [ \"$3\" = \"backup\" ]; then printf '%s\\n' '{{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}'; fi\n\
+             exit 0\n",
+            log_path.display(),
+            failure
+        )
+    }
+
+    #[cfg(windows)]
+    fn make_executable(_path: &Path) {}
+
+    #[cfg(not(windows))]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    fn config_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
     }
 }

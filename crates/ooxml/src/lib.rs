@@ -150,6 +150,16 @@ fn safe_relative_path(entry_name: &str) -> OoxmlResult<PathBuf> {
 mod tests {
     use super::*;
 
+    fn write_zip_entry(path: &Path, entry_name: &str, contents: &[u8]) {
+        let file = File::create(path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        writer
+            .start_file(entry_name, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(contents).unwrap();
+        writer.finish().unwrap();
+    }
+
     #[test]
     fn detects_supported_office_documents() {
         assert!(is_supported_ooxml("report.docx"));
@@ -179,6 +189,82 @@ mod tests {
         assert_eq!(
             fs::read(unpacked.join("word").join("document.xml")).unwrap(),
             b"document"
+        );
+    }
+
+    #[test]
+    fn rejects_parent_directory_zip_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let package = temp_dir.path().join("evil.docx");
+        write_zip_entry(&package, "../evil.xml", b"evil");
+
+        let error = unpack_package(&package, temp_dir.path().join("unpacked")).unwrap_err();
+
+        assert!(matches!(error, OoxmlError::UnsafeEntry(entry) if entry == "../evil.xml"));
+        assert!(!temp_dir.path().join("evil.xml").exists());
+    }
+
+    #[test]
+    fn rejects_absolute_zip_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let package = temp_dir.path().join("absolute.docx");
+        write_zip_entry(&package, "/evil.xml", b"evil");
+
+        let error = unpack_package(&package, temp_dir.path().join("unpacked")).unwrap_err();
+
+        assert!(matches!(error, OoxmlError::UnsafeEntry(entry) if entry == "/evil.xml"));
+    }
+
+    #[test]
+    fn pack_unpack_preserves_nested_directory_structure() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        let unpacked = temp_dir.path().join("unpacked");
+        let package = temp_dir.path().join("nested.pptx");
+        fs::create_dir_all(source.join("ppt").join("slides").join("_rels")).unwrap();
+        fs::create_dir_all(source.join("docProps")).unwrap();
+        fs::write(source.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(
+            source.join("ppt").join("slides").join("slide1.xml"),
+            b"slide",
+        )
+        .unwrap();
+        fs::write(
+            source
+                .join("ppt")
+                .join("slides")
+                .join("_rels")
+                .join("slide1.xml.rels"),
+            b"rels",
+        )
+        .unwrap();
+        fs::write(source.join("docProps").join("core.xml"), b"core").unwrap();
+
+        pack_package(&source, &package).unwrap();
+        unpack_package(&package, &unpacked).unwrap();
+
+        assert_eq!(
+            fs::read(unpacked.join("[Content_Types].xml")).unwrap(),
+            b"types"
+        );
+        assert_eq!(
+            fs::read(unpacked.join("ppt").join("slides").join("slide1.xml")).unwrap(),
+            b"slide"
+        );
+        assert_eq!(
+            fs::read(
+                unpacked
+                    .join("ppt")
+                    .join("slides")
+                    .join("_rels")
+                    .join("slide1.xml.rels")
+            )
+            .unwrap(),
+            b"rels"
+        );
+        assert_eq!(
+            fs::read(unpacked.join("docProps").join("core.xml")).unwrap(),
+            b"core"
         );
     }
 }

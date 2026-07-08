@@ -95,3 +95,131 @@ fn default_root_dir() -> PathBuf {
         .map(|dirs| dirs.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from(".docvault"))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
+
+    use crate::{BackupBackend, config::read_settings};
+
+    use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn docvault_root_dir_overrides_default_root() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        set_env("DOCVAULT_ROOT_DIR", temp_dir.path());
+        remove_env("DOCVAULT_DATA_DIR");
+        remove_env("DOCVAULT_DB_PATH");
+
+        let paths = VaultPaths::from_env();
+
+        assert_eq!(paths.root_dir, absolute(temp_dir.path()));
+        assert_eq!(paths.data_dir, absolute(temp_dir.path().join("data")));
+        assert_eq!(paths.db_path, absolute(temp_dir.path().join("db.sqlite")));
+        remove_docvault_env();
+    }
+
+    #[test]
+    fn config_file_paths_are_used_by_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("vault");
+        let data_dir = temp_dir.path().join("configured-data");
+        let repo_dir = temp_dir.path().join("configured-repo");
+        let db_path = temp_dir.path().join("configured-db.sqlite");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            format!(
+                "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
+                config_path(&data_dir),
+                config_path(&repo_dir),
+                config_path(&db_path)
+            ),
+        )
+        .unwrap();
+        set_env("DOCVAULT_ROOT_DIR", &root);
+        remove_env("DOCVAULT_DATA_DIR");
+        remove_env("DOCVAULT_DB_PATH");
+
+        let paths = VaultPaths::from_env();
+
+        assert_eq!(paths.data_dir, absolute(data_dir));
+        assert_eq!(paths.repo_dir, absolute(repo_dir));
+        assert_eq!(paths.db_path, absolute(db_path));
+        remove_docvault_env();
+    }
+
+    #[test]
+    fn env_overrides_config_backend_and_restic_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("vault");
+        let config_restic = temp_dir.path().join("config-restic");
+        let env_restic = temp_dir.path().join("env-restic");
+        let paths = VaultPaths::new_with_repo(
+            &root,
+            temp_dir.path().join("data"),
+            temp_dir.path().join("repo"),
+            temp_dir.path().join("db.sqlite"),
+        );
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &paths.config_path,
+            format!(
+                "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"{}\"\nrestic_password = \"from-config\"\n\n[database]\npath = \"{}\"\n",
+                config_path(&paths.data_dir),
+                config_path(&paths.repo_dir),
+                config_path(&config_restic),
+                config_path(&paths.db_path)
+            ),
+        )
+        .unwrap();
+        set_env("DOCVAULT_BACKUP_BACKEND", "local-copy");
+        set_env("DOCVAULT_RESTIC_PATH", &env_restic);
+        set_env("DOCVAULT_RESTIC_PASSWORD", "from-env");
+
+        let settings = read_settings(&paths).unwrap();
+
+        assert_eq!(settings.backend, BackupBackend::LocalCopy);
+        assert_eq!(settings.restic_path, env_restic);
+        assert_eq!(settings.restic_password, "from-env");
+        remove_docvault_env();
+    }
+
+    fn set_env(key: &str, value: impl AsRef<Path>) {
+        unsafe {
+            env::set_var(key, value.as_ref());
+        }
+    }
+
+    fn remove_env(key: &str) {
+        unsafe {
+            env::remove_var(key);
+        }
+    }
+
+    fn remove_docvault_env() {
+        remove_env("DOCVAULT_ROOT_DIR");
+        remove_env("DOCVAULT_DATA_DIR");
+        remove_env("DOCVAULT_DB_PATH");
+        remove_env("DOCVAULT_BACKUP_BACKEND");
+        remove_env("DOCVAULT_RESTIC_PATH");
+        remove_env("DOCVAULT_RESTIC_PASSWORD");
+    }
+
+    fn absolute(path: impl Into<PathBuf>) -> PathBuf {
+        absolute_path(path.into())
+    }
+
+    fn config_path(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+}
