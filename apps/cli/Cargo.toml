@@ -14,3 +14,5 @@ docvault-core = { path = "../../crates/core" }
 docvault-storage = { path = "../../crates/storage" }
 docvault-types = { path = "../../shared/types" }
 serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -10,6 +10,7 @@ use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use thiserror::Error;
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -196,6 +197,7 @@ struct StorageSettings {
 
 impl VaultStorage {
     pub fn init(paths: VaultPaths) -> StorageResult<Self> {
+        info!(root_dir = %paths.root_dir.display(), "initializing vault storage");
         fs::create_dir_all(&paths.root_dir)?;
         fs::create_dir_all(&paths.data_dir)?;
         fs::create_dir_all(&paths.staging_dir)?;
@@ -221,10 +223,12 @@ impl VaultStorage {
         if storage.settings.backend == BackupBackend::Restic {
             storage.ensure_restic_repo()?;
         }
+        info!(root_dir = %storage.paths.root_dir.display(), "vault storage initialized");
         Ok(storage)
     }
 
     pub fn open(paths: VaultPaths) -> StorageResult<Self> {
+        debug!(root_dir = %paths.root_dir.display(), "opening vault storage");
         let settings = read_settings(&paths)?;
         let connection = Connection::open(&paths.db_path)?;
         let storage = Self {
@@ -251,6 +255,7 @@ impl VaultStorage {
         metadata: CommitMetadata,
     ) -> StorageResult<(Document, Version)> {
         let now = unix_timestamp();
+        info!(source = %source_path.display(), "adding document version");
         let document = match document_ref {
             DocumentRef::NewName(name) => {
                 let document = Document {
@@ -312,6 +317,12 @@ impl VaultStorage {
                 document_name: document.name.clone(),
                 version: requested_version.to_owned(),
             })?;
+        info!(
+            document_id = document.id.as_str(),
+            version_id = version.id.as_str(),
+            output = %output_path.display(),
+            "exporting document version"
+        );
         self.export_resolved_version(&document, &version, output_path)
     }
 
@@ -328,6 +339,11 @@ impl VaultStorage {
                 document_name: document.name.clone(),
                 version: requested_version.to_owned(),
             })?;
+        info!(
+            document_id = document.id.as_str(),
+            version_id = version.id.as_str(),
+            "checking out document version"
+        );
         self.set_current_version(document.id.as_str(), &version.id)?;
         output_path
             .map(|output_path| self.export_resolved_version(&document, &version, output_path))
@@ -351,6 +367,11 @@ impl VaultStorage {
     ) -> StorageResult<(Document, Version)> {
         let number = self.next_version_number(document.id.as_str())?;
         let version_id = format!("v{number}");
+        debug!(
+            document_id = document.id.as_str(),
+            version_id = version_id.as_str(),
+            "archiving source for document version"
+        );
         let archive = self.archive_source(&document, &version_id, source_path)?;
         let original_filename = source_path
             .file_name()
@@ -374,6 +395,12 @@ impl VaultStorage {
         self.set_current_version(document.id.as_str(), &version.id)?;
         let mut updated_document = document;
         updated_document.current_version_id = Some(version.id.clone());
+        info!(
+            document_id = updated_document.id.as_str(),
+            version_id = version.id.as_str(),
+            backend = version.backup_backend.as_str(),
+            "document version added"
+        );
         Ok((updated_document, version))
     }
 
@@ -611,6 +638,12 @@ impl VaultStorage {
         version_id: &str,
         source_path: &Path,
     ) -> StorageResult<ArchiveReference> {
+        debug!(
+            document_id = document.id.as_str(),
+            version_id,
+            source = %source_path.display(),
+            "archiving source with local copy backend"
+        );
         let source_name = source_path
             .file_name()
             .ok_or_else(|| StorageError::InvalidFileName(source_path.to_path_buf()))?;
@@ -640,6 +673,12 @@ impl VaultStorage {
         version_id: &str,
         source_path: &Path,
     ) -> StorageResult<ArchiveReference> {
+        debug!(
+            document_id = document.id.as_str(),
+            version_id,
+            source = %source_path.display(),
+            "archiving source with restic backend"
+        );
         self.ensure_restic_repo()?;
         let package_dir = self.restic_package_dir(document, version_id);
         reset_dir(&package_dir)?;
@@ -672,6 +711,13 @@ impl VaultStorage {
         output_path: &Path,
     ) -> StorageResult<PathBuf> {
         let destination = self.restore_destination(version, output_path)?;
+        info!(
+            document_id = document.id.as_str(),
+            version_id = version.id.as_str(),
+            backend = version.backup_backend.as_str(),
+            destination = %destination.display(),
+            "restoring archived version"
+        );
         match BackupBackend::parse(&version.backup_backend)? {
             BackupBackend::LocalCopy => {
                 fs::copy(
@@ -720,16 +766,20 @@ impl VaultStorage {
     }
 
     fn ensure_restic_repo(&self) -> StorageResult<()> {
+        debug!(repo = %self.paths.repo_dir.display(), "checking restic repository");
         let config = self.run_restic(["cat", "config"])?;
         if config.status.success() {
             return Ok(());
         }
 
+        info!(repo = %self.paths.repo_dir.display(), "initializing restic repository");
         let init = self.run_restic(["init"])?;
         if init.status.success() {
             Ok(())
         } else {
-            Err(restic_failed("init", init.stderr))
+            let error = restic_failed("init", init.stderr);
+            error!(repo = %self.paths.repo_dir.display(), %error, "failed to initialize restic repository");
+            Err(error)
         }
     }
 
@@ -756,9 +806,23 @@ impl VaultStorage {
             parent,
         )?;
         if !output.status.success() {
-            return Err(restic_failed("backup", output.stderr));
+            let error = restic_failed("backup", output.stderr);
+            error!(
+                document_id = document.id.as_str(),
+                version_id,
+                %error,
+                "restic backup failed"
+            );
+            return Err(error);
         }
-        snapshot_id_from_backup_json(&output.stdout)
+        let snapshot_id = snapshot_id_from_backup_json(&output.stdout)?;
+        info!(
+            document_id = document.id.as_str(),
+            version_id,
+            snapshot_id = snapshot_id.as_str(),
+            "restic backup completed"
+        );
+        Ok(snapshot_id)
     }
 
     fn restic_restore(&self, snapshot_id: &str, target: &Path) -> StorageResult<()> {
@@ -766,9 +830,12 @@ impl VaultStorage {
         let target = target.display().to_string();
         let output = self.run_restic(["restore", snapshot_id, "--target", target.as_str()])?;
         if output.status.success() {
+            info!(snapshot_id, target, "restic restore completed");
             Ok(())
         } else {
-            Err(restic_failed("restore", output.stderr))
+            let error = restic_failed("restore", output.stderr);
+            error!(snapshot_id, target, %error, "restic restore failed");
+            Err(error)
         }
     }
 
@@ -789,6 +856,13 @@ impl VaultStorage {
         args: [&str; N],
         current_dir: Option<&Path>,
     ) -> StorageResult<std::process::Output> {
+        debug!(
+            restic = %self.settings.restic_path.display(),
+            repo = %self.paths.repo_dir.display(),
+            args = ?args,
+            current_dir = ?current_dir,
+            "running restic command"
+        );
         let mut command = Command::new(&self.settings.restic_path);
         command
             .args(["-r", self.paths.repo_dir.to_string_lossy().as_ref()])

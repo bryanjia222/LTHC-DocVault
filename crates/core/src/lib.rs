@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use thiserror::Error;
+use tracing::{error, info};
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -40,13 +41,21 @@ impl DocVault {
         metadata: CommitMetadata,
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
+        info!(path = %source_path.display(), "starting document commit");
         if !docvault_ooxml::is_supported_ooxml(source_path) {
+            error!(path = %source_path.display(), "unsupported Office document");
             return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
         }
 
-        Ok(self
+        let result = self
             .storage
-            .add_document_version(document_ref, source_path, metadata)?)
+            .add_document_version(document_ref, source_path, metadata)?;
+        info!(
+            document_id = result.0.id.as_str(),
+            version_id = result.1.id.as_str(),
+            "completed document commit"
+        );
+        Ok(result)
     }
 
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {

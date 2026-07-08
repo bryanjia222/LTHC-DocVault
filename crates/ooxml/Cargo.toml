@@ -6,4 +6,5 @@ version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+tracing = { workspace = true }
 zip = { workspace = true }

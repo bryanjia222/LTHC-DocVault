@@ -5,6 +5,7 @@ use std::{
 };
 
 use thiserror::Error;
+use tracing::{debug, info};
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["docx", "xlsx", "pptx"];
@@ -39,11 +40,17 @@ pub fn unpack_package(
 ) -> OoxmlResult<()> {
     let source_path = source_path.as_ref();
     let destination_dir = destination_dir.as_ref();
+    info!(
+        source = %source_path.display(),
+        destination = %destination_dir.display(),
+        "unpacking OOXML package"
+    );
     fs::create_dir_all(destination_dir)?;
 
     let file = File::open(source_path)?;
     let mut archive = ZipArchive::new(file)?;
-    for index in 0..archive.len() {
+    let entry_count = archive.len();
+    for index in 0..entry_count {
         let mut entry = archive.by_index(index)?;
         let entry_name = entry.name().to_owned();
         let relative_path = safe_relative_path(&entry_name)?;
@@ -60,6 +67,7 @@ pub fn unpack_package(
         }
     }
 
+    debug!(entries = entry_count, "OOXML package unpacked");
     Ok(())
 }
 
@@ -69,6 +77,11 @@ pub fn pack_package(
 ) -> OoxmlResult<()> {
     let source_dir = source_dir.as_ref();
     let destination_path = destination_path.as_ref();
+    info!(
+        source = %source_dir.display(),
+        destination = %destination_path.display(),
+        "packing OOXML package"
+    );
     if let Some(parent) = destination_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -78,6 +91,7 @@ pub fn pack_package(
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     add_directory_to_zip(source_dir, source_dir, &mut writer, options)?;
     writer.finish()?;
+    debug!("OOXML package packed");
     Ok(())
 }
 

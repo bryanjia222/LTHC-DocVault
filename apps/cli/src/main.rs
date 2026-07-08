@@ -5,6 +5,8 @@ use docvault_core::DocVault;
 use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
 use docvault_types::CommitMetadata;
 use serde_json::json;
+use tracing::error;
+use tracing_subscriber::filter::LevelFilter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -23,13 +25,27 @@ impl OutputFormat {
 }
 
 fn main() -> ExitCode {
+    init_tracing();
     match run(env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            error!(%error, "docvault command failed");
             eprintln!("{error}");
             ExitCode::from(2)
         }
     }
+}
+
+fn init_tracing() {
+    let level = env::var("DOCVAULT_LOG_LEVEL")
+        .ok()
+        .and_then(|value| value.parse::<LevelFilter>().ok())
+        .unwrap_or(LevelFilter::WARN);
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .init();
 }
 
 fn run(args: Vec<String>) -> Result<()> {

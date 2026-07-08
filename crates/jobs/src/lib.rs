@@ -1,3 +1,5 @@
+use tracing::info;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
     Pending,
@@ -14,8 +16,13 @@ pub struct CommitJob {
 
 impl CommitJob {
     pub fn pending(document_name: impl Into<String>) -> Self {
+        let document_name = document_name.into();
+        info!(
+            document_name = document_name.as_str(),
+            "creating pending commit job"
+        );
         Self {
-            document_name: document_name.into(),
+            document_name,
             status: JobStatus::Pending,
         }
     }
