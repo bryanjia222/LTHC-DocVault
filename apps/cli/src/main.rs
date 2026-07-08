@@ -1,5 +1,6 @@
 use std::{env, path::PathBuf, process::ExitCode};
 
+use anyhow::{Result, anyhow, bail};
 use docvault_core::DocVault;
 use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
 use docvault_types::CommitMetadata;
@@ -12,11 +13,11 @@ enum OutputFormat {
 }
 
 impl OutputFormat {
-    fn parse(args: &[String]) -> Result<Self, String> {
+    fn parse(args: &[String]) -> Result<Self> {
         match parse_option_value(args, "--format").as_deref() {
             Some("table") | None => Ok(Self::Table),
             Some("json") => Ok(Self::Json),
-            Some(other) => Err(format!("Unsupported format: {other}. Use table or json.")),
+            Some(other) => bail!("Unsupported format: {other}. Use table or json."),
         }
     }
 }
@@ -31,11 +32,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<String>) -> Result<(), String> {
+fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("init") => {
-            let storage =
-                VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::init(VaultPaths::from_env())?;
             println!(
                 "DocVault initialized at {}",
                 storage.paths().root_dir.display()
@@ -44,20 +44,18 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("commit") => {
             if has_flag(&args, "--track") {
-                return Err("--track was removed from commit".to_owned());
+                bail!("--track was removed from commit");
             }
-            let source_path = args.get(1).ok_or_else(|| usage().to_owned())?;
+            let source_path = args.get(1).ok_or_else(|| anyhow!(usage()))?;
             let document_ref = parse_commit_ref(&args)?;
             let metadata = CommitMetadata {
                 author: parse_option_value(&args, "--author"),
                 note: parse_option_value(&args, "--note"),
             };
-            let storage =
-                VaultStorage::init(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::init(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let (_, version) = vault
-                .commit_document(source_path, document_ref.clone(), metadata)
-                .map_err(|error| error.to_string())?;
+            let (_, version) =
+                vault.commit_document(source_path, document_ref.clone(), metadata)?;
             println!(
                 "Committed {} as {}",
                 document_ref.display_name(),
@@ -67,10 +65,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         Some("list") => {
             let format = OutputFormat::parse(&args)?;
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::open(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let documents = vault.list_documents().map_err(|error| error.to_string())?;
+            let documents = vault.list_documents()?;
             match format {
                 OutputFormat::Table => {
                     if documents.is_empty() {
@@ -102,10 +99,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                             })
                         })
                         .collect::<Vec<_>>();
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&rows).map_err(|error| error.to_string())?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&rows)?);
                 }
             }
             Ok(())
@@ -113,12 +107,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("versions") => {
             let format = OutputFormat::parse(&args)?;
             let document_ref = parse_document_ref_arg(&args, 1)?;
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::open(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let versions = vault
-                .list_versions(&document_ref)
-                .map_err(|error| error.to_string())?;
+            let versions = vault.list_versions(&document_ref)?;
             match format {
                 OutputFormat::Table => {
                     if versions.is_empty() {
@@ -177,10 +168,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                             })
                         })
                         .collect::<Vec<_>>();
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&rows).map_err(|error| error.to_string())?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&rows)?);
                 }
             }
             Ok(())
@@ -196,13 +184,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .unwrap_or_else(|| "latest".to_owned());
             let output_path = parse_option_value(&args, "--output")
                 .map(PathBuf::from)
-                .ok_or_else(|| usage().to_owned())?;
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+                .ok_or_else(|| anyhow!(usage()))?;
+            let storage = VaultStorage::open(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let exported = vault
-                .export_version(&document_ref, &requested_version, output_path)
-                .map_err(|error| error.to_string())?;
+            let exported = vault.export_version(&document_ref, &requested_version, output_path)?;
             println!("Exported to {}", exported.display());
             Ok(())
         }
@@ -216,12 +201,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 })
                 .unwrap_or_else(|| "latest".to_owned());
             let output_path = parse_option_value(&args, "--output").map(PathBuf::from);
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::open(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let exported = vault
-                .checkout_version(&document_ref, &requested_version, output_path.as_ref())
-                .map_err(|error| error.to_string())?;
+            let exported =
+                vault.checkout_version(&document_ref, &requested_version, output_path.as_ref())?;
             match exported {
                 Some(path) => println!(
                     "Checked out {requested_version} and exported to {}",
@@ -234,25 +217,21 @@ fn run(args: Vec<String>) -> Result<(), String> {
         Some("current") => {
             let format = OutputFormat::parse(&args)?;
             let document_ref = parse_document_ref_arg(&args, 1)?;
-            let storage =
-                VaultStorage::open(VaultPaths::from_env()).map_err(|error| error.to_string())?;
+            let storage = VaultStorage::open(VaultPaths::from_env())?;
             let vault = DocVault::new(storage);
-            let current = vault
-                .current_version(&document_ref)
-                .map_err(|error| error.to_string())?;
+            let current = vault.current_version(&document_ref)?;
             match (format, current) {
                 (OutputFormat::Table, Some(version)) => print_versions_table(&[version]),
                 (OutputFormat::Table, None) => println!("No current version"),
                 (OutputFormat::Json, Some(version)) => println!(
                     "{}",
-                    serde_json::to_string_pretty(&version_to_json(&version))
-                        .map_err(|error| error.to_string())?
+                    serde_json::to_string_pretty(&version_to_json(&version))?
                 ),
                 (OutputFormat::Json, None) => println!("null"),
             }
             Ok(())
         }
-        _ => Err(usage().to_owned()),
+        _ => bail!("{}", usage()),
     }
 }
 
@@ -271,39 +250,39 @@ impl DocumentRefDisplay for DocumentRef {
     }
 }
 
-fn parse_commit_ref(args: &[String]) -> Result<DocumentRef, String> {
+fn parse_commit_ref(args: &[String]) -> Result<DocumentRef> {
     if let Some(id_prefix) = parse_option_value(args, "--id") {
         return Ok(DocumentRef::IdPrefix(id_prefix));
     }
 
     let value = parse_option_value(args, "--name")
         .or_else(|| args.get(2).cloned())
-        .ok_or_else(|| usage().to_owned())?;
+        .ok_or_else(|| anyhow!(usage()))?;
     if has_flag(args, "--new") {
         if value.contains('@') {
-            return Err("--new requires a plain document name".to_owned());
+            bail!("--new requires a plain document name");
         }
         return Ok(DocumentRef::NewName(value));
     }
     parse_document_ref_value(&value)
 }
 
-fn parse_document_ref_arg(args: &[String], position: usize) -> Result<DocumentRef, String> {
+fn parse_document_ref_arg(args: &[String], position: usize) -> Result<DocumentRef> {
     if let Some(id_prefix) = parse_option_value(args, "--id") {
         return Ok(DocumentRef::IdPrefix(id_prefix));
     }
 
-    let value = args.get(position).ok_or_else(|| usage().to_owned())?;
+    let value = args.get(position).ok_or_else(|| anyhow!(usage()))?;
     if value.starts_with("--") {
-        return Err(usage().to_owned());
+        bail!("{}", usage());
     }
     parse_document_ref_value(value)
 }
 
-fn parse_document_ref_value(value: &str) -> Result<DocumentRef, String> {
+fn parse_document_ref_value(value: &str) -> Result<DocumentRef> {
     if let Some((name, id_prefix)) = value.rsplit_once('@') {
         if name.is_empty() || id_prefix.is_empty() {
-            return Err(format!("Invalid document reference: {value}"));
+            bail!("Invalid document reference: {value}");
         }
         Ok(DocumentRef::NameAndIdPrefix {
             name: name.to_owned(),

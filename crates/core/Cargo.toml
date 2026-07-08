@@ -8,3 +8,4 @@ version.workspace = true
 docvault-ooxml = { path = "../ooxml" }
 docvault-storage = { path = "../storage" }
 docvault-types = { path = "../../shared/types" }
+thiserror = { workspace = true }

@@ -9,6 +9,7 @@ name = "docvault"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = { workspace = true }
 docvault-core = { path = "../../crates/core" }
 docvault-storage = { path = "../../crates/storage" }
 docvault-types = { path = "../../shared/types" }

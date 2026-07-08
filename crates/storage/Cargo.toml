@@ -9,4 +9,5 @@ docvault-ooxml = { path = "../ooxml" }
 docvault-types = { path = "../../shared/types" }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 uuid = { workspace = true }

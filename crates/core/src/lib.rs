@@ -2,30 +2,14 @@ use std::path::{Path, PathBuf};
 
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum CoreError {
+    #[error("unsupported Office document: {}", .0.display())]
     UnsupportedDocument(PathBuf),
-    Storage(StorageError),
-}
-
-impl std::fmt::Display for CoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnsupportedDocument(path) => {
-                write!(f, "unsupported Office document: {}", path.display())
-            }
-            Self::Storage(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for CoreError {}
-
-impl From<StorageError> for CoreError {
-    fn from(value: StorageError) -> Self {
-        Self::Storage(value)
-    }
+    #[error(transparent)]
+    Storage(#[from] StorageError),
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;

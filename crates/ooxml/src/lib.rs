@@ -4,39 +4,19 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use thiserror::Error;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["docx", "xlsx", "pptx"];
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum OoxmlError {
-    Io(io::Error),
-    Zip(zip::result::ZipError),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("ZIP error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("unsafe OOXML package entry: {0}")]
     UnsafeEntry(String),
-}
-
-impl std::fmt::Display for OoxmlError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(error) => write!(f, "I/O error: {error}"),
-            Self::Zip(error) => write!(f, "ZIP error: {error}"),
-            Self::UnsafeEntry(entry) => write!(f, "unsafe OOXML package entry: {entry}"),
-        }
-    }
-}
-
-impl std::error::Error for OoxmlError {}
-
-impl From<io::Error> for OoxmlError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<zip::result::ZipError> for OoxmlError {
-    fn from(value: zip::result::ZipError) -> Self {
-        Self::Zip(value)
-    }
 }
 
 pub type OoxmlResult<T> = Result<T, OoxmlError>;

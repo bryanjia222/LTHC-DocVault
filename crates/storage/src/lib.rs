@@ -9,115 +9,78 @@ use docvault_ooxml::OoxmlError;
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
+use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum StorageError {
-    Io(io::Error),
-    Ooxml(OoxmlError),
-    Sqlite(rusqlite::Error),
-    Json(serde_json::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("OOXML error: {0}")]
+    Ooxml(#[from] OoxmlError),
+    #[error(transparent)]
+    Database(#[from] DatabaseError),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("document not found: {0}")]
     DocumentNotFound(String),
+    #[error("document id not found: {0}")]
     DocumentIdNotFound(String),
+    #[error(
+        "document name is ambiguous: {name}\n{}",
+        format_document_matches(matches)
+    )]
     AmbiguousDocumentName {
         name: String,
         matches: Vec<Document>,
     },
+    #[error(
+        "document id prefix is ambiguous: {prefix}\n{}",
+        format_document_matches(matches)
+    )]
     AmbiguousDocumentIdPrefix {
         prefix: String,
         matches: Vec<Document>,
     },
+    #[error("document reference mismatch: requested name {requested_name}, matched {} ({})", matched.name, matched.id.as_str())]
     DocumentReferenceMismatch {
         requested_name: String,
         matched: Box<Document>,
     },
+    #[error("version {version} not found for document {document_name}")]
     VersionNotFound {
         document_name: String,
         version: String,
     },
+    #[error("invalid file name: {}", .0.display())]
     InvalidFileName(PathBuf),
+    #[error("invalid backup backend: {0}")]
     InvalidBackend(String),
-    ResticFailed {
-        command: String,
-        stderr: String,
-    },
-    ResticSnapshotMissing,
-}
-
-impl std::fmt::Display for StorageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(error) => write!(f, "I/O error: {error}"),
-            Self::Ooxml(error) => write!(f, "OOXML error: {error}"),
-            Self::Sqlite(error) => write!(f, "SQLite error: {error}"),
-            Self::Json(error) => write!(f, "JSON error: {error}"),
-            Self::DocumentNotFound(name) => write!(f, "document not found: {name}"),
-            Self::DocumentIdNotFound(id) => write!(f, "document id not found: {id}"),
-            Self::AmbiguousDocumentName { name, matches } => {
-                writeln!(f, "document name is ambiguous: {name}")?;
-                write_document_matches(f, matches)
-            }
-            Self::AmbiguousDocumentIdPrefix { prefix, matches } => {
-                writeln!(f, "document id prefix is ambiguous: {prefix}")?;
-                write_document_matches(f, matches)
-            }
-            Self::DocumentReferenceMismatch {
-                requested_name,
-                matched,
-            } => {
-                write!(
-                    f,
-                    "document reference mismatch: requested name {requested_name}, matched {} ({})",
-                    matched.name,
-                    matched.id.as_str()
-                )
-            }
-            Self::VersionNotFound {
-                document_name,
-                version,
-            } => {
-                write!(
-                    f,
-                    "version {version} not found for document {document_name}"
-                )
-            }
-            Self::InvalidFileName(path) => write!(f, "invalid file name: {}", path.display()),
-            Self::InvalidBackend(backend) => write!(f, "invalid backup backend: {backend}"),
-            Self::ResticFailed { command, stderr } => {
-                write!(f, "restic command failed ({command}): {stderr}")
-            }
-            Self::ResticSnapshotMissing => write!(f, "restic backup did not return a snapshot id"),
-        }
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-impl From<io::Error> for StorageError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<OoxmlError> for StorageError {
-    fn from(value: OoxmlError) -> Self {
-        Self::Ooxml(value)
-    }
+    #[error(transparent)]
+    Restic(#[from] ResticError),
 }
 
 impl From<rusqlite::Error> for StorageError {
     fn from(value: rusqlite::Error) -> Self {
-        Self::Sqlite(value)
-    }
-}
-
-impl From<serde_json::Error> for StorageError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Json(value)
+        DatabaseError::from(value).into()
     }
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
+
+#[derive(Debug, Error)]
+pub enum DatabaseError {
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum ResticError {
+    #[error("restic command failed ({command}): {stderr}")]
+    Failed { command: String, stderr: String },
+    #[error("restic backup did not return a snapshot id")]
+    SnapshotMissing,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentRef {
@@ -732,7 +695,7 @@ impl VaultStorage {
         let snapshot_id = version
             .snapshot_id
             .as_deref()
-            .ok_or(StorageError::ResticSnapshotMissing)?;
+            .ok_or(ResticError::SnapshotMissing)?;
         let restore_root = self
             .paths
             .staging_dir
@@ -871,15 +834,13 @@ fn document_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     })
 }
 
-fn write_document_matches(
-    f: &mut std::fmt::Formatter<'_>,
-    matches: &[Document],
-) -> std::fmt::Result {
-    writeln!(f, "matches:")?;
+fn format_document_matches(matches: &[Document]) -> String {
+    let mut output = String::from("matches:\n");
     for document in matches {
-        writeln!(f, "  {}  {}", document.id.as_str(), document.name)?;
+        output.push_str(&format!("  {}  {}\n", document.id.as_str(), document.name));
     }
-    write!(f, "use --id <document_id> or name@<id-prefix>")
+    output.push_str("use --id <document_id> or name@<id-prefix>");
+    output
 }
 
 fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings> {
@@ -977,10 +938,11 @@ fn reset_dir(path: &Path) -> StorageResult<()> {
 }
 
 fn restic_failed(command: &str, stderr: Vec<u8>) -> StorageError {
-    StorageError::ResticFailed {
+    ResticError::Failed {
         command: command.to_owned(),
         stderr: String::from_utf8_lossy(&stderr).trim().to_owned(),
     }
+    .into()
 }
 
 fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
@@ -993,7 +955,7 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
             return Ok(snapshot_id.to_owned());
         }
     }
-    Err(StorageError::ResticSnapshotMissing)
+    Err(ResticError::SnapshotMissing.into())
 }
 
 fn default_config(paths: &VaultPaths) -> String {
