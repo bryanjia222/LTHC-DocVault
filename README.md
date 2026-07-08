@@ -139,6 +139,20 @@ cargo build
 cargo install --path apps/cli
 ```
 
+### 测试与覆盖率
+
+```bash
+cargo test
+cargo clippy --all-targets --all-features
+cargo llvm-cov --workspace --summary-only
+```
+
+如果本机尚未安装覆盖率工具：
+
+```bash
+cargo install cargo-llvm-cov --locked
+```
+
 ------
 
 ## 快速开始
