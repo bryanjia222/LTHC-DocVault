@@ -1,9 +1,8 @@
-
 # AGENTS.md — DocVault AI Development Guide
 
 This document defines how AI agents (Codex / automated coding assistants / contributors) should interact with the DocVault codebase.
 
-It focuses on consistency, maintainability, and safe incremental development.
+It focuses on consistency, maintainability, safe incremental development, and preserving a clear domain-oriented architecture.
 
 ---
 
@@ -16,6 +15,7 @@ All Rust code must be formatted using:
 ```bash
 cargo fmt
 ```
+
 All TypeScript/Frontend code must follow Prettier formatting:
 
 ```bash
@@ -24,7 +24,7 @@ npm run format
 
 Formatting is considered part of every change.
 
-------
+---
 
 ## 1.2 Linting
 
@@ -44,40 +44,45 @@ npm run lint
 
 ESLint rules must be respected.
 
-------
+---
 
 ## 1.3 Naming Conventions
 
 ### Rust
 
-- snake_case → functions, variables
-- PascalCase → structs, enums, traits
-- UPPER_SNAKE_CASE → constants
-- Modules → snake_case
+* snake_case → functions, variables
+* PascalCase → structs, enums, traits
+* UPPER_SNAKE_CASE → constants
+* Modules → snake_case
 
 ### TypeScript
 
-- camelCase → variables, functions
-- PascalCase → components, types, interfaces
+* camelCase → variables, functions
+* PascalCase → components, types, interfaces
 
 ### Domain Naming Preference
 
-Prefer domain-oriented naming:
+Prefer domain-oriented naming.
 
-✔ Recommended:
+Recommended:
 
-- Document
-- Version
-- CommitJob
-- RestoreJob
+```
+Document
+Version
+CommitJob
+RestoreJob
+```
 
-✖ Avoid:
+Avoid vague technical names:
 
-- FileManagerV2
-- DocHandlerUtil
-- ManagerServiceHelper
+```
+FileManagerV2
+DocHandlerUtil
+ManagerServiceHelper
+CommonHelper
+```
 
-------
+---
 
 # 2. Project Structure Rules
 
@@ -101,11 +106,11 @@ third_party/
   restic/      → bundled Restic binaries, grouped by version and target triple
 ```
 
-------
+---
 
 ## 2.2 Layering Rules
 
-### Allowed dependencies
+Allowed dependency direction:
 
 ```
 UI (cli/desktop)
@@ -115,39 +120,39 @@ core
 storage / ooxml / jobs
 ```
 
-### Strict rules
+Strict rules:
 
-- core MUST NOT depend on apps/
-- storage MUST NOT depend on UI
-- ooxml MUST NOT depend on storage
-- jobs MUST NOT depend on UI
+* core MUST NOT depend on apps/
+* storage MUST NOT depend on UI
+* ooxml MUST NOT depend on storage
+* jobs MUST NOT depend on UI
 
-------
+---
 
-## 2.3 Core module responsibility
+## 2.3 Core Module Responsibility
 
 core is responsible for:
 
-- Document lifecycle
-- Version management
-- Job orchestration
-- Business rules
+* Document lifecycle
+* Version management
+* Job orchestration
+* Business rules
 
 core is NOT responsible for:
 
-- File system implementation details
-- Restic CLI execution
-- UI state
+* File system implementation details
+* Restic CLI execution
+* UI state management
 
-------
+---
 
-## 2.4 Third-party runtime assets
+## 2.4 Third-party Runtime Assets
 
 Restic is a bundled runtime dependency for v1, not application source code.
 
 Recommended layout:
 
-```text
+```
 third_party/
   restic/
     <version>/
@@ -158,61 +163,71 @@ third_party/
         restic.exe
       x86_64-unknown-linux-gnu/
         restic
-      aarch64-unknown-linux-gnu/
-        restic
-      x86_64-apple-darwin/
-        restic
-      aarch64-apple-darwin/
-        restic
 ```
 
 Rules:
 
-- Do not place platform binaries in the repository root.
-- Keep Restic binaries grouped by upstream version and Rust target triple.
-- Keep checksum and license information next to the bundled binaries.
-- Desktop packaging may copy the selected binary into `apps/desktop/src-tauri/binaries/`.
-- CLI packaging should use the same `third_party/restic` source asset.
-- Do not implement multiple Restic discovery mechanisms in different crates.
+* Do not place platform binaries in repository root.
+* Keep Restic binaries grouped by upstream version and Rust target triple.
+* Keep checksum and license information next to bundled binaries.
+* Desktop packaging may copy selected binaries into Tauri sidecar location.
+* CLI packaging should reuse the same third_party/restic assets.
+* Do not implement multiple Restic discovery mechanisms.
 
-------
+---
 
 # 3. AI Editing Principles
 
-## 3.1 Primary rule: reuse before creating
+## 3.1 Primary Rule: Reuse Before Creating
 
 Before creating new modules:
 
-- Search existing crates for similar logic
-- Extend existing functions where reasonable
-- Prefer composition over duplication
+* Search existing crates for similar logic.
+* Extend existing functionality when responsibility is the same.
+* Prefer composition over duplication.
+* Check existing dependencies before implementing custom utilities.
 
-------
+Do not create:
 
-## 3.2 Minimal change principle
+* duplicate helpers
+* alternative implementations
+* unnecessary wrapper layers
+
+---
+
+## 3.2 Minimal Change Principle
 
 When modifying code:
 
-- Keep changes localized
-- Avoid refactoring unrelated modules
-- Avoid restructuring directories unless required
+* Keep changes localized to the affected domain.
+* Avoid unrelated refactoring.
+* Avoid restructuring directories without reason.
 
-------
+However:
 
-## 3.3 No speculative architecture
+* Do not avoid necessary refactoring when existing structure prevents maintainability.
+* Adding a new module is preferred over significantly expanding an unrelated existing module.
+* Minimal change means minimal conceptual disruption, not minimum number of files changed.
+
+---
+
+## 3.3 No Speculative Architecture
 
 Agents must avoid:
 
-- Adding plugin systems
-- Introducing abstraction layers not used yet
-- Designing cloud interfaces prematurely
-- Over-generalizing storage or backend logic
+* Adding plugin systems.
+* Introducing unused abstraction layers.
+* Designing cloud interfaces prematurely.
+* Creating generic backend systems before they are required.
+* Generalizing code for hypothetical future requirements.
 
-If a feature is not explicitly required → do not implement.
+If a feature is not explicitly required:
 
-------
+Do not implement it.
 
-## 3.4 Prefer explicit over abstract
+---
+
+## 3.4 Prefer Explicit Over Abstract
 
 Prefer:
 
@@ -226,46 +241,197 @@ Avoid:
 trait StorageBackend
 ```
 
-unless explicitly requested.
+unless multiple implementations are actually required.
 
-------
+Do not introduce abstraction only for theoretical flexibility.
 
-## 3.5 Preserve working flows
+---
+
+## 3.5 Preserve Working Flows
 
 If a feature works:
 
-- Do not optimize prematurely
-- Do not refactor for style alone
-- Do not split working functions unnecessarily
+* Do not optimize prematurely.
+* Do not refactor only for cosmetic reasons.
+* Do not split code without improving readability, testing, or responsibility boundaries.
 
-------
+However:
 
-## 3.6 Early-stage compatibility policy
+* Split modules when responsibilities become unclear.
+* Extract code when it improves maintainability or testing.
+* Do not allow working code to become an unmaintainable monolith.
 
-DocVault is in early active development. Agents may make incompatible changes when a model,
-schema, command, or workflow is clearly wrong or blocks a cleaner design.
+---
 
-When doing so:
+## 3.6 File and Module Organization
 
-- Prefer the correct domain model over preserving experimental data
-- Do not add complex migration code only to support old local test vaults
-- Update README / CLI usage examples alongside command or schema changes
-- Keep incompatible changes explicit in the final summary
-- It is acceptable for users to recreate `.docvault*` test directories after breaking schema changes
+The codebase should remain modular and maintainable.
 
-------
+### Single Responsibility
+
+Each file and module should have one clear responsibility.
+
+Avoid placing unrelated:
+
+* business logic
+* database operations
+* filesystem handling
+* CLI/UI code
+* utility functions
+
+inside the same file.
+
+---
+
+### File Size Guidelines
+
+Prefer files under approximately 300-500 lines.
+
+A larger file is acceptable only when:
+
+* responsibilities are tightly related
+* splitting would reduce readability
+* the file represents a coherent domain unit
+
+When a file grows large, evaluate extracting:
+
+* independent workflows
+* domain services
+* adapters
+* data models
+* helper modules
+
+Do not split files artificially only to reduce line count.
+
+---
+
+### Avoid God Files
+
+Avoid files such as:
+
+```
+utils.rs
+helpers.rs
+manager.rs
+service.rs
+common.rs
+```
+
+that accumulate unrelated logic.
+
+Bad:
+
+```
+storage.rs
+
+- SQLite operations
+- Restic execution
+- filesystem helpers
+- backup workflow
+- restore workflow
+```
+
+Preferred:
+
+```
+storage/
+  mod.rs
+  sqlite.rs
+  restic.rs
+  repository.rs
+```
+
+---
+
+## 3.7 Domain-Oriented Module Organization
+
+Prefer organizing code around business concepts.
+
+Preferred:
+
+```
+core/
+  document/
+    commit.rs
+    restore.rs
+    version.rs
+
+  jobs/
+    commit_job.rs
+    restore_job.rs
+```
+
+Avoid organizing only by technical categories:
+
+```
+core/
+  utils.rs
+  helpers.rs
+  managers.rs
+  services.rs
+```
+
+A module should represent a meaningful domain concept.
+
+---
+
+## 3.8 Rust Module Organization
+
+Prefer Rust module trees over large flat files.
+
+Preferred:
+
+```
+storage/
+  mod.rs
+  sqlite.rs
+  restic.rs
+  repository.rs
+```
+
+Avoid:
+
+```
+storage.rs
+```
+
+containing all storage implementations.
+
+`mod.rs` should primarily define:
+
+* module structure
+* exports
+* interfaces
+
+Avoid placing large implementations inside `mod.rs`.
+
+---
+
+## 3.9 Refactoring Triggers
+
+Agents should consider refactoring when:
+
+* A file contains multiple unrelated responsibilities.
+* A module mixes domain logic and infrastructure logic.
+* A function becomes difficult to understand or test.
+* Adding a feature requires navigating a very large file.
+* Tests are difficult because a module does too many things.
+
+Do not wait until architecture becomes difficult to change.
+
+---
 
 # 4. Testing Requirements
 
-## 4.1 Required test types
+## 4.1 Required Test Types
 
-### Unit tests (Rust)
+### Unit Tests (Rust)
 
-Each crate must include:
+Each crate should include:
 
-- core business logic tests
-- storage operation tests (mocked)
-- ooxml parsing tests
+* core business logic tests
+* storage operation tests (mocked)
+* ooxml parsing tests
 
 Run:
 
@@ -273,16 +439,16 @@ Run:
 cargo test
 ```
 
-------
+---
 
-### Integration tests
+## 4.2 Integration Tests
 
 Must cover:
 
-- Commit workflow
-- Restore workflow
-- SQLite persistence consistency
-- Restic snapshot creation (mock or test repo)
+* Commit workflow
+* Restore workflow
+* SQLite persistence consistency
+* Restic snapshot creation (mock or test repository)
 
 Run:
 
@@ -290,11 +456,11 @@ Run:
 cargo test --tests
 ```
 
-------
+---
 
-### CLI tests
+## 4.3 CLI Tests
 
-Basic CLI behavior must be verified:
+Verify:
 
 ```bash
 cargo run --bin docvault -- commit ./sample.docx --name sample
@@ -302,19 +468,21 @@ cargo run --bin docvault -- list
 cargo run --bin docvault -- restore <id>
 ```
 
-------
+---
 
-### Frontend tests (if applicable)
+## 4.4 Frontend Tests
+
+If applicable:
 
 ```bash
 npm run test
 ```
 
-------
+---
 
-## 4.2 Required pre-merge checks
+## 4.5 Required Pre-merge Checks
 
-All changes must pass:
+Rust:
 
 ```bash
 cargo fmt
@@ -329,21 +497,21 @@ npm run lint
 npm run test
 ```
 
-------
+---
 
 # 5. Runtime Constraints
 
-## 5.1 Environment assumptions
+## 5.1 Environment Assumptions
 
 The system runs in:
 
-- Local desktop environment
-- macOS / Windows / Linux
-- No external services required in v1
+* Local desktop environment
+* macOS / Windows / Linux
+* No external services required in v1
 
-------
+---
 
-## 5.2 Required environment variables
+## 5.2 Required Environment Variables
 
 ```text
 DOCVAULT_DATA_DIR
@@ -351,45 +519,53 @@ DOCVAULT_DB_PATH
 DOCVAULT_LOG_LEVEL
 ```
 
-If not set, defaults are used from config.toml.
+Defaults are loaded from config.toml.
 
-------
+---
 
-## 5.3 File system rules
+## 5.3 File System Rules
 
-- All original files are immutable after commit
-- Temporary files must be stored in staging directory
-- Restore operations must write to explicit output path
-- The DocVault database must not persist local filesystem paths; source paths are command inputs only
-- Persist `original_filename` rather than full source paths when a default export filename is needed
+* Original files are immutable after commit.
+* Temporary files must be stored in staging directory.
+* Restore operations must write to explicit output paths.
+* Database must not persist local filesystem paths.
+* Persist original_filename instead of source paths.
 
-------
+---
 
-## 5.4 Restic execution rules
+## 5.4 Restic Execution Rules
 
-Restic is executed via CLI process:
+Restic is executed through CLI process.
 
-- All commands must be deterministic
-- Output must be captured and parsed
-- Errors must be propagated explicitly
-- No hidden state is allowed
-- Restic path resolution must be explicit and testable
-- Prefer this lookup order:
-  1. configured `restic_path`
-  2. `DOCVAULT_RESTIC_PATH`
-  3. packaged application sidecar
-  4. development asset under `third_party/restic/<version>/<target>/`
-  5. `restic` from system `PATH`
-- Keep Restic command construction in storage-layer code, not UI code.
-- Avoid introducing a generic plugin or backend abstraction unless explicitly requested.
+Rules:
 
-------
+* Commands must be deterministic.
+* Output must be captured and parsed.
+* Errors must propagate explicitly.
+* No hidden state.
+* Restic path resolution must be explicit and testable.
 
-## 5.5 Mocking rules (for tests)
+Lookup order:
 
-- Restic must be mocked in unit tests
-- SQLite may use in-memory DB for tests
-- File system interactions must use temp directories
+1. configured restic_path
+2. DOCVAULT_RESTIC_PATH
+3. packaged application sidecar
+4. third_party/restic asset
+5. system PATH
+
+Keep Restic command construction inside storage layer.
+
+Do not create plugin or backend abstractions unless explicitly required.
+
+---
+
+## 5.5 Mocking Rules
+
+Tests:
+
+* Restic must be mocked in unit tests.
+* SQLite may use in-memory DB.
+* File operations should use temporary directories.
 
 Example:
 
@@ -397,13 +573,13 @@ Example:
 tempfile::TempDir
 ```
 
-------
+---
 
 # 6. Logging & Debugging Rules
 
-## 6.1 Logging system
+## 6.1 Logging System
 
-All modules must use:
+Use:
 
 ```rust
 tracing::info!
@@ -411,63 +587,66 @@ tracing::debug!
 tracing::error!
 ```
 
-------
+---
 
-## 6.2 Log requirements
+## 6.2 Log Requirements
 
-- Every job must emit start/end logs
-- Every failure must include context
-- No silent failures allowed
+* Every job emits start/end logs.
+* Every failure includes context.
+* No silent failures.
 
-------
+---
 
 # 7. Performance Guidelines
 
-- Prefer streaming over full file loading
-- Avoid cloning large buffers unnecessarily
-- Use async only where IO-bound
-- Keep CPU-heavy logic synchronous unless necessary
+* Prefer streaming over full file loading.
+* Avoid unnecessary cloning of large buffers.
+* Use async only for IO-bound operations.
+* Keep CPU-heavy logic synchronous unless required.
 
-------
+---
 
 # 8. Error Handling Rules
 
-- Use Result<T, E> everywhere in core
-- Avoid panics in production code paths
-- Convert external errors into domain errors
+* Use Result<T, E> in core logic.
+* Avoid panics in production paths.
+* Convert external errors into domain errors.
 
-------
+---
 
-# 9. What AI Agents SHOULD do
+# 9. What AI Agents SHOULD Do
 
-- Extend existing modules
-- Keep logic simple and readable
-- Follow existing patterns in codebase
-- Add tests when introducing new behavior
+* Extend existing modules.
+* Search existing code before creating new implementations.
+* Keep logic simple and readable.
+* Follow existing architectural patterns.
+* Add tests for new behavior.
+* Extract modules when responsibilities diverge.
 
-------
+---
 
-# 10. What AI Agents MUST NOT do
+# 10. What AI Agents MUST NOT Do
 
-- Introduce new architectural layers
-- Add unused abstractions
-- Create multiple competing implementations
-- Modify working pipelines without reason
-- Introduce cloud or distributed assumptions
+* Introduce unnecessary architectural layers.
+* Add unused abstractions.
+* Create duplicate implementations.
+* Append unrelated logic into existing large files.
+* Create generic utility modules as dumping grounds.
+* Modify working pipelines without reason.
+* Introduce cloud or distributed assumptions.
 
-------
+---
 
 # 11. Design Stability Principle
 
 The system prioritizes:
 
-> Working local-first functionality over theoretical extensibility
+> Working local-first functionality over theoretical extensibility.
 
 Any change must preserve:
 
-- Deterministic behavior
-- Recoverability of data
-- Compatibility with existing commits and versions
+* Deterministic behavior.
+* Data recoverability.
+* Compatibility with existing commits and versions.
 
-------
-
+---
