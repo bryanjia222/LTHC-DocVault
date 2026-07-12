@@ -313,6 +313,29 @@ async function checkoutVersion(params: {
   return invoke<string>("checkout_version", params);
 }
 
+type ConnectOutcome = {
+  mode: "initialized" | "opened";
+  backend: string;
+  root_dir: string;
+};
+
+type ConnectParams = {
+  root_dir: string;
+  backend: string;
+  restic_password?: string;
+};
+
+/**
+ * Connect (and switch to) the vault at `root_dir` with the chosen `backend`,
+ * then refresh documents/config/jobs so the UI reflects the now-active vault.
+ * Rejects with a structured `{ kind, message? }` error the caller can localize.
+ */
+async function connect(params: ConnectParams): Promise<ConnectOutcome> {
+  const outcome = await invoke<ConnectOutcome>("connect_vault", params);
+  await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
+  return outcome;
+}
+
 /**
  * Subscribe to `job:update` events and mirror the backend's authoritative job
  * state into the reactive `jobs` map. Commits/checkouts that succeed refresh
@@ -359,6 +382,7 @@ export function useVault() {
     commit,
     exportVersion,
     checkoutVersion,
+    connect,
     subscribeJobs,
   };
 }

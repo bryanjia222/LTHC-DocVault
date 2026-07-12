@@ -31,8 +31,12 @@ export function useVaultActions() {
   } = useVault();
 
   function runAction(actionKey: string) {
+    if (actionKey === "actionLogs.addDocument") {
+      void addDocumentAction();
+      return;
+    }
     if (actionKey === "actionLogs.commit") {
-      void commitAction();
+      void commitVersionAction();
       return;
     }
     if (actionKey === "actionLogs.export") {
@@ -53,7 +57,36 @@ export function useVaultActions() {
     }
   }
 
-  async function commitAction() {
+  async function addDocumentAction() {
+    log(
+      t("log.actionRequested", {
+        action: t("actionLogs.addDocument"),
+        name: t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!isTauri()) return;
+    const path = await pickOfficeFile();
+    if (!path) {
+      log(t("log.actionCancelled", { action: t("actionLogs.addDocument") }));
+      return;
+    }
+    try {
+      // Always create a new document, named from the file stem. This is the
+      // entry point for an empty vault (no selection needed).
+      const id = await commit({ path, new_name: deriveNameFromPath(path) });
+      log(t("log.jobStarted", { action: t("actionLogs.addDocument"), id }));
+    } catch (e) {
+      log(
+        t("log.actionFailed", {
+          action: t("actionLogs.addDocument"),
+          error: String(e),
+        }),
+      );
+    }
+  }
+
+  async function commitVersionAction() {
     const doc = selectedDocument.value;
     log(
       t("log.actionRequested", {
@@ -62,6 +95,10 @@ export function useVaultActions() {
         version: t("log.latest"),
       }),
     );
+    if (!doc) {
+      log(t("log.noSelection", { action: t("actionLogs.commit") }));
+      return;
+    }
     if (!isTauri()) return;
     const path = await pickOfficeFile();
     if (!path) {
@@ -69,11 +106,8 @@ export function useVaultActions() {
       return;
     }
     try {
-      // Commit to the selected document, or create a new one named from the
-      // file stem when nothing is selected (first-commit onboarding flow).
-      const id = doc
-        ? await commit({ path, document_id: doc.id })
-        : await commit({ path, new_name: deriveNameFromPath(path) });
+      // Commit a new version to the selected document.
+      const id = await commit({ path, document_id: doc.id });
       log(t("log.jobStarted", { action: t("actionLogs.commit"), id }));
     } catch (e) {
       log(

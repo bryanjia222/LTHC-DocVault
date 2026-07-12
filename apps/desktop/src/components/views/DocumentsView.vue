@@ -8,6 +8,7 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
+  Upload,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
@@ -23,6 +24,7 @@ import VersionGraph from "../VersionGraph.vue";
 
 const { t } = useI18n();
 const {
+  documents,
   filteredDocuments,
   selectedDocument,
   selectedDocumentId,
@@ -100,9 +102,9 @@ function setGraphMaximized(maximized: boolean) {
           <button
             class="primary"
             type="button"
-            @click="runAction('actionLogs.commit')"
+            @click="runAction('actionLogs.addDocument')"
           >
-            {{ t("actions.commit") }}
+            {{ t("actions.addDocument") }}
           </button>
         </div>
       </div>
@@ -147,7 +149,17 @@ function setGraphMaximized(maximized: boolean) {
             </tr>
             <tr v-if="filteredDocuments.length === 0">
               <td colspan="6" class="empty-state">
-                {{ t("documents.empty") }}
+                <div v-if="documents.length === 0" class="empty-cta">
+                  <p>{{ t("documents.emptyNoDocs") }}</p>
+                  <button
+                    class="primary"
+                    type="button"
+                    @click="runAction('actionLogs.addDocument')"
+                  >
+                    {{ t("actions.addDocument") }}
+                  </button>
+                </div>
+                <template v-else>{{ t("documents.empty") }}</template>
               </td>
             </tr>
           </tbody>
@@ -167,6 +179,15 @@ function setGraphMaximized(maximized: boolean) {
           </p>
         </div>
         <div class="action-row">
+          <button
+            class="icon-action-button"
+            type="button"
+            :title="t('actions.commit')"
+            :aria-label="t('actions.commit')"
+            @click="runAction('actionLogs.commit')"
+          >
+            <Upload aria-hidden="true" />
+          </button>
           <button
             class="icon-action-button"
             type="button"
@@ -369,6 +390,15 @@ function setGraphMaximized(maximized: boolean) {
             <button
               class="icon-action-button"
               type="button"
+              :title="t('actions.commit')"
+              :aria-label="t('actions.commit')"
+              @click="runAction('actionLogs.commit')"
+            >
+              <Upload aria-hidden="true" />
+            </button>
+            <button
+              class="icon-action-button"
+              type="button"
               :title="t('actions.export')"
               :aria-label="t('actions.export')"
               @click="runAction('actionLogs.export')"
@@ -518,6 +548,18 @@ tbody tr.selected {
   white-space: normal;
 }
 
+.empty-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  font-style: normal;
+}
+
+.empty-cta .primary {
+  font-style: normal;
+}
+
 .version-list {
   display: grid;
   min-height: 0;
@@ -640,7 +682,7 @@ tbody tr.selected {
 
 .action-row {
   display: grid;
-  grid-template-columns: repeat(2, 34px);
+  grid-template-columns: repeat(3, 34px);
   justify-content: start;
   gap: 8px;
 }

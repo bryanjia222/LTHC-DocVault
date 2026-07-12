@@ -1,19 +1,20 @@
 use std::process::Command;
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
-use docvault_storage::{DocumentRef, VaultPaths};
+use docvault_storage::DocumentRef;
 use docvault_types::VaultConfig;
 
-use crate::dto::{ConfigDto, DocumentWithVersions, VaultStatusDto};
+use crate::dto::{ConfigDto, ConnectError, ConnectOutcome, DocumentWithVersions, VaultStatusDto};
+use crate::prefs;
 use crate::state::{self, AppState};
 
 #[tauri::command]
-pub fn vault_status(state: State<AppState>) -> Result<VaultStatusDto, String> {
+pub fn vault_status(app: AppHandle, state: State<AppState>) -> Result<VaultStatusDto, String> {
     let vault = state.vault.lock().expect("vault mutex poisoned");
     Ok(VaultStatusDto {
         initialized: vault.is_some(),
-        root_dir: VaultPaths::from_env().root_dir.display().to_string(),
+        root_dir: state::current_root(&app).display().to_string(),
     })
 }
 
@@ -85,4 +86,32 @@ fn restic_version(restic_path: &std::path::Path) -> String {
         .next()
         .unwrap_or("")
         .to_owned()
+}
+
+/// Connect (and switch to) the vault at the chosen directory with the chosen
+/// backend. See [`state::connect_vault`] for the empty/recognized/unrecognized
+/// logic. Refuses while jobs are running.
+#[tauri::command]
+pub fn connect_vault(
+    app: AppHandle,
+    state: State<AppState>,
+    root_dir: String,
+    backend: String,
+    restic_password: Option<String>,
+) -> Result<ConnectOutcome, ConnectError> {
+    let outcome = state::connect_vault_core(state.inner(), &root_dir, &backend, restic_password)?;
+    prefs::save_root(&app, std::path::Path::new(&outcome.root_dir))
+        .map_err(|e| ConnectError::Other(e.to_string()))?;
+    Ok(outcome)
+}
+
+/// Open the webview devtools (developer mode -> right-click -> inspect). Requires
+/// the `devtools` tauri feature, which is enabled for this crate.
+#[tauri::command]
+pub fn open_devtools(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_owned())?;
+    window.open_devtools();
+    Ok(())
 }

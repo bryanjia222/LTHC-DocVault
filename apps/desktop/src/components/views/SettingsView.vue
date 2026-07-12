@@ -1,12 +1,64 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
 import { useVault } from "../../composables/useVault";
+import { useDevMode } from "../../composables/useDevMode";
 
 const { t, locale } = useI18n();
 const { isDark, setTheme } = useTheme();
-const { config } = useVault();
+const { config, connect, isTauri } = useVault();
+const { isDevMode } = useDevMode();
+
+// --- switch backend / connect to vault ---
+const switchDir = ref("");
+const switchBackend = ref<"local-copy" | "restic">("local-copy");
+const switchPassword = ref("");
+const switchStatus = ref("");
+const switchError = ref("");
+const switching = ref(false);
+
+async function pickDir() {
+  if (!isTauri()) return;
+  const result = await open({ directory: true, multiple: false });
+  if (typeof result === "string") {
+    switchDir.value = result;
+  }
+}
+
+async function doConnect() {
+  switchError.value = "";
+  switchStatus.value = "";
+  if (!switchDir.value) {
+    switchError.value = t("connect.chooseDir");
+    return;
+  }
+  switching.value = true;
+  try {
+    const outcome = await connect({
+      root_dir: switchDir.value,
+      backend: switchBackend.value,
+      restic_password:
+        switchBackend.value === "restic" ? switchPassword.value : undefined,
+    });
+    switchStatus.value =
+      outcome.mode === "initialized"
+        ? t("connect.initialized", { backend: t(`backend.${outcome.backend}`) })
+        : t("connect.opened", { backend: t(`backend.${outcome.backend}`) });
+    switchPassword.value = "";
+  } catch (e: unknown) {
+    const err = e as { kind?: string; message?: string };
+    if (err?.kind && err.kind !== "other") {
+      switchError.value = t(`connect.${err.kind}`);
+    } else {
+      switchError.value = err?.message ?? String(e);
+    }
+  } finally {
+    switching.value = false;
+  }
+}
 </script>
 
 <template>
@@ -15,6 +67,55 @@ const { config } = useVault();
       <h2>{{ t("settings.title") }}</h2>
       <p class="subtitle">{{ t("settings.subtitle") }}</p>
       <p class="note">{{ t("settings.readOnlyNote") }}</p>
+    </div>
+
+    <div class="surface settings-card switch-card">
+      <h3>{{ t("settings.connectSection") }}</h3>
+      <div class="switch-form">
+        <label class="switch-field">
+          <span>{{ t("connect.dirLabel") }}</span>
+          <div class="dir-row">
+            <input
+              v-model="switchDir"
+              type="text"
+              class="dir-input"
+              :placeholder="t('connect.chooseDir')"
+              readonly
+            />
+            <button type="button" @click="pickDir">
+              {{ t("connect.browse") }}
+            </button>
+          </div>
+        </label>
+        <label class="switch-field">
+          <span>{{ t("connect.backend") }}</span>
+          <select v-model="switchBackend" class="locale-select">
+            <option value="local-copy">
+              {{ t("backend.local-copy") }}
+            </option>
+            <option value="restic">{{ t("backend.restic") }}</option>
+          </select>
+        </label>
+        <label v-if="switchBackend === 'restic'" class="switch-field">
+          <span>{{ t("connect.password") }}</span>
+          <input
+            v-model="switchPassword"
+            type="password"
+            class="dir-input"
+            :placeholder="t('connect.password')"
+          />
+        </label>
+        <button
+          class="primary"
+          type="button"
+          :disabled="switching"
+          @click="doConnect"
+        >
+          {{ t("connect.submit") }}
+        </button>
+        <p v-if="switchStatus" class="switch-status">{{ switchStatus }}</p>
+        <p v-if="switchError" class="switch-error">{{ switchError }}</p>
+      </div>
     </div>
 
     <div class="settings-grid">
@@ -102,6 +203,28 @@ const { config } = useVault();
                   {{ supportedLocale.label }}
                 </option>
               </select>
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.devMode") }}</dt>
+            <dd>
+              <div class="segmented-control">
+                <button
+                  type="button"
+                  :class="{ active: !isDevMode }"
+                  @click="isDevMode = false"
+                >
+                  {{ t("settings.off") }}
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: isDevMode }"
+                  @click="isDevMode = true"
+                >
+                  {{ t("settings.on") }}
+                </button>
+              </div>
+              <p class="field-hint">{{ t("settings.devModeHint") }}</p>
             </dd>
           </div>
         </dl>
@@ -209,5 +332,83 @@ const { config } = useVault();
   height: 32px;
   min-width: 64px;
   padding: 0 14px;
+}
+
+.switch-card {
+  padding: 18px;
+}
+
+.switch-form {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+.switch-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.switch-field span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.switch-field:first-child {
+  grid-column: 1 / -1;
+}
+
+.dir-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dir-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.dir-row button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.switch-form .primary {
+  height: 32px;
+  padding: 0 18px;
+}
+
+.switch-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--success-text);
+  font-size: 13px;
+}
+
+.switch-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 </style>

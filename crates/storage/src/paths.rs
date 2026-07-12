@@ -17,6 +17,35 @@ pub struct VaultPaths {
 }
 
 impl VaultPaths {
+    /// The default vault root used when no explicit root is configured. The
+    /// desktop app falls back to this when the user has not yet chosen a vault.
+    pub fn default_root() -> PathBuf {
+        default_root_dir()
+    }
+
+    /// Build paths for an explicit root, reading data/repo/db locations from
+    /// the vault's `config.toml` when present (falling back to root-relative
+    /// defaults). No environment variables are consulted: the desktop app uses
+    /// this so the on-disk config is the single source of truth.
+    pub fn from_root(root_dir: impl Into<PathBuf>) -> Self {
+        let root_dir = root_dir.into();
+        let config_path = absolute_path(root_dir.join("config.toml"));
+        let config = read_config_file(&config_path).ok();
+        let data_dir = config
+            .as_ref()
+            .map(|config| PathBuf::from(&config.storage.data_dir))
+            .unwrap_or_else(|| root_dir.join("data"));
+        let db_path = config
+            .as_ref()
+            .map(|config| PathBuf::from(&config.database.path))
+            .unwrap_or_else(|| root_dir.join("db.sqlite"));
+        let repo_dir = config
+            .as_ref()
+            .map(|config| PathBuf::from(&config.storage.repo_dir))
+            .unwrap_or_else(|| root_dir.join("repo"));
+        Self::new_with_repo(root_dir, data_dir, repo_dir, db_path)
+    }
+
     pub fn from_env() -> Self {
         let root_dir = env::var_os("DOCVAULT_ROOT_DIR")
             .map(PathBuf::from)

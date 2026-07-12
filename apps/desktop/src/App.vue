@@ -4,6 +4,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
 import AppTopbar from "./components/AppTopbar.vue";
+import AppContextMenu from "./components/AppContextMenu.vue";
 import MetricsBar from "./components/MetricsBar.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
@@ -99,6 +100,7 @@ onBeforeUnmount(() => {
     </main>
 
     <CommandPalette />
+    <AppContextMenu />
   </div>
 </template>
 

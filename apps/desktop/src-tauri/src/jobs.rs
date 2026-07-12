@@ -219,7 +219,8 @@ mod tests {
         let paths = temp_paths(temp.path());
         write_local_copy_config(&paths);
         let storage = VaultStorage::init(paths).unwrap();
-        let vault: Arc<Mutex<Option<DocVault>>> = Arc::new(Mutex::new(Some(DocVault::new(storage))));
+        let vault: Arc<Mutex<Option<DocVault>>> =
+            Arc::new(Mutex::new(Some(DocVault::new(storage))));
 
         let docx = write_source(temp.path(), "report.docx", b"version one");
         let path = docx.to_string_lossy().to_string();
@@ -235,7 +236,11 @@ mod tests {
         wait_for_terminal(&terminal);
         let record = registry.get(&job_id).expect("job recorded");
         assert_eq!(record.status, JobStatus::Succeeded);
-        assert!(record.error.is_none(), "unexpected error: {:?}", record.error);
+        assert!(
+            record.error.is_none(),
+            "unexpected error: {:?}",
+            record.error
+        );
         assert!(record.finished_at.is_some());
 
         let vault = vault.lock().unwrap();
@@ -257,7 +262,8 @@ mod tests {
         let paths = temp_paths(temp.path());
         write_local_copy_config(&paths);
         let storage = VaultStorage::init(paths).unwrap();
-        let vault: Arc<Mutex<Option<DocVault>>> = Arc::new(Mutex::new(Some(DocVault::new(storage))));
+        let vault: Arc<Mutex<Option<DocVault>>> =
+            Arc::new(Mutex::new(Some(DocVault::new(storage))));
 
         let txt = temp.path().join("notes.txt");
         fs::write(&txt, b"not office").unwrap();
@@ -274,7 +280,10 @@ mod tests {
         wait_for_terminal(&terminal);
         let record = registry.get(&job_id).expect("job recorded");
         assert_eq!(record.status, JobStatus::Failed);
-        assert!(record.error.as_deref().is_some_and(|e| e.contains("unsupported")));
+        assert!(record
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("unsupported")));
         assert!(record.finished_at.is_some());
     }
 

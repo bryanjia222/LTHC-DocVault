@@ -32,6 +32,7 @@ export const enUS = {
     refresh: "Refresh",
     commandPalette: "Command palette",
     commit: "Commit",
+    addDocument: "Add document",
     export: "Export",
     checkout: "Checkout",
     history: "History",
@@ -50,6 +51,7 @@ export const enUS = {
     refresh: "Refresh vault",
     commandPalette: "Open command palette",
     commit: "Commit new version",
+    addDocument: "Add document",
     export: "Export",
     checkout: "Checkout",
     history: "Open versions",
@@ -72,6 +74,7 @@ export const enUS = {
     visible: "{count} visible",
     searchPlaceholder: "Search name, owner, id",
     empty: "No documents match your search. Try adjusting the filters.",
+    emptyNoDocs: "No documents yet. Add your first document.",
     columns: {
       name: "Name",
       file: "File",
@@ -144,6 +147,25 @@ export const enUS = {
     restic: "Restic",
     "local-copy": "Local copy",
   },
+  connect: {
+    dirLabel: "Vault directory",
+    chooseDir: "Select a vault directory",
+    browse: "Browse…",
+    backend: "Backend",
+    password: "Restic password",
+    submit: "Connect / Initialize",
+    initialized: "Initialized a new vault ({backend})",
+    opened: "Attached existing vault ({backend})",
+    unrecognized:
+      "Directory is non-empty and is not a recognizable DocVault vault.",
+    jobs_running:
+      "A job is still running. Wait for it to finish before switching.",
+    restic_password_required: "The restic backend requires a password.",
+  },
+  contextMenu: {
+    reload: "Reload",
+    inspect: "Inspect",
+  },
   archive: {
     title: "Archive repository",
     subtitle: "Inspect the active backup backend and repository state.",
@@ -165,6 +187,7 @@ export const enUS = {
     subtitle: "Preview of the current VaultConfig (read-only).",
     readOnlyNote:
       "Settings are read-only for now; editing will arrive in a later release.",
+    connectSection: "Switch vault / backend",
     storageSection: "Storage",
     databaseSection: "Database",
     loggingSection: "Logging",
@@ -182,6 +205,10 @@ export const enUS = {
     themeLight: "Light",
     themeDark: "Dark",
     language: "Language",
+    devMode: "Developer mode",
+    devModeHint: "Shows inspect and other dev tools in the right-click menu.",
+    on: "On",
+    off: "Off",
   },
   commandPalette: {
     title: "Command palette",
