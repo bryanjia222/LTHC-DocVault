@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { Moon, Sun } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { supportedLocales } from "../i18n";
 import { useTheme } from "../theme";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useCommandPalette } from "../composables/useCommandPalette";
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const { isDark } = useTheme();
 const { runAction, toggleCurrentTheme } = useVaultActions();
 const { open } = useCommandPalette();
@@ -20,19 +19,6 @@ const { open } = useCommandPalette();
     </div>
 
     <div class="toolbar">
-      <select
-        v-model="locale"
-        class="locale-select"
-        :aria-label="t('actions.language')"
-      >
-        <option
-          v-for="supportedLocale in supportedLocales"
-          :key="supportedLocale.code"
-          :value="supportedLocale.code"
-        >
-          {{ supportedLocale.label }}
-        </option>
-      </select>
       <button
         class="icon-button secondary"
         type="button"
@@ -50,16 +36,8 @@ const { open } = useCommandPalette();
       >
         {{ t("actions.refresh") }}
       </button>
-      <button class="secondary command-button" type="button" @click="open">
+      <button class="secondary" type="button" @click="open">
         {{ t("actions.commandPalette") }}
-        <kbd>Ctrl K</kbd>
-      </button>
-      <button
-        class="primary"
-        type="button"
-        @click="runAction('actionLogs.commit')"
-      >
-        {{ t("actions.commit") }}
       </button>
     </div>
   </header>
@@ -80,30 +58,5 @@ const { open } = useCommandPalette();
 h1 {
   font-size: 30px;
   font-weight: 750;
-}
-
-.locale-select {
-  height: 34px;
-  padding: 0 30px 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-}
-
-.command-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.command-button kbd {
-  padding: 1px 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-family: var(--mono-font);
-  font-size: 11px;
 }
 </style>

@@ -244,6 +244,23 @@ button:disabled {
   stroke-width: 2;
 }
 
+/* Icon-only buttons inside toolbars / action rows keep square sizing and no
+   inner padding, overriding the text-button height+padding rule above. */
+.toolbar button.icon-button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+}
+
+.action-row button.icon-action-button,
+.panel-header button.icon-action-button {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
 /* Panel header (shared across views) */
 .panel-header {
   display: flex;

@@ -90,12 +90,21 @@ function setGraphMaximized(maximized: boolean) {
             {{ t("documents.visible", { count: filteredDocuments.length }) }}
           </p>
         </div>
-        <input
-          v-model="searchQuery"
-          type="search"
-          :placeholder="t('documents.searchPlaceholder')"
-          :aria-label="t('actions.search')"
-        />
+        <div class="toolbar">
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="t('documents.searchPlaceholder')"
+            :aria-label="t('actions.search')"
+          />
+          <button
+            class="primary"
+            type="button"
+            @click="runAction('actionLogs.commit')"
+          >
+            {{ t("actions.commit") }}
+          </button>
+        </div>
       </div>
 
       <div class="table-wrap">
