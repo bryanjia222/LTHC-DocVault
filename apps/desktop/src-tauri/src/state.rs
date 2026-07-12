@@ -1,20 +1,27 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use docvault_core::DocVault;
+use docvault_jobs::JobRegistry;
 use docvault_storage::{VaultPaths, VaultStorage};
 use docvault_types::VaultConfig;
 
 /// Shared application state. The vault is `None` until the user initializes it
 /// (first run); once initialized it is opened on startup. `rusqlite::Connection`
 /// is `Send` but not `Sync`, so the whole vault is guarded by a `Mutex`.
+///
+/// The vault lives behind an `Arc` so background job threads can clone the
+/// handle and lock it independently of the Tauri command that spawned them.
+/// `jobs` is the authoritative job state machine; the UI mirrors it via events.
 pub struct AppState {
-    pub vault: Mutex<Option<DocVault>>,
+    pub vault: Arc<Mutex<Option<DocVault>>>,
+    pub jobs: JobRegistry,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            vault: Mutex::new(None),
+            vault: Arc::new(Mutex::new(None)),
+            jobs: JobRegistry::new(),
         }
     }
 }

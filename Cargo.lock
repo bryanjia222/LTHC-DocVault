@@ -418,7 +418,9 @@ dependencies = [
 name = "docvault-jobs"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

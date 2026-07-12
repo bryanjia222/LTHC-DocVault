@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ref, type Ref } from "vue";
 
 import {
@@ -70,6 +71,18 @@ interface RawConfig {
 interface VaultStatus {
   initialized: boolean;
   root_dir: string;
+}
+
+/** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
+interface RawJob {
+  id: string;
+  kind: "commit" | "export" | "checkout";
+  status: "running" | "succeeded" | "failed";
+  progress: number | null;
+  error: string | null;
+  target_label: string;
+  started_at: number;
+  finished_at: number | null;
 }
 
 /** True when running inside a Tauri window (IPC available). */
@@ -151,6 +164,28 @@ function mapConfig(raw: RawConfig): VaultConfigPreview {
   };
 }
 
+function mapJob(raw: RawJob): Job {
+  // Indeterminate running jobs show an empty bar (0%); succeeded jobs fill it.
+  // Real `progress` (0..1) arrives once restic `percent_done` streaming lands.
+  const progress =
+    raw.progress != null
+      ? Math.round(raw.progress * 100)
+      : raw.status === "succeeded"
+        ? 100
+        : 0;
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    target: raw.target_label,
+    progress,
+    status: raw.status,
+    error: raw.error ?? undefined,
+    startedAt: formatEpoch(raw.started_at),
+    finishedAt:
+      raw.finished_at != null ? formatEpoch(raw.finished_at) : undefined,
+  };
+}
+
 // --- shared reactive state (module-level singletons) ---
 
 const documents: Ref<Document[]> = ref([]);
@@ -221,10 +256,15 @@ async function loadDocuments(): Promise<void> {
 }
 
 async function loadJobs(): Promise<void> {
-  // Phase 2 wires this to the job runner (`list_jobs`). Until then the UI shows
-  // an empty, truthful job list under Tauri; mock fixtures only in browser dev.
   if (!isTauri()) {
     jobs.value = mockJobs.map((job) => ({ ...job }));
+    return;
+  }
+  try {
+    const raw = await invoke<RawJob[]>("list_jobs");
+    jobs.value = raw.map(mapJob);
+  } catch (e) {
+    error.value = String(e);
   }
 }
 
@@ -239,6 +279,66 @@ async function loadConfig(): Promise<void> {
   } catch (e) {
     error.value = String(e);
   }
+}
+
+// --- write actions (return the spawned job id; state arrives via events) ---
+// `type` (not `interface`) so the object is assignable to Tauri's InvokeArgs
+// (`Record<string, unknown>`); interfaces are open and lack an index signature.
+
+type CommitParams = {
+  path: string;
+  document_id?: string;
+  new_name?: string;
+  author?: string;
+  note?: string;
+};
+
+async function commit(params: CommitParams): Promise<string> {
+  return invoke<string>("commit_document", params);
+}
+
+async function exportVersion(params: {
+  document_id: string;
+  version: string;
+  output_path: string;
+}): Promise<string> {
+  return invoke<string>("export_version", params);
+}
+
+async function checkoutVersion(params: {
+  document_id: string;
+  version: string;
+  output_path?: string;
+}): Promise<string> {
+  return invoke<string>("checkout_version", params);
+}
+
+/**
+ * Subscribe to `job:update` events and mirror the backend's authoritative job
+ * state into the reactive `jobs` map. Commits/checkouts that succeed refresh
+ * the document list (checkout changes which version is current). Returns an
+ * unsubscribe fn; a no-op when not running under Tauri.
+ */
+async function subscribeJobs(): Promise<UnlistenFn> {
+  if (!isTauri()) {
+    return () => {};
+  }
+  return listen<RawJob>("job:update", (event) => {
+    const job = mapJob(event.payload);
+    const index = jobs.value.findIndex((existing) => existing.id === job.id);
+    if (index >= 0) {
+      jobs.value.splice(index, 1, job);
+    } else {
+      jobs.value.unshift(job);
+    }
+    const refreshKinds: RawJob["kind"][] = ["commit", "checkout"];
+    if (
+      refreshKinds.includes(event.payload.kind) &&
+      event.payload.status === "succeeded"
+    ) {
+      void loadDocuments();
+    }
+  });
 }
 
 export function useVault() {
@@ -256,5 +356,9 @@ export function useVault() {
     loadDocuments,
     loadJobs,
     loadConfig,
+    commit,
+    exportVersion,
+    checkoutVersion,
+    subscribeJobs,
   };
 }

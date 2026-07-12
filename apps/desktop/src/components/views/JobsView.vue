@@ -31,7 +31,14 @@ const { runAction } = useVaultActions();
         <div v-for="job in jobs" :key="job.id" class="job-row">
           <span class="job-kind">{{ t(`jobs.${job.kind}`) }}</span>
           <strong class="job-target">{{ job.target }}</strong>
-          <div class="progress-track" aria-hidden="true">
+          <div
+            v-if="job.status === 'failed' && job.error"
+            class="job-error"
+            :title="job.error"
+          >
+            {{ job.error }}
+          </div>
+          <div v-else class="progress-track" aria-hidden="true">
             <span :style="{ width: `${job.progress}%` }" />
           </div>
           <em class="job-status" :data-status="job.status">{{
@@ -122,8 +129,21 @@ const { runAction } = useVaultActions();
   font-weight: 650;
 }
 
-.job-status[data-status="done"] {
+.job-status[data-status="succeeded"] {
   color: var(--success-text);
+}
+
+.job-status[data-status="failed"] {
+  color: var(--danger-text);
+}
+
+.job-error {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--danger-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-state {

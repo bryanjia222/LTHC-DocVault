@@ -365,11 +365,6 @@ small {
   color: var(--warning-text);
 }
 
-.status-pill[data-status="queued"] {
-  background: var(--info-bg);
-  color: var(--info-text);
-}
-
 /* File type tag */
 .file-type {
   display: inline-flex;

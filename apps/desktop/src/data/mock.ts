@@ -9,7 +9,7 @@
 
 export type DocumentType = "docx" | "xlsx" | "pptx";
 export type Backend = "restic" | "local-copy";
-export type HealthStatus = "synced" | "needsReview" | "queued";
+export type HealthStatus = "synced" | "needsReview";
 export type VersionStatus = "current" | "archived";
 
 export interface Version {
@@ -36,7 +36,7 @@ export interface Document {
 }
 
 export type JobKind = "commit" | "export" | "checkout";
-export type JobStatus = "running" | "queued" | "done";
+export type JobStatus = "running" | "succeeded" | "failed";
 
 export interface Job {
   id: string;
@@ -44,6 +44,9 @@ export interface Job {
   target: string;
   progress: number;
   status: JobStatus;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
 }
 
 export interface VaultConfigPreview {
@@ -149,7 +152,7 @@ export const documents: Document[] = [
     owner: "产品",
     updatedAt: "2026-07-08 22:36",
     backend: "restic",
-    health: "queued",
+    health: "synced",
     versions: [
       {
         id: "v2",
@@ -181,20 +184,26 @@ export const jobs: Job[] = [
     target: "产品路线图",
     progress: 72,
     status: "running",
+    startedAt: "2026-07-11 09:30",
   },
   {
     id: "job-103",
     kind: "export",
     target: "合同归档 v2",
     progress: 100,
-    status: "done",
+    status: "succeeded",
+    startedAt: "2026-07-11 09:20",
+    finishedAt: "2026-07-11 09:21",
   },
   {
     id: "job-102",
     kind: "checkout",
     target: "季度预算 v4",
     progress: 0,
-    status: "queued",
+    status: "failed",
+    error: "document 7c1b28d1 not found",
+    startedAt: "2026-07-11 09:10",
+    finishedAt: "2026-07-11 09:10",
   },
 ];
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
 import AppTopbar from "./components/AppTopbar.vue";
@@ -26,10 +27,12 @@ const {
   loadDocuments,
   loadConfig,
   loadJobs,
+  subscribeJobs,
 } = useVault();
 
 const booting = ref(true);
 const initError = ref("");
+let unsubJobs: UnlistenFn | null = null;
 
 function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -42,6 +45,7 @@ async function onInit() {
   initError.value = "";
   try {
     await init();
+    unsubJobs = await subscribeJobs();
   } catch (e) {
     initError.value = String(e);
   }
@@ -51,6 +55,7 @@ onMounted(async () => {
   await refreshStatus();
   if (initialized.value) {
     await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
+    unsubJobs = await subscribeJobs();
   }
   booting.value = false;
   log(t("log.loaded"));
@@ -59,6 +64,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onGlobalKeydown);
+  unsubJobs?.();
 });
 </script>
 
