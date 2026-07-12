@@ -23,7 +23,7 @@ use tracing::warn;
 
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn commit_document(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -48,7 +48,7 @@ pub fn commit_document(
     Ok(job_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn export_version(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -72,7 +72,7 @@ pub fn export_version(
     Ok(job_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn checkout_version(
     app: AppHandle,
     state: State<'_, AppState>,

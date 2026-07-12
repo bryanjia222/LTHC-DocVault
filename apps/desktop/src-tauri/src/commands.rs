@@ -91,7 +91,7 @@ fn restic_version(restic_path: &std::path::Path) -> String {
 /// Connect (and switch to) the vault at the chosen directory with the chosen
 /// backend. See [`state::connect_vault`] for the empty/recognized/unrecognized
 /// logic. Refuses while jobs are running.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn connect_vault(
     app: AppHandle,
     state: State<AppState>,
