@@ -45,6 +45,7 @@
   --warning-text: #9a5b13;
   --info-bg: #e8efff;
   --info-text: #315aaf;
+  --danger-text: #b42318;
 
   --brand: #26384d;
   --grid-line: #f8fafc;
@@ -91,6 +92,7 @@
   --warning-text: #d9a44e;
   --info-bg: #1d2a45;
   --info-text: #8fb0e0;
+  --danger-text: #f9708a;
 
   --brand: #2a3548;
   --grid-line: #1d2330;

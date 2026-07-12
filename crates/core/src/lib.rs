@@ -92,6 +92,18 @@ impl DocVault {
     pub fn current_version(&self, document_ref: &DocumentRef) -> StorageResult<Option<Version>> {
         self.storage.current_version(document_ref)
     }
+
+    pub fn paths(&self) -> &docvault_storage::VaultPaths {
+        self.storage.paths()
+    }
+
+    pub fn backend(&self) -> docvault_storage::BackupBackend {
+        self.storage.backend()
+    }
+
+    pub fn restic_path(&self) -> &Path {
+        self.storage.restic_path()
+    }
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ const { runAction } = useVaultActions();
       <div class="job-list">
         <div v-for="job in jobs" :key="job.id" class="job-row">
           <span class="job-kind">{{ t(`jobs.${job.kind}`) }}</span>
-          <strong class="job-target">{{ t(job.targetKey) }}</strong>
+          <strong class="job-target">{{ job.target }}</strong>
           <div class="progress-track" aria-hidden="true">
             <span :style="{ width: `${job.progress}%` }" />
           </div>

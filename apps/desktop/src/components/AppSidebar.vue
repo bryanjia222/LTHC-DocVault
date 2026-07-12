@@ -4,12 +4,13 @@ import { useI18n } from "vue-i18n";
 import { navigationItems, useNavigation } from "../composables/useNavigation";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
-import { vaultConfig } from "../data/mock";
+import { useVault } from "../composables/useVault";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
 const { navigate } = useVaultActions();
 const { documents, totalVersions } = useDocuments();
+const { config } = useVault();
 
 const navIcons = {
   documents: FileText,
@@ -60,7 +61,7 @@ const navIcons = {
         </div>
         <div>
           <dt>{{ t("sidebar.backend") }}</dt>
-          <dd>{{ t(`backend.${vaultConfig.backend}`) }}</dd>
+          <dd>{{ t(`backend.${config.backend}`) }}</dd>
         </div>
       </dl>
     </div>

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { vaultConfig } from "../../data/mock";
+import { useVault } from "../../composables/useVault";
 import { useDocuments } from "../../composables/useDocuments";
 
 const { t } = useI18n();
+const { config } = useVault();
 const { totalVersions } = useDocuments();
 </script>
 
@@ -19,25 +20,25 @@ const { totalVersions } = useDocuments();
       <div class="surface archive-card">
         <h3>{{ t("archive.currentBackend") }}</h3>
         <span class="status-pill" data-status="synced">{{
-          t(`backend.${vaultConfig.backend}`)
+          t(`backend.${config.backend}`)
         }}</span>
 
         <dl class="archive-dl">
           <div>
             <dt>{{ t("archive.repositoryDir") }}</dt>
-            <dd class="mono">{{ vaultConfig.repoDir }}</dd>
+            <dd class="mono">{{ config.repoDir }}</dd>
           </div>
           <div>
             <dt>{{ t("archive.dataDir") }}</dt>
-            <dd class="mono">{{ vaultConfig.dataDir }}</dd>
+            <dd class="mono">{{ config.dataDir }}</dd>
           </div>
           <div>
             <dt>{{ t("archive.resticVersion") }}</dt>
-            <dd>{{ vaultConfig.resticVersion }}</dd>
+            <dd>{{ config.resticVersion }}</dd>
           </div>
           <div>
             <dt>{{ t("archive.bundledBinary") }}</dt>
-            <dd class="mono break">{{ vaultConfig.resticPath }}</dd>
+            <dd class="mono break">{{ config.resticPath }}</dd>
           </div>
         </dl>
       </div>

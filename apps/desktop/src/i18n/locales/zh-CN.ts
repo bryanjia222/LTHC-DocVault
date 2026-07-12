@@ -19,6 +19,14 @@ export const zhCN = {
     title: "文档工作台",
     subtitle: "版本提交、导出、切换版本与任务追踪的桌面控制台原型。",
   },
+  boot: {
+    loading: "正在连接仓库…",
+    welcome: "欢迎使用 DocVault",
+    notInitialized:
+      "尚未初始化文档仓库。初始化将在本地创建仓库目录与数据库（local-copy 后端）。",
+    initialize: "初始化仓库",
+    initFailed: "初始化失败：{error}",
+  },
   actions: {
     refresh: "刷新",
     commandPalette: "命令面板",
@@ -175,32 +183,5 @@ export const zhCN = {
     hint: "按 ↑↓ 选择，回车执行，Esc 关闭",
     groupNavigation: "导航",
     groupActions: "操作",
-  },
-  mock: {
-    documents: {
-      contract: "合同归档",
-      budget: "季度预算",
-      roadmap: "产品路线图",
-    },
-    notes: {
-      contractV3: "更新签署页和付款条款",
-      contractV2: "法律评审意见合并",
-      contractV2a: "保留原始条款的备用分支",
-      contractV1: "初始提交",
-      budgetV5: "补充采购项",
-      budgetV4: "调整差旅预算",
-      roadmapV2: "增加桌面端里程碑",
-      roadmapV1: "初版路线图",
-    },
-    owners: {
-      bryan: "Bryan",
-      finance: "财务",
-      product: "产品",
-    },
-    targets: {
-      roadmap: "产品路线图",
-      contractV2: "合同归档 v2",
-      budgetV4: "季度预算 v4",
-    },
   },
 };

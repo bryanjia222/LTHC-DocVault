@@ -1,11 +1,13 @@
-import { computed, ref } from "vue";
-import { jobs as mockJobs } from "../data/mock";
+import { computed } from "vue";
+import { useVault } from "./useVault";
 
 /*
- * Job list state. Shared so the metrics bar and jobs view stay consistent.
+ * Job list state. Shared so the metrics bar and jobs view stay consistent. The
+ * list is owned by useVault (empty under Tauri until Phase 2 wires the job
+ * runner; mock fixtures only in browser dev).
  */
 
-const jobs = ref([...mockJobs]);
+const { jobs } = useVault();
 
 export function useJobs() {
   const activeJobCount = computed(

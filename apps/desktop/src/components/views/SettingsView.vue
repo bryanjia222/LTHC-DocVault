@@ -2,10 +2,11 @@
 import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
-import { vaultConfig } from "../../data/mock";
+import { useVault } from "../../composables/useVault";
 
 const { t, locale } = useI18n();
 const { isDark, setTheme } = useTheme();
+const { config } = useVault();
 </script>
 
 <template>
@@ -22,19 +23,19 @@ const { isDark, setTheme } = useTheme();
         <dl class="settings-dl">
           <div>
             <dt>{{ t("settings.backend") }}</dt>
-            <dd>{{ t(`backend.${vaultConfig.backend}`) }}</dd>
+            <dd>{{ t(`backend.${config.backend}`) }}</dd>
           </div>
           <div>
             <dt>{{ t("settings.dataDir") }}</dt>
-            <dd class="mono">{{ vaultConfig.dataDir }}</dd>
+            <dd class="mono">{{ config.dataDir }}</dd>
           </div>
           <div>
             <dt>{{ t("settings.repoDir") }}</dt>
-            <dd class="mono">{{ vaultConfig.repoDir }}</dd>
+            <dd class="mono">{{ config.repoDir }}</dd>
           </div>
           <div>
             <dt>{{ t("settings.resticPath") }}</dt>
-            <dd class="mono break">{{ vaultConfig.resticPath }}</dd>
+            <dd class="mono break">{{ config.resticPath }}</dd>
           </div>
           <div>
             <dt>{{ t("settings.resticPassword") }}</dt>
@@ -48,7 +49,7 @@ const { isDark, setTheme } = useTheme();
         <dl class="settings-dl">
           <div>
             <dt>{{ t("settings.dbPath") }}</dt>
-            <dd class="mono break">{{ vaultConfig.dbPath }}</dd>
+            <dd class="mono break">{{ config.dbPath }}</dd>
           </div>
         </dl>
 
@@ -56,11 +57,11 @@ const { isDark, setTheme } = useTheme();
         <dl class="settings-dl">
           <div>
             <dt>{{ t("settings.logLevel") }}</dt>
-            <dd>{{ vaultConfig.logLevel }}</dd>
+            <dd>{{ config.logLevel }}</dd>
           </div>
           <div>
             <dt>{{ t("settings.logFile") }}</dt>
-            <dd class="mono break">{{ vaultConfig.logFile }}</dd>
+            <dd class="mono break">{{ config.logFile }}</dd>
           </div>
         </dl>
       </div>

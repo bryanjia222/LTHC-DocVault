@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
 import AppTopbar from "./components/AppTopbar.vue";
@@ -12,11 +12,24 @@ import SettingsView from "./components/views/SettingsView.vue";
 import { useNavigation } from "./composables/useNavigation";
 import { useCommandPalette } from "./composables/useCommandPalette";
 import { useActivityLog } from "./composables/useActivityLog";
+import { useVault } from "./composables/useVault";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
 const { toggle } = useCommandPalette();
 const { log } = useActivityLog();
+const {
+  initialized,
+  rootDir,
+  refreshStatus,
+  init,
+  loadDocuments,
+  loadConfig,
+  loadJobs,
+} = useVault();
+
+const booting = ref(true);
+const initError = ref("");
 
 function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -25,7 +38,21 @@ function onGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+async function onInit() {
+  initError.value = "";
+  try {
+    await init();
+  } catch (e) {
+    initError.value = String(e);
+  }
+}
+
+onMounted(async () => {
+  await refreshStatus();
+  if (initialized.value) {
+    await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
+  }
+  booting.value = false;
   log(t("log.loaded"));
   window.addEventListener("keydown", onGlobalKeydown);
 });
@@ -44,10 +71,24 @@ onBeforeUnmount(() => {
       <MetricsBar />
 
       <div class="view-host">
-        <DocumentsView v-if="activeSection === 'documents'" />
-        <JobsView v-else-if="activeSection === 'jobs'" />
-        <ArchiveView v-else-if="activeSection === 'archive'" />
-        <SettingsView v-else-if="activeSection === 'settings'" />
+        <div v-if="booting" class="boot-state">{{ t("boot.loading") }}</div>
+        <section v-else-if="!initialized" class="onboarding surface">
+          <h2>{{ t("boot.welcome") }}</h2>
+          <p>{{ t("boot.notInitialized") }}</p>
+          <p class="root-dir">{{ rootDir }}</p>
+          <button class="primary" type="button" @click="onInit">
+            {{ t("boot.initialize") }}
+          </button>
+          <p v-if="initError" class="init-error">
+            {{ t("boot.initFailed", { error: initError }) }}
+          </p>
+        </section>
+        <template v-else>
+          <DocumentsView v-if="activeSection === 'documents'" />
+          <JobsView v-else-if="activeSection === 'jobs'" />
+          <ArchiveView v-else-if="activeSection === 'archive'" />
+          <SettingsView v-else-if="activeSection === 'settings'" />
+        </template>
       </div>
     </main>
 
@@ -78,5 +119,49 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
+}
+
+.boot-state {
+  align-self: center;
+  justify-self: center;
+  color: var(--text-muted);
+}
+
+.onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: center;
+  justify-self: center;
+  max-width: 480px;
+  padding: 32px;
+  text-align: center;
+}
+
+.onboarding h2 {
+  font-size: 22px;
+  font-weight: 750;
+}
+
+.onboarding p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.root-dir {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--text-muted);
+}
+
+.onboarding .primary {
+  align-self: center;
+  margin-top: 8px;
+}
+
+.init-error {
+  color: var(--danger-text);
+  font-size: 13px;
 }
 </style>

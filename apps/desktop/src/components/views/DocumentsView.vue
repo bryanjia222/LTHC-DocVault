@@ -46,14 +46,14 @@ function chooseDocument(document: Document) {
   selectDocument(document);
   versionViewMode.value = "list";
   isGraphMaximized.value = false;
-  log(t("log.selectedDocument", { name: t(document.nameKey) }));
+  log(t("log.selectedDocument", { name: document.name }));
 }
 
 function chooseVersion(version: Version) {
   selectVersion(version);
   log(
     t("log.selectedVersion", {
-      name: t(selectedDocument.value?.nameKey ?? "log.noDocument"),
+      name: selectedDocument.value?.name ?? t("log.noDocument"),
       version: version.label,
     }),
   );
@@ -126,17 +126,17 @@ function setGraphMaximized(maximized: boolean) {
               :class="{ selected: selectedDocumentId === document.id }"
               tabindex="0"
               role="button"
-              :aria-label="t(document.nameKey)"
+              :aria-label="document.name"
               @click="chooseDocument(document)"
               @keydown.enter="chooseDocument(document)"
               @keydown.space.prevent="chooseDocument(document)"
             >
               <td>
                 <span class="file-type">{{ document.type }}</span>
-                <strong>{{ t(document.nameKey) }}</strong>
+                <strong>{{ document.name }}</strong>
               </td>
               <td>{{ document.originalFilename }}</td>
-              <td>{{ t(document.ownerKey) }}</td>
+              <td>{{ document.owner }}</td>
               <td>{{ document.versions.length }}</td>
               <td>
                 <span class="status-pill" :data-status="document.health">{{
@@ -158,7 +158,7 @@ function setGraphMaximized(maximized: boolean) {
     <aside class="detail-panel surface" :aria-label="t('details.label')">
       <div class="panel-header compact">
         <div>
-          <h2>{{ t(selectedDocument?.nameKey ?? "log.noDocument") }}</h2>
+          <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
           <p>
             {{ selectedDocument?.id }} ·
             {{
@@ -304,11 +304,7 @@ function setGraphMaximized(maximized: boolean) {
           <div>
             <dt>{{ t("details.note") }}</dt>
             <dd>
-              {{
-                selectedVersion
-                  ? t(selectedVersion.noteKey)
-                  : t("details.noNote")
-              }}
+              {{ selectedVersion ? selectedVersion.note : t("details.noNote") }}
             </dd>
           </div>
         </dl>
@@ -361,7 +357,7 @@ function setGraphMaximized(maximized: boolean) {
       <aside class="graph-context surface">
         <div class="panel-header compact">
           <div>
-            <h2>{{ t(selectedDocument?.nameKey ?? "log.noDocument") }}</h2>
+            <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
             <p>
               {{ selectedDocument?.id }} ·
               {{
@@ -409,9 +405,7 @@ function setGraphMaximized(maximized: boolean) {
               <dt>{{ t("details.note") }}</dt>
               <dd>
                 {{
-                  selectedVersion
-                    ? t(selectedVersion.noteKey)
-                    : t("details.noNote")
+                  selectedVersion ? selectedVersion.note : t("details.noNote")
                 }}
               </dd>
             </div>

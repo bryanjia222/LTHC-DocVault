@@ -13,3 +13,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.9"
+docvault-core = { path = "../../../crates/core" }
+docvault-storage = { path = "../../../crates/storage" }
+docvault-types = { path = "../../../shared/types" }
+
+# Keep this crate out of the root workspace; it is built standalone by tauri.
+[workspace]

@@ -2,13 +2,14 @@ import { useI18n } from "vue-i18n";
 import { useActivityLog } from "./useActivityLog";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
+import { useVault } from "./useVault";
 import { useTheme } from "../theme";
 
 /*
- * Centralized prototype action handlers. Every UI action (commit, export,
- * checkout, refresh, navigate, toggle theme) flows through here so the activity
- * log records a consistent message. Real Tauri command wiring will replace the
- * log calls later.
+ * Centralized action handlers. Every UI action (commit, export, checkout,
+ * refresh, navigate, toggle theme) flows through here so the activity log records
+ * a consistent message. Read-only refresh reloads from the backend; commit /
+ * export / checkout are wired to real jobs in Phase 2 (they log for now).
  */
 
 export function useVaultActions() {
@@ -17,14 +18,19 @@ export function useVaultActions() {
   const { setSection } = useNavigation();
   const { toggleTheme, isDark } = useTheme();
   const { selectedDocument, selectedVersion } = useDocuments();
+  const { loadDocuments } = useVault();
 
   function runAction(actionKey: string) {
     const name = selectedDocument.value
-      ? t(selectedDocument.value.nameKey)
+      ? selectedDocument.value.name
       : t("log.noDocument");
     const version = selectedVersion.value?.label ?? t("log.latest");
 
     log(t("log.actionRequested", { action: t(actionKey), name, version }));
+
+    if (actionKey === "actionLogs.refresh") {
+      void loadDocuments();
+    }
   }
 
   function navigate(sectionId: NavigationId) {

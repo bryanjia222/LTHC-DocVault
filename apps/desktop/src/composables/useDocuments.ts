@@ -1,19 +1,16 @@
 import { computed, ref } from "vue";
-import { useI18n } from "vue-i18n";
-import {
-  documents as mockDocuments,
-  type Document,
-  type Version,
-} from "../data/mock";
+import { useVault } from "./useVault";
+import type { Document, Version } from "../data/mock";
 
 /*
  * Document selection + search state. Shared app-wide so the topbar actions and
- * command palette can reference the currently selected document/version.
+ * command palette can reference the currently selected document/version. The
+ * document list itself is owned by useVault (backed by the real Tauri commands,
+ * or mock fixtures in browser dev); this composable layers selection + filtering
+ * on top of it.
  */
 
-const documents = ref<Document[]>(
-  mockDocuments.map((document) => ({ ...document })),
-);
+const { documents } = useVault();
 const selectedDocumentId = ref<string>(documents.value[0]?.id ?? "");
 const selectedVersionId = ref<string>(
   documents.value[0]?.versions[0]?.id ?? "",
@@ -35,8 +32,6 @@ const selectedVersion = computed<Version | undefined>(
 );
 
 export function useDocuments() {
-  const { t } = useI18n();
-
   const filteredDocuments = computed<Document[]>(() => {
     const query = searchQuery.value.trim().toLowerCase();
 
@@ -46,9 +41,9 @@ export function useDocuments() {
 
     return documents.value.filter((document) =>
       [
-        t(document.nameKey),
+        document.name,
         document.originalFilename,
-        t(document.ownerKey),
+        document.owner,
         document.id,
       ].some((value) => value.toLowerCase().includes(query)),
     );

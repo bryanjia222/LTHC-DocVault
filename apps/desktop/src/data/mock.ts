@@ -1,9 +1,10 @@
 /*
- * Mock data for the DocVault desktop prototype.
+ * Fallback fixtures for the DocVault desktop UI.
  *
- * These types and fixtures stand in for the Tauri commands that will eventually
- * read from core/storage. They are intentionally UI-oriented (i18n keys for
- * translatable strings) and will be replaced by real command results.
+ * Used only when running outside Tauri (pure `npm run dev` in a browser) so the
+ * UI still renders. Under `tauri dev` the real backend drives everything via
+ * `composables/useVault.ts`. Field names mirror the view-model shape produced by
+ * useVault's mapping layer: plain display strings, not i18n keys.
  */
 
 export type DocumentType = "docx" | "xlsx" | "pptx";
@@ -16,7 +17,7 @@ export interface Version {
   label: string;
   parentId?: string;
   author: string;
-  noteKey: string;
+  note: string;
   size: string;
   createdAt: string;
   status: VersionStatus;
@@ -24,10 +25,10 @@ export interface Version {
 
 export interface Document {
   id: string;
-  nameKey: string;
+  name: string;
   originalFilename: string;
   type: DocumentType;
-  ownerKey: string;
+  owner: string;
   updatedAt: string;
   versions: Version[];
   backend: Backend;
@@ -40,7 +41,7 @@ export type JobStatus = "running" | "queued" | "done";
 export interface Job {
   id: string;
   kind: JobKind;
-  targetKey: string;
+  target: string;
   progress: number;
   status: JobStatus;
 }
@@ -60,10 +61,10 @@ export interface VaultConfigPreview {
 export const documents: Document[] = [
   {
     id: "550e8400",
-    nameKey: "mock.documents.contract",
+    name: "合同归档",
     originalFilename: "contract-review.docx",
     type: "docx",
-    ownerKey: "mock.owners.bryan",
+    owner: "Bryan",
     updatedAt: "2026-07-09 10:42",
     backend: "restic",
     health: "synced",
@@ -73,7 +74,7 @@ export const documents: Document[] = [
         label: "v3",
         parentId: "v2",
         author: "Bryan",
-        noteKey: "mock.notes.contractV3",
+        note: "更新签署页和付款条款",
         size: "1.8 MB",
         createdAt: "2026-07-09 10:42",
         status: "current",
@@ -83,7 +84,7 @@ export const documents: Document[] = [
         label: "v2",
         parentId: "v1",
         author: "Evan",
-        noteKey: "mock.notes.contractV2",
+        note: "法律评审意见合并",
         size: "1.7 MB",
         createdAt: "2026-07-08 18:12",
         status: "archived",
@@ -93,7 +94,7 @@ export const documents: Document[] = [
         label: "v2a",
         parentId: "v1",
         author: "Bryan",
-        noteKey: "mock.notes.contractV2a",
+        note: "保留原始条款的备用分支",
         size: "1.6 MB",
         createdAt: "2026-07-08 09:20",
         status: "archived",
@@ -102,7 +103,7 @@ export const documents: Document[] = [
         id: "v1",
         label: "v1",
         author: "Bryan",
-        noteKey: "mock.notes.contractV1",
+        note: "初始提交",
         size: "1.5 MB",
         createdAt: "2026-07-07 21:05",
         status: "archived",
@@ -111,10 +112,10 @@ export const documents: Document[] = [
   },
   {
     id: "7c1b28d1",
-    nameKey: "mock.documents.budget",
+    name: "季度预算",
     originalFilename: "q3-budget.xlsx",
     type: "xlsx",
-    ownerKey: "mock.owners.finance",
+    owner: "财务",
     updatedAt: "2026-07-09 09:18",
     backend: "local-copy",
     health: "needsReview",
@@ -124,7 +125,7 @@ export const documents: Document[] = [
         label: "v5",
         parentId: "v4",
         author: "May",
-        noteKey: "mock.notes.budgetV5",
+        note: "补充采购项",
         size: "824 KB",
         createdAt: "2026-07-09 09:18",
         status: "current",
@@ -133,7 +134,7 @@ export const documents: Document[] = [
         id: "v4",
         label: "v4",
         author: "May",
-        noteKey: "mock.notes.budgetV4",
+        note: "调整差旅预算",
         size: "802 KB",
         createdAt: "2026-07-08 15:24",
         status: "archived",
@@ -142,10 +143,10 @@ export const documents: Document[] = [
   },
   {
     id: "a91f2048",
-    nameKey: "mock.documents.roadmap",
+    name: "产品路线图",
     originalFilename: "roadmap.pptx",
     type: "pptx",
-    ownerKey: "mock.owners.product",
+    owner: "产品",
     updatedAt: "2026-07-08 22:36",
     backend: "restic",
     health: "queued",
@@ -155,7 +156,7 @@ export const documents: Document[] = [
         label: "v2",
         parentId: "v1",
         author: "Lena",
-        noteKey: "mock.notes.roadmapV2",
+        note: "增加桌面端里程碑",
         size: "4.2 MB",
         createdAt: "2026-07-08 22:36",
         status: "current",
@@ -164,7 +165,7 @@ export const documents: Document[] = [
         id: "v1",
         label: "v1",
         author: "Lena",
-        noteKey: "mock.notes.roadmapV1",
+        note: "初版路线图",
         size: "3.9 MB",
         createdAt: "2026-07-06 11:30",
         status: "archived",
@@ -177,21 +178,21 @@ export const jobs: Job[] = [
   {
     id: "job-104",
     kind: "commit",
-    targetKey: "mock.targets.roadmap",
+    target: "产品路线图",
     progress: 72,
     status: "running",
   },
   {
     id: "job-103",
     kind: "export",
-    targetKey: "mock.targets.contractV2",
+    target: "合同归档 v2",
     progress: 100,
     status: "done",
   },
   {
     id: "job-102",
     kind: "checkout",
-    targetKey: "mock.targets.budgetV4",
+    target: "季度预算 v4",
     progress: 0,
     status: "queued",
   },

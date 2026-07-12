@@ -20,6 +20,14 @@ export const enUS = {
     subtitle:
       "Desktop console prototype for commits, exports, checkout, and job tracking.",
   },
+  boot: {
+    loading: "Connecting to vault…",
+    welcome: "Welcome to DocVault",
+    notInitialized:
+      "The document vault is not initialized yet. Initializing creates the local vault directory and database (local-copy backend).",
+    initialize: "Initialize vault",
+    initFailed: "Initialization failed: {error}",
+  },
   actions: {
     refresh: "Refresh",
     commandPalette: "Command palette",
@@ -178,32 +186,5 @@ export const enUS = {
     hint: "↑↓ to navigate, Enter to run, Esc to close",
     groupNavigation: "Navigation",
     groupActions: "Actions",
-  },
-  mock: {
-    documents: {
-      contract: "Contract Archive",
-      budget: "Quarterly Budget",
-      roadmap: "Product Roadmap",
-    },
-    notes: {
-      contractV3: "Updated signature page and payment terms",
-      contractV2: "Merged legal review notes",
-      contractV2a: "Fallback branch retaining the original terms",
-      contractV1: "Initial commit",
-      budgetV5: "Added procurement items",
-      budgetV4: "Adjusted travel budget",
-      roadmapV2: "Added desktop milestones",
-      roadmapV1: "Initial roadmap",
-    },
-    owners: {
-      bryan: "Bryan",
-      finance: "Finance",
-      product: "Product",
-    },
-    targets: {
-      roadmap: "Product Roadmap",
-      contractV2: "Contract Archive v2",
-      budgetV4: "Quarterly Budget v4",
-    },
   },
 };
