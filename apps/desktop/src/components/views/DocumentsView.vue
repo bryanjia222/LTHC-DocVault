@@ -44,6 +44,10 @@ const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
 const versions = computed(() => selectedDocument.value?.versions ?? []);
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
 
+function currentVersionLabel(document: Document): string {
+  return document.versions.find((v) => v.status === "current")?.label ?? "-";
+}
+
 function chooseDocument(document: Document) {
   selectDocument(document);
   versionViewMode.value = "list";
@@ -114,9 +118,8 @@ function setGraphMaximized(maximized: boolean) {
           <thead>
             <tr>
               <th>{{ t("documents.columns.name") }}</th>
-              <th>{{ t("documents.columns.file") }}</th>
               <th>{{ t("documents.columns.owner") }}</th>
-              <th>{{ t("documents.columns.versions") }}</th>
+              <th>{{ t("documents.columns.currentVersion") }}</th>
               <th>{{ t("documents.columns.status") }}</th>
               <th>{{ t("documents.columns.updated") }}</th>
             </tr>
@@ -137,9 +140,8 @@ function setGraphMaximized(maximized: boolean) {
                 <span class="file-type">{{ document.type }}</span>
                 <strong>{{ document.name }}</strong>
               </td>
-              <td>{{ document.originalFilename }}</td>
               <td>{{ document.owner }}</td>
-              <td>{{ document.versions.length }}</td>
+              <td>{{ currentVersionLabel(document) }}</td>
               <td>
                 <span class="status-pill" :data-status="document.health">{{
                   t(`status.${document.health}`)
@@ -148,7 +150,7 @@ function setGraphMaximized(maximized: boolean) {
               <td>{{ document.updatedAt }}</td>
             </tr>
             <tr v-if="filteredDocuments.length === 0">
-              <td colspan="6" class="empty-state">
+              <td colspan="5" class="empty-state">
                 <div v-if="documents.length === 0" class="empty-cta">
                   <p>{{ t("documents.emptyNoDocs") }}</p>
                   <button
@@ -214,7 +216,12 @@ function setGraphMaximized(maximized: boolean) {
         :aria-label="t('details.versionHistoryLabel')"
       >
         <div class="section-heading">
-          <h3>{{ t("details.versionHistory") }}</h3>
+          <div class="heading-title">
+            <h3>{{ t("details.versionHistory") }}</h3>
+            <small v-if="selectedDocument" class="heading-meta">{{
+              t("details.totalVersions", { count: versions.length })
+            }}</small>
+          </div>
           <div class="segmented-control">
             <button
               type="button"
@@ -574,6 +581,17 @@ tbody tr.selected {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.heading-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.heading-meta {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .version-history-scroll {

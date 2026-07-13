@@ -91,9 +91,8 @@ export const enUS = {
     emptyNoDocs: "No documents yet. Add your first document.",
     columns: {
       name: "Name",
-      file: "File",
       owner: "Owner",
-      versions: "Versions",
+      currentVersion: "Current version",
       status: "Status",
       updated: "Updated",
     },
@@ -102,6 +101,7 @@ export const enUS = {
     label: "Document details",
     versionHistoryLabel: "Version history",
     versionHistory: "Version History",
+    totalVersions: "Total versions: {count}",
     treeView: "Tree",
     listView: "List",
     noBranchingTooltip: "Version structure has no branches",

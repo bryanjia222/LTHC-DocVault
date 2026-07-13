@@ -90,9 +90,8 @@ export const zhCN = {
     emptyNoDocs: "还没有文档，添加第一个文档吧。",
     columns: {
       name: "名称",
-      file: "文件",
       owner: "所有者",
-      versions: "版本",
+      currentVersion: "当前版本",
       status: "状态",
       updated: "更新时间",
     },
@@ -101,6 +100,7 @@ export const zhCN = {
     label: "文档详情",
     versionHistoryLabel: "版本历史",
     versionHistory: "版本历史",
+    totalVersions: "总版本数：{count}",
     treeView: "树形",
     listView: "列表",
     noBranchingTooltip: "版本结构无分叉",
