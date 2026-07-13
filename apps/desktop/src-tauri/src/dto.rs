@@ -1,4 +1,6 @@
-use serde::Serialize;
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 use docvault_types::{Document, Version};
 
@@ -57,4 +59,55 @@ pub enum ConnectError {
     /// Any other failure (init/open IO error, invalid backend, ...). Carries the
     /// backend's verbatim message.
     Other(String),
+}
+
+/// Desktop-local annotations for one vault, stored in `desktop-state.json`
+/// (separate from any vault's own `config.toml`/DB). The DocVault backend never
+/// persists local file paths or tags, so these live entirely on the desktop side
+/// and are scoped by vault root - switching vaults swaps the slice.
+///
+/// `tags` maps document id -> tag list. `tracked` holds the source-file baseline
+/// captured at import time, used by the modification tracker.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DesktopStateSlice {
+    #[serde(default)]
+    pub tags: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub tracked: Vec<TrackedFile>,
+}
+
+/// A tracked source file: the path the user last committed for a document, plus
+/// the size/mtime/sha256 snapshot captured right after that commit. The tracker
+/// compares a fresh probe against this baseline to detect external edits.
+/// `sha256` is omitted for files above the hash threshold (too large to hash).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackedFile {
+    pub document_id: String,
+    pub path: String,
+    pub size: u64,
+    pub mtime_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub sha256: Option<String>,
+}
+
+/// Fast stat result for a single path (no content hashing). `exists` is false
+/// for any path that cannot be stat'd (missing or inaccessible).
+#[derive(Debug, Serialize)]
+pub struct FileStat {
+    pub path: String,
+    pub exists: bool,
+    pub size: u64,
+    pub mtime_ms: u64,
+}
+
+/// Full probe of a single path: stat plus a sha256 digest, computed only when
+/// the file exists and its size is within `max_bytes` (so large files are not
+/// hashed on every poll). `sha256` is `None` otherwise.
+#[derive(Debug, Serialize)]
+pub struct FileProbe {
+    pub exists: bool,
+    pub size: u64,
+    pub mtime_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }

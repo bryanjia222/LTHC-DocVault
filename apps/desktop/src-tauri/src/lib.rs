@@ -1,6 +1,7 @@
 mod commands;
 mod dto;
 mod jobs;
+mod local_state;
 mod prefs;
 mod state;
 
@@ -48,6 +49,10 @@ pub fn run() {
             jobs::checkout_version,
             jobs::list_jobs,
             jobs::cancel_job,
+            local_state::get_desktop_state,
+            local_state::set_desktop_state,
+            local_state::stat_files,
+            local_state::probe_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocVault desktop");

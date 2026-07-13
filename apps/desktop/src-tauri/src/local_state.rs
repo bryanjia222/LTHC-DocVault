@@ -1,0 +1,384 @@
+//! Desktop-local state (tags + tracked source files), persisted in
+//! `desktop-state.json` in the Tauri app config dir - the same dir as
+//! `desktop-prefs.json`. The DocVault backend never stores local file paths or
+//! tags, so this file is the single home for desktop-only annotations.
+//!
+//! State is scoped by vault root: each vault root maps to its own
+//! [`DesktopStateSlice`] (tags + tracked files), so switching vaults swaps the
+//! active slice and two vaults never share tags. The root key is the
+//! canonicalized vault root path (falls back to the raw display string when
+//! canonicalization fails), so connecting the same vault via different path
+//! spellings still resolves to one slice.
+//!
+//! File-stat / sha256 probing is split into pure helpers ([`stat_at`],
+//! [`probe_at`]) so the two-tier modification detection (fast stat, full hash
+//! only when stat changed and the file is small) is unit-testable without a
+//! running app.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tauri::{AppHandle, Manager, State};
+
+use crate::dto::{DesktopStateSlice, FileProbe, FileStat, TrackedFile};
+use crate::state::{self, AppState};
+
+/// On-disk shape: a versioned map of vault root -> slice. `version` is reserved
+/// for future migration; today it is always written as 1.
+#[derive(Default, Serialize, Deserialize)]
+struct DesktopStateFile {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    vaults: BTreeMap<String, DesktopStateSlice>,
+}
+
+// --- pure helpers (no AppHandle; unit-testable) ---
+
+/// Read & deserialize the state file. A missing file is not an error - it yields
+/// an empty (default) state, so first run is transparent.
+fn load_file_at(path: &Path) -> Result<DesktopStateFile, String> {
+    match fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DesktopStateFile::default()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Serialize & write the state file, creating the parent dir if needed.
+fn save_file_at(path: &Path, file: &DesktopStateFile) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
+    fs::write(path, text).map_err(|e| e.to_string())
+}
+
+/// The slice for `root` in `file`, or an empty default when absent. Pure: takes
+/// the root key already canonicalized (or any stable string).
+fn slice_for_root(file: &DesktopStateFile, root: &str) -> DesktopStateSlice {
+    file.vaults.get(root).cloned().unwrap_or_default()
+}
+
+/// Canonicalize a vault root path into a stable map key. Falls back to the raw
+/// display string when canonicalization fails (e.g. the path no longer exists),
+/// so a transiently-unavailable vault still resolves to its stored slice.
+fn canonical_key(path: &Path) -> String {
+    fs::canonicalize(path)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+/// Stat a single path. Any metadata error (missing or inaccessible) is reported
+/// as `exists: false` so the tracker surfaces "源文件缺失" rather than crashing
+/// a batch poll.
+fn stat_at(path: &Path) -> FileStat {
+    match fs::metadata(path) {
+        Ok(meta) => FileStat {
+            path: path.display().to_string(),
+            exists: true,
+            size: meta.len(),
+            mtime_ms: mtime_ms(&meta),
+        },
+        Err(_) => FileStat {
+            path: path.display().to_string(),
+            exists: false,
+            size: 0,
+            mtime_ms: 0,
+        },
+    }
+}
+
+/// Stat + (conditionally) hash a single path. `sha256` is computed only when the
+/// file exists and its size is within `max_bytes`, so large files are never
+/// hashed. A read failure on an existing small file yields `sha256: None` (the
+/// tracker then treats a stat change as "modified" rather than crashing).
+fn probe_at(path: &Path, max_bytes: u64) -> FileProbe {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => {
+            return FileProbe {
+                exists: false,
+                size: 0,
+                mtime_ms: 0,
+                sha256: None,
+            }
+        }
+    };
+    let size = meta.len();
+    let mtime_ms = mtime_ms(&meta);
+    let sha256 = if size <= max_bytes {
+        compute_sha256(path)
+    } else {
+        None
+    };
+    FileProbe {
+        exists: true,
+        size,
+        mtime_ms,
+        sha256,
+    }
+}
+
+/// File mtime as milliseconds since the Unix epoch (0 when unavailable).
+fn mtime_ms(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Hex sha256 of a file's contents, streamed through a 64 KB buffer. `None` on
+/// any read error.
+fn compute_sha256(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+// --- AppHandle-bound wrappers + commands ---
+
+fn state_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("desktop-state.json"))
+}
+
+/// The canonicalized root of the currently-open vault, or `None` when no vault
+/// is open (onboarding). The desktop-state file is scoped by this key.
+fn current_vault_root(state: &State<AppState>) -> Option<String> {
+    let vault = state::lock_vault(&state.vault);
+    let vault = vault.as_ref()?;
+    Some(canonical_key(&vault.paths().root_dir))
+}
+
+/// Read the whole state file from disk.
+fn load_file(app: &AppHandle) -> Result<DesktopStateFile, String> {
+    let path = state_path(app).ok_or_else(|| "app config directory unavailable".to_owned())?;
+    load_file_at(&path)
+}
+
+/// Write the whole state file to disk.
+fn save_file(app: &AppHandle, file: &DesktopStateFile) -> Result<(), String> {
+    let path = state_path(app).ok_or_else(|| "app config directory unavailable".to_owned())?;
+    save_file_at(&path, file)
+}
+
+/// Return the current vault's desktop-local slice (tags + tracked files). An
+/// empty slice is returned when no vault is open, so onboarding renders cleanly.
+#[tauri::command(rename_all = "snake_case")]
+pub fn get_desktop_state(
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<DesktopStateSlice, String> {
+    let file = load_file(&app)?;
+    let root = current_vault_root(&state);
+    Ok(slice_for_root(
+        &file,
+        root.as_deref().unwrap_or(""),
+    ))
+}
+
+/// Replace the current vault's slice (tags + tracked) and persist. Refuses when
+/// no vault is open, since there is no root to key the slice by.
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_desktop_state(
+    app: AppHandle,
+    state: State<AppState>,
+    tags: BTreeMap<String, Vec<String>>,
+    tracked: Vec<TrackedFile>,
+) -> Result<(), String> {
+    let root = current_vault_root(&state)
+        .ok_or_else(|| "vault not initialized".to_owned())?;
+    let mut file = load_file(&app)?;
+    file.vaults.insert(root, DesktopStateSlice { tags, tracked });
+    save_file(&app, &file)
+}
+
+/// Fast batch stat (size + mtime only, no hashing) for the two-tier tracker's
+/// polling pass. Each path resolves independently; a missing/inaccessible path
+/// returns `exists: false` rather than failing the whole batch.
+#[tauri::command(rename_all = "snake_case")]
+pub fn stat_files(paths: Vec<String>) -> Result<Vec<FileStat>, String> {
+    Ok(paths.into_iter().map(|p| stat_at(Path::new(&p))).collect())
+}
+
+/// Full probe (stat + sha256 when the file is within `max_bytes`) for a single
+/// path. Used for the import-time baseline and the full-detection pass.
+#[tauri::command(rename_all = "snake_case")]
+pub fn probe_file(path: String, max_bytes: u64) -> Result<FileProbe, String> {
+    Ok(probe_at(Path::new(&path), max_bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// A missing state file yields an empty default - first run is transparent.
+    #[test]
+    fn load_missing_file_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("desktop-state.json");
+        let file = load_file_at(&path).unwrap();
+        assert!(file.vaults.is_empty());
+    }
+
+    /// Writing then reading round-trips tags and tracked files verbatim, and
+    /// omits `sha256` when it is `None`.
+    #[test]
+    fn save_then_load_round_trips() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("nested/desktop-state.json");
+        let mut file = DesktopStateFile {
+            version: 1,
+            ..Default::default()
+        };
+        file.vaults.insert(
+            "/vault".to_owned(),
+            DesktopStateSlice {
+                tags: {
+                    let mut m = BTreeMap::new();
+                    m.insert("docA".to_owned(), vec!["legal".to_owned(), "draft".to_owned()]);
+                    m
+                },
+                tracked: vec![TrackedFile {
+                    document_id: "docA".to_owned(),
+                    path: "/tmp/a.docx".to_owned(),
+                    size: 10,
+                    mtime_ms: 5,
+                    sha256: None,
+                }],
+            },
+        );
+        save_file_at(&path, &file).unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("sha256"),
+            "None sha256 should be omitted, got: {text}"
+        );
+
+        let reloaded = load_file_at(&path).unwrap();
+        let slice = slice_for_root(&reloaded, "/vault");
+        assert_eq!(slice.tags.get("docA").unwrap(), &["legal", "draft"]);
+        assert_eq!(slice.tracked.len(), 1);
+        assert_eq!(slice.tracked[0].path, "/tmp/a.docx");
+        assert_eq!(slice.tracked[0].sha256, None);
+    }
+
+    /// Two vault roots keep independent slices - switching vaults never leaks
+    /// tags or tracked files from one into the other.
+    #[test]
+    fn slices_are_isolated_per_root() {
+        let mut file = DesktopStateFile::default();
+        file.vaults.insert(
+            "/a".to_owned(),
+            DesktopStateSlice {
+                tags: {
+                    let mut m = BTreeMap::new();
+                    m.insert("docA".to_owned(), vec!["t1".to_owned()]);
+                    m
+                },
+                tracked: Vec::new(),
+            },
+        );
+        file.vaults.insert(
+            "/b".to_owned(),
+            DesktopStateSlice {
+                tags: BTreeMap::new(),
+                tracked: vec![TrackedFile {
+                    document_id: "docB".to_owned(),
+                    path: "/b.docx".to_owned(),
+                    size: 1,
+                    mtime_ms: 1,
+                    sha256: None,
+                }],
+            },
+        );
+
+        let a = slice_for_root(&file, "/a");
+        let b = slice_for_root(&file, "/b");
+        let none = slice_for_root(&file, "/c");
+        assert_eq!(a.tags.get("docA").unwrap(), &["t1"]);
+        assert!(a.tracked.is_empty());
+        assert!(b.tags.is_empty());
+        assert_eq!(b.tracked.len(), 1);
+        assert!(none.tags.is_empty() && none.tracked.is_empty());
+    }
+
+    /// `stat_at` reports exists/size/mtime for a real file and `exists: false`
+    /// for a missing one.
+    #[test]
+    fn stat_at_reports_existing_and_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("x.docx");
+        fs::write(&file, b"hello").unwrap();
+
+        let stat = stat_at(&file);
+        assert!(stat.exists);
+        assert_eq!(stat.size, 5);
+        assert!(stat.mtime_ms > 0);
+
+        let missing = stat_at(&temp.path().join("nope.docx"));
+        assert!(!missing.exists);
+        assert_eq!(missing.size, 0);
+    }
+
+    /// `probe_at` hashes a small file but skips hashing when the file is larger
+    /// than `max_bytes`; a missing file reports `exists: false` with no digest.
+    #[test]
+    fn probe_at_hashes_small_skips_large() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("x.docx");
+        fs::write(&file, b"hello").unwrap();
+
+        let small = probe_at(&file, 1024);
+        assert!(small.exists);
+        assert_eq!(small.size, 5);
+        let sha = small.sha256.expect("small file should be hashed");
+        assert_eq!(sha.len(), 64, "sha256 hex is 64 chars");
+
+        // Same content -> same digest.
+        let again = probe_at(&file, 1024);
+        assert_eq!(again.sha256.as_deref(), Some(sha.as_str()));
+
+        // max_bytes below the file size -> no hashing.
+        let large = probe_at(&file, 1);
+        assert!(large.exists);
+        assert_eq!(large.sha256, None);
+
+        let missing = probe_at(&temp.path().join("nope.docx"), 1024);
+        assert!(!missing.exists);
+        assert_eq!(missing.sha256, None);
+    }
+
+    /// Different contents produce different digests.
+    #[test]
+    fn sha256_distinguishes_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let a = temp.path().join("a.docx");
+        let b = temp.path().join("b.docx");
+        fs::write(&a, b"version one").unwrap();
+        fs::write(&b, b"version two").unwrap();
+        assert_ne!(
+            probe_at(&a, 1024).sha256,
+            probe_at(&b, 1024).sha256
+        );
+    }
+}
