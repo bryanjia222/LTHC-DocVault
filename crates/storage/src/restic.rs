@@ -116,6 +116,23 @@ impl VaultStorage {
         }
         Ok(command.output()?)
     }
+
+    /// Best-effort `restic version` capture for display. Empty when the binary
+    /// is unavailable or exits non-zero. Cached once per vault session by
+    /// `VaultStorage::init`/`open` rather than re-spawned on every config read.
+    pub(crate) fn capture_restic_version(&self) -> String {
+        let Ok(output) = self.run_restic(["version"]) else {
+            return String::new();
+        };
+        if !output.status.success() {
+            return String::new();
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_owned()
+    }
 }
 
 fn restic_failed(command: &str, stderr: Vec<u8>) -> StorageError {
@@ -213,6 +230,28 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn restic_version_cached_once_per_session() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let first = storage.restic_version().to_owned();
+        let second = storage.restic_version().to_owned();
+        assert_eq!(first, "restic 0.19.1");
+        assert_eq!(second, first);
+
+        let log = fs::read_to_string(&log_path).unwrap();
+        let version_calls = log.lines().filter(|line| line.contains(" version")).count();
+        assert_eq!(
+            version_calls, 1,
+            "restic version should be invoked once at init, not on every read"
+        );
+    }
+
     enum MockRestic {
         Success,
         BackupFails,
@@ -277,6 +316,7 @@ mod tests {
              echo %*>>\"{}\"\n\
              {}\n\
              if \"%3\"==\"backup\" echo {{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}\n\
+             if \"%3\"==\"version\" echo restic 0.19.1\n\
              exit /b 0\n",
             log_path.display(),
             failure
@@ -296,6 +336,7 @@ mod tests {
              printf '%s\\n' \"$*\" >> '{}'\n\
              {}\
              if [ \"$3\" = \"backup\" ]; then printf '%s\\n' '{{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}'; fi\n\
+             if [ \"$3\" = \"version\" ]; then printf '%s\\n' 'restic 0.19.1'; fi\n\
              exit 0\n",
             log_path.display(),
             failure

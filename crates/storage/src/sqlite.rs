@@ -92,6 +92,15 @@ impl VaultStorage {
         Ok(documents)
     }
 
+    pub(crate) fn document_name_by_id(&self, id: &str) -> StorageResult<String> {
+        self.connection
+            .query_row("SELECT name FROM documents WHERE id = ?1", [id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?
+            .ok_or_else(|| StorageError::DocumentIdNotFound(id.to_owned()))
+    }
+
     pub(crate) fn resolve_document_ref(
         &self,
         document_ref: &DocumentRef,

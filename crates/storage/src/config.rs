@@ -83,21 +83,49 @@ pub(crate) fn default_config(paths: &VaultPaths) -> StorageResult<String> {
     ))?)
 }
 
+/// Resolve the restic binary when neither config nor env supplies one (§5.4
+/// steps 3-5): the packaged sidecar next to the running executable, then the
+/// `third_party/restic` asset beside the vault root, then the system PATH.
 fn bundled_or_system_restic(paths: &VaultPaths) -> PathBuf {
-    let bundled = paths
-        .root_dir
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("third_party")
-        .join("restic")
-        .join("0.19.1")
-        .join(target_triple())
-        .join(restic_binary_name());
-    if bundled.exists() {
-        bundled
-    } else {
-        PathBuf::from(restic_binary_name())
+    resolve_restic_path(
+        &restic_candidate_roots(paths, target_triple()),
+        restic_binary_name(),
+    )
+}
+
+/// Candidate directories searched for a bundled restic, in §5.4 order:
+/// (3) next to the running executable (packaged sidecar), then
+/// (4) `third_party/restic/<version>/<triple>` beside the vault root.
+fn restic_candidate_roots(paths: &VaultPaths, triple: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(exe) = env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        roots.push(dir.to_path_buf());
     }
+    if let Some(parent) = paths.root_dir.parent() {
+        roots.push(
+            parent
+                .join("third_party")
+                .join("restic")
+                .join("0.19.1")
+                .join(triple),
+        );
+    }
+    roots
+}
+
+/// Return the first existing `<root>/<binary_name>` among `candidate_roots`, or
+/// the bare binary name as a system-PATH fallback (§5.4 step 5). Pure so the
+/// lookup order is unit-testable without depending on `current_exe`.
+fn resolve_restic_path(candidate_roots: &[PathBuf], binary_name: &str) -> PathBuf {
+    for root in candidate_roots {
+        let candidate = root.join(binary_name);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from(binary_name)
 }
 
 fn target_triple() -> &'static str {
@@ -133,5 +161,54 @@ mod tests {
         let config = ResticConfig::new(".docvault/repo").with_restic_path("tools/restic.exe");
 
         assert_eq!(config.restic_path, Some(PathBuf::from("tools/restic.exe")));
+    }
+
+    #[test]
+    fn resolve_restic_path_finds_existing_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let candidate = temp.path().join("bin");
+        fs::create_dir_all(&candidate).unwrap();
+        let restic = candidate.join(restic_binary_name());
+        fs::write(&restic, b"").unwrap();
+
+        assert_eq!(
+            resolve_restic_path(&[candidate], restic_binary_name()),
+            restic
+        );
+    }
+
+    #[test]
+    fn resolve_restic_path_falls_back_to_system_path() {
+        assert_eq!(
+            resolve_restic_path(
+                &[PathBuf::from("/nonexistent/restic-dir")],
+                restic_binary_name()
+            ),
+            PathBuf::from(restic_binary_name())
+        );
+    }
+
+    #[test]
+    fn restic_candidate_roots_include_third_party_asset() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        fs::create_dir_all(&root).unwrap();
+        let paths = VaultPaths::new(
+            root,
+            temp.path().join("data"),
+            temp.path().join("db.sqlite"),
+        );
+
+        let roots = restic_candidate_roots(&paths, target_triple());
+        let asset = temp
+            .path()
+            .join("third_party")
+            .join("restic")
+            .join("0.19.1")
+            .join(target_triple());
+        assert!(
+            roots.contains(&asset),
+            "third_party asset dir should be a candidate, got {roots:?}"
+        );
     }
 }

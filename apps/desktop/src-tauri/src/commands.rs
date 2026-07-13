@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use tauri::{AppHandle, Manager, State};
 
 use docvault_storage::DocumentRef;
@@ -63,7 +61,7 @@ pub fn get_config(state: State<AppState>) -> Result<ConfigDto, String> {
         repo_dir: paths.repo_dir.display().to_string(),
         db_path: paths.db_path.display().to_string(),
         restic_path: vault.restic_path().display().to_string(),
-        restic_version: restic_version(vault.restic_path()),
+        restic_version: vault.restic_version().to_owned(),
         log_level,
         log_file,
     })
@@ -80,22 +78,6 @@ fn read_logging(config_path: &std::path::Path) -> Result<(String, String), Strin
         config.logging.level,
         config.logging.file.unwrap_or_default(),
     ))
-}
-
-/// Best-effort `restic version` capture; empty when the binary is unavailable
-/// (e.g. local-copy backend without restic on PATH).
-fn restic_version(restic_path: &std::path::Path) -> String {
-    let Ok(output) = Command::new(restic_path).arg("version").output() else {
-        return String::new();
-    };
-    if !output.status.success() {
-        return String::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .to_owned()
 }
 
 /// Connect (and switch to) the vault at the chosen directory with the chosen

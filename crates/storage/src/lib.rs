@@ -56,6 +56,10 @@ pub struct VaultStorage {
     pub(crate) paths: VaultPaths,
     pub(crate) settings: StorageSettings,
     pub(crate) connection: Connection,
+    /// Best-effort `restic version` captured once at init/open. Empty for the
+    /// local-copy backend or when restic is unavailable; avoids re-spawning on
+    /// every config read.
+    pub(crate) restic_version: String,
 }
 
 impl VaultStorage {
@@ -77,14 +81,16 @@ impl VaultStorage {
 
         let settings = config::read_settings(&paths)?;
         let connection = Connection::open(&paths.db_path)?;
-        let storage = Self {
+        let mut storage = Self {
             paths,
             settings,
             connection,
+            restic_version: String::new(),
         };
         storage.migrate()?;
         if storage.settings.backend == BackupBackend::Restic {
             storage.ensure_restic_repo()?;
+            storage.restic_version = storage.capture_restic_version();
         }
         info!(root_dir = %storage.paths.root_dir.display(), "vault storage initialized");
         Ok(storage)
@@ -94,12 +100,16 @@ impl VaultStorage {
         debug!(root_dir = %paths.root_dir.display(), "opening vault storage");
         let settings = config::read_settings(&paths)?;
         let connection = Connection::open(&paths.db_path)?;
-        let storage = Self {
+        let mut storage = Self {
             paths,
             settings,
             connection,
+            restic_version: String::new(),
         };
         storage.migrate()?;
+        if storage.settings.backend == BackupBackend::Restic {
+            storage.restic_version = storage.capture_restic_version();
+        }
         Ok(storage)
     }
 
@@ -113,6 +123,12 @@ impl VaultStorage {
 
     pub fn restic_path(&self) -> &Path {
         &self.settings.restic_path
+    }
+
+    /// The cached `restic version` string (empty for local-copy or when restic
+    /// is unavailable). Captured once at init/open.
+    pub fn restic_version(&self) -> &str {
+        &self.restic_version
     }
 
     pub fn add_document_version(
@@ -283,6 +299,12 @@ impl VaultStorage {
         self.versions_for_document(document.id.as_str())
     }
 
+    /// Look up a single document's display name by id, without scanning all
+    /// documents. `DocumentIdNotFound` when no document has that exact id.
+    pub fn document_name(&self, id: &str) -> StorageResult<String> {
+        self.document_name_by_id(id)
+    }
+
     fn resolve_requested_version(
         &self,
         document: &Document,
@@ -435,6 +457,34 @@ mod tests {
         assert!(matches!(
             error,
             StorageError::AmbiguousDocumentName { name, matches } if name == "report" && matches.len() == 2
+        ));
+    }
+
+    #[test]
+    fn document_name_lookup_by_id() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+        let document = storage.create_document("report", 1).unwrap();
+
+        assert_eq!(
+            storage.document_name(document.id.as_str()).unwrap(),
+            "report"
+        );
+    }
+
+    #[test]
+    fn document_name_missing_returns_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let error = storage.document_name("nonexistent-id").unwrap_err();
+        assert!(matches!(
+            error,
+            StorageError::DocumentIdNotFound(id) if id == "nonexistent-id"
         ));
     }
 

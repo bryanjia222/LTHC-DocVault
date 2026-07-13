@@ -21,7 +21,7 @@ use docvault_types::CommitMetadata;
 use tauri::{AppHandle, Emitter, State};
 use tracing::warn;
 
-use crate::state::AppState;
+use crate::state::{self, AppState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn commit_document(
@@ -169,19 +169,15 @@ fn resolve_commit_ref(
     }
 }
 
-/// Look up a document's display name by id. Fails fast with a clear message if
-/// the document does not exist, so the UI never spawns a job doomed to fail.
+/// Look up a document's display name by id via a targeted query (not a full
+/// document scan). Fails fast with a clear message if the document does not
+/// exist, so the UI never spawns a job doomed to fail.
 fn lookup_document_name(state: &State<AppState>, id: &str) -> Result<String, String> {
-    let vault = state.vault.lock().map_err(|e| e.to_string())?;
+    let vault = state::lock_vault(&state.vault);
     let vault = vault
         .as_ref()
         .ok_or_else(|| "vault not initialized".to_owned())?;
-    let documents = vault.list_documents().map_err(|e| e.to_string())?;
-    documents
-        .into_iter()
-        .find(|document| document.id.as_str() == id)
-        .map(|document| document.name)
-        .ok_or_else(|| format!("document {id} not found"))
+    vault.document_name(id).map_err(|e| e.to_string())
 }
 
 /// Build the `on_event` callback that forwards each job snapshot to the UI as a

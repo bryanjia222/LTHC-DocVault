@@ -104,6 +104,16 @@ impl DocVault {
     pub fn restic_path(&self) -> &Path {
         self.storage.restic_path()
     }
+
+    /// Cached `restic version` string (empty for local-copy or unavailable).
+    pub fn restic_version(&self) -> &str {
+        self.storage.restic_version()
+    }
+
+    /// Look up a document's display name by id without scanning all documents.
+    pub fn document_name(&self, id: &str) -> StorageResult<String> {
+        self.storage.document_name(id)
+    }
 }
 
 #[cfg(test)]
