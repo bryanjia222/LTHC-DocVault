@@ -27,6 +27,10 @@ pub struct ConfigDto {
 pub struct VaultStatusDto {
     pub initialized: bool,
     pub root_dir: String,
+    /// Error from the last failed attempt to open an already-initialized vault.
+    /// Absent when the vault is open or no open has been attempted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_error: Option<String>,
 }
 
 /// Result of a `connect_vault` call. `mode` is `"initialized"` (a new vault was

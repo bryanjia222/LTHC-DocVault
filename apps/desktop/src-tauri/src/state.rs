@@ -7,6 +7,7 @@ use docvault_jobs::{JobRegistry, JobStatus};
 use docvault_storage::{VaultPaths, VaultStorage};
 use docvault_types::VaultConfig;
 use tauri::AppHandle;
+use tracing::warn;
 
 use crate::dto::{ConnectError, ConnectOutcome};
 use crate::prefs;
@@ -18,9 +19,12 @@ use crate::prefs;
 /// The vault lives behind an `Arc` so background job threads can clone the
 /// handle and lock it independently of the Tauri command that spawned them.
 /// `jobs` is the authoritative job state machine; the UI mirrors it via events.
+/// `last_open_error` holds the error from the most recent failed attempt to open
+/// an already-initialized vault, so the UI can explain the silence.
 pub struct AppState {
     pub vault: Arc<Mutex<Option<DocVault>>>,
     pub jobs: JobRegistry,
+    pub last_open_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -28,6 +32,7 @@ impl AppState {
         Self {
             vault: Arc::new(Mutex::new(None)),
             jobs: JobRegistry::new(),
+            last_open_error: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -44,28 +49,72 @@ pub fn current_root(app: &AppHandle) -> PathBuf {
     prefs::load_root(app).unwrap_or_else(VaultPaths::default_root)
 }
 
-/// Open the vault on startup if it has already been initialized (config.toml
-/// exists at the current root). A missing config means first run; the UI will
-/// prompt to init.
-pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
-    let paths = VaultPaths::from_root(current_root(app));
-    if !paths.config_path.exists() {
-        return;
-    }
-    if let Ok(storage) = VaultStorage::open(paths) {
-        *state.vault.lock().expect("vault mutex poisoned") = Some(DocVault::new(storage));
+/// Lock the shared vault, recovering from a poisoned mutex instead of panicking.
+/// A panic in a job executor is caught by the runner, but the unwinding can
+/// still poison the mutex via its guard's `Drop`; read paths recover best-effort
+/// so a single panic does not cascade into every subsequent command crashing.
+pub fn lock_vault(
+    vault: &Arc<Mutex<Option<DocVault>>>,
+) -> std::sync::MutexGuard<'_, Option<DocVault>> {
+    match vault.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("vault mutex poisoned; recovering for best-effort access");
+            poisoned.into_inner()
+        }
     }
 }
 
-/// Initialize the vault for the first time (onboarding) at the platform default
-/// root using the `local-copy` backend. The user can later connect a different
-/// directory/backend from Settings. Only writes when no config exists, so
-/// re-running never clobbers an existing vault.
-pub fn init_vault(state: &AppState) -> Result<(), String> {
-    let paths = VaultPaths::from_root(VaultPaths::default_root());
+/// The error from the last attempt to open an already-initialized vault, if any.
+/// Surfaced via `vault_status` so the UI can explain why an existing vault is
+/// unavailable instead of silently showing the onboarding screen.
+pub fn open_error(state: &AppState) -> Option<String> {
+    state
+        .last_open_error
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn set_open_error(state: &AppState, message: Option<String>) {
+    *state
+        .last_open_error
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = message;
+}
+
+/// Open the vault on startup if it has already been initialized (config.toml
+/// exists at the current root). A missing config means first run; the UI will
+/// prompt to init. A failure to open an existing vault is captured in
+/// `last_open_error` (surfaced via `vault_status`) instead of being swallowed.
+pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
+    let root = current_root(app);
+    let paths = VaultPaths::from_root(&root);
+    if !paths.config_path.exists() {
+        return;
+    }
+    match VaultStorage::open(paths) {
+        Ok(storage) => {
+            set_open_error(state, None);
+            *lock_vault(&state.vault) = Some(DocVault::new(storage));
+        }
+        Err(e) => {
+            warn!(error = %e, root = %root.display(), "failed to open existing vault");
+            set_open_error(state, Some(e.to_string()));
+        }
+    }
+}
+
+/// Initialize the vault for the first time (onboarding) at the current root
+/// (last user-chosen, else platform default) using the `local-copy` backend.
+/// The user can later connect a different directory/backend from Settings. Only
+/// writes when no config exists, so re-running never clobbers an existing vault.
+pub fn init_vault(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let paths = VaultPaths::from_root(current_root(app));
     ensure_local_copy_config(&paths)?;
     let storage = VaultStorage::init(paths).map_err(|e| e.to_string())?;
-    *state.vault.lock().expect("vault mutex poisoned") = Some(DocVault::new(storage));
+    set_open_error(state, None);
+    *lock_vault(&state.vault) = Some(DocVault::new(storage));
     Ok(())
 }
 
@@ -104,16 +153,22 @@ pub fn connect_vault_core(
         write_config(&paths, backend, restic_password.as_deref())?;
         let storage = VaultStorage::init(paths).map_err(|e| ConnectError::Other(e.to_string()))?;
         let backend = backend.to_owned();
-        *state.vault.lock().expect("vault mutex poisoned") = Some(DocVault::new(storage));
+        *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("initialized", backend)
     } else if is_recognized_vault(&paths) {
         let storage = VaultStorage::open(paths).map_err(|e| ConnectError::Other(e.to_string()))?;
         let backend = storage.backend().as_str().to_owned();
-        *state.vault.lock().expect("vault mutex poisoned") = Some(DocVault::new(storage));
+        *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("opened", backend)
     } else {
         return Err(ConnectError::Unrecognized);
     };
+
+    // The previous vault's job history is no longer relevant, and any prior open
+    // error is now resolved. Safe because the `running` guard above guarantees
+    // no job is in flight.
+    set_open_error(state, None);
+    state.jobs.clear();
 
     Ok(ConnectOutcome {
         mode: mode.to_owned(),
@@ -194,8 +249,11 @@ fn ensure_local_copy_config(paths: &VaultPaths) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::dto::ConnectError;
+    use docvault_jobs::JobKind;
     use docvault_storage::{VaultPaths, VaultStorage};
     use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
 
     /// An empty directory is initialized as a new local-copy vault.
     #[test]
@@ -260,6 +318,41 @@ mod tests {
         let err = connect_vault_core(&state, root.to_str().unwrap(), "restic", None)
             .expect_err("restic without a password should be rejected");
         assert!(matches!(err, ConnectError::ResticPasswordRequired));
+    }
+
+    /// Switching to a new vault clears the job registry so the UI does not show
+    /// the previous vault's (terminal) jobs.
+    #[test]
+    fn connect_clears_jobs_from_previous_vault() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = AppState::new();
+
+        // First vault + a quickly-terminating job.
+        let root = temp.path().join("vault");
+        connect_vault_core(&state, root.to_str().unwrap(), "local-copy", None).unwrap();
+        let job_id = state
+            .jobs
+            .spawn(JobKind::Commit, "report", Arc::new(|_| {}), |_| Ok(()));
+        let mut waited = 0;
+        while state
+            .jobs
+            .get(&job_id)
+            .is_some_and(|record| record.status == JobStatus::Running)
+            && waited < 500
+        {
+            thread::sleep(Duration::from_millis(2));
+            waited += 1;
+        }
+        assert!(waited < 500, "job did not finish before switch");
+        assert!(!state.jobs.list().is_empty());
+
+        // Switch to a fresh empty vault; the old job record must be gone.
+        let root2 = temp.path().join("vault2");
+        connect_vault_core(&state, root2.to_str().unwrap(), "local-copy", None).unwrap();
+        assert!(
+            state.jobs.list().is_empty(),
+            "switching vaults should clear the job registry"
+        );
     }
 
     fn local_copy_config(paths: &VaultPaths) -> String {

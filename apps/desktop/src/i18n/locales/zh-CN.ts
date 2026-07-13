@@ -26,6 +26,7 @@ export const zhCN = {
       "尚未初始化文档仓库。初始化将在本地创建仓库目录与数据库（local-copy 后端）。",
     initialize: "初始化仓库",
     initFailed: "初始化失败：{error}",
+    openFailed: "无法打开现有仓库：{error}",
   },
   actions: {
     refresh: "刷新",

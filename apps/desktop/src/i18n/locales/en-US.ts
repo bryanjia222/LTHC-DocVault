@@ -27,6 +27,7 @@ export const enUS = {
       "The document vault is not initialized yet. Initializing creates the local vault directory and database (local-copy backend).",
     initialize: "Initialize vault",
     initFailed: "Initialization failed: {error}",
+    openFailed: "Could not open the existing vault: {error}",
   },
   actions: {
     refresh: "Refresh",

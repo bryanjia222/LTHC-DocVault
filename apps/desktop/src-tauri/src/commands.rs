@@ -11,23 +11,33 @@ use crate::state::{self, AppState};
 
 #[tauri::command]
 pub fn vault_status(app: AppHandle, state: State<AppState>) -> Result<VaultStatusDto, String> {
-    let vault = state.vault.lock().expect("vault mutex poisoned");
+    // `initialized` reflects the actually-open vault; `root_dir` is the open
+    // vault's root when one is open, otherwise the intended (pref/default) root.
+    let (initialized, active_root) = {
+        let vault = state::lock_vault(&state.vault);
+        let active_root = vault.as_ref().map(|v| v.paths().root_dir.clone());
+        (vault.is_some(), active_root)
+    };
+    let root_dir = active_root
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| state::current_root(&app).display().to_string());
     Ok(VaultStatusDto {
-        initialized: vault.is_some(),
-        root_dir: state::current_root(&app).display().to_string(),
+        initialized,
+        root_dir,
+        open_error: state::open_error(state.inner()),
     })
 }
 
 #[tauri::command]
-pub fn init_vault(state: State<AppState>) -> Result<(), String> {
-    state::init_vault(state.inner())
+pub fn init_vault(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    state::init_vault(&app, state.inner())
 }
 
 #[tauri::command]
 pub fn list_documents_with_versions(
     state: State<AppState>,
 ) -> Result<Vec<DocumentWithVersions>, String> {
-    let vault = state.vault.lock().expect("vault mutex poisoned");
+    let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     let documents = vault.list_documents().map_err(|e| e.to_string())?;
     let mut result = Vec::with_capacity(documents.len());
@@ -43,7 +53,7 @@ pub fn list_documents_with_versions(
 
 #[tauri::command]
 pub fn get_config(state: State<AppState>) -> Result<ConfigDto, String> {
-    let vault = state.vault.lock().expect("vault mutex poisoned");
+    let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     let paths = vault.paths();
     let (log_level, log_file) = read_logging(&paths.config_path)?;
@@ -89,7 +99,7 @@ fn restic_version(restic_path: &std::path::Path) -> String {
 }
 
 /// Connect (and switch to) the vault at the chosen directory with the chosen
-/// backend. See [`state::connect_vault`] for the empty/recognized/unrecognized
+/// backend. See [`state::connect_vault_core`] for the empty/recognized/unrecognized
 /// logic. Refuses while jobs are running.
 #[tauri::command(rename_all = "snake_case")]
 pub fn connect_vault(

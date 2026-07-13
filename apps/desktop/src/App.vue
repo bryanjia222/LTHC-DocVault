@@ -23,6 +23,7 @@ const { log } = useActivityLog();
 const {
   initialized,
   rootDir,
+  openError,
   refreshStatus,
   init,
   loadDocuments,
@@ -83,6 +84,9 @@ onBeforeUnmount(() => {
           <h2>{{ t("boot.welcome") }}</h2>
           <p>{{ t("boot.notInitialized") }}</p>
           <p class="root-dir">{{ rootDir }}</p>
+          <p v-if="openError" class="init-error">
+            {{ t("boot.openFailed", { error: openError }) }}
+          </p>
           <button class="primary" type="button" @click="onInit">
             {{ t("boot.initialize") }}
           </button>

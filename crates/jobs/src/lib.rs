@@ -11,6 +11,7 @@
 //! this state via events and never optimistically updates.
 
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -100,6 +101,15 @@ impl JobRegistry {
             .cloned()
     }
 
+    /// Drop all job records. Called when switching to a different vault so the
+    /// UI does not show the previous vault's jobs. Safe because the desktop's
+    /// connect flow only switches when no job is `Running`.
+    pub fn clear(&self) {
+        let mut inner = self.inner.lock().expect("job registry poisoned");
+        inner.records.clear();
+        inner.order.clear();
+    }
+
     /// Spawn `work` on a dedicated thread and return its id immediately. The
     /// record is already `Running` by the time this returns; `on_event` has
     /// already fired with the initial snapshot.
@@ -107,7 +117,8 @@ impl JobRegistry {
     /// `work` receives a progress reporter it may call between phases (ignored
     /// by fast local-copy ops; used by future restic streaming). Errors are
     /// mapped to `Failed` with `e.to_string()` so the backend's readable
-    /// `Display` reaches the UI unchanged.
+    /// `Display` reaches the UI unchanged. A panic inside `work` is caught and
+    /// likewise mapped to `Failed`, so the job always reaches a terminal state.
     pub fn spawn<F>(
         &self,
         kind: JobKind,
@@ -150,7 +161,13 @@ impl JobRegistry {
                 };
                 on_event(snapshot);
             };
-            let result = work(&progress);
+            // catch_unwind so a panic inside `work` still reaches a terminal
+            // state and emits the event - otherwise the thread dies silently
+            // and the job is stuck `Running` forever (truthfulness contract).
+            let result = match catch_unwind(AssertUnwindSafe(|| work(&progress))) {
+                Ok(inner) => inner,
+                Err(payload) => Err(panic_message(payload)),
+            };
             let terminal = {
                 let mut inner = inner.lock().expect("job registry poisoned");
                 let Some(rec) = inner.records.get_mut(&id_for_thread) else {
@@ -178,6 +195,19 @@ fn now_epoch() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Extract a readable message from a panic payload (`&'static str` or `String`
+/// from `panic!`), falling back to a generic label so the `Failed` record
+/// always carries some explanation.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "job panicked".to_string()
 }
 
 #[cfg(test)]
@@ -236,6 +266,42 @@ mod tests {
         assert_eq!(records.first().map(|r| r.id.as_str()), Some(b.as_str()));
         assert_eq!(records.last().map(|r| r.id.as_str()), Some(a.as_str()));
         assert_eq!(records.len(), 2);
+    }
+
+    /// A panic inside `work` must not leave the job stuck `Running`: the runner
+    /// catches it, marks the job `Failed` with the panic message, and still
+    /// emits the terminal event (truthfulness contract).
+    #[test]
+    fn panic_in_work_is_marked_failed_and_emits_terminal() {
+        let registry = JobRegistry::new();
+        let terminal = Arc::new(AtomicUsize::new(0));
+
+        let id = registry.spawn(
+            JobKind::Commit,
+            "boom",
+            make_counter(&terminal),
+            |_progress| panic!("boom"),
+        );
+
+        let mut waited = 0;
+        while terminal.load(Ordering::SeqCst) == 0 && waited < 500 {
+            thread::sleep(Duration::from_millis(2));
+            waited += 1;
+        }
+        assert_eq!(
+            terminal.load(Ordering::SeqCst),
+            1,
+            "a panicking job must still emit its terminal event"
+        );
+
+        let record = registry.get(&id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Failed);
+        assert!(
+            record.error.as_deref().is_some_and(|e| e.contains("boom")),
+            "unexpected error: {:?}",
+            record.error
+        );
+        assert!(record.finished_at.is_some());
     }
 
     fn make_counter(terminal: &Arc<AtomicUsize>) -> JobEventCallback {

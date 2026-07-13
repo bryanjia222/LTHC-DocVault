@@ -71,6 +71,7 @@ interface RawConfig {
 interface VaultStatus {
   initialized: boolean;
   root_dir: string;
+  open_error?: string;
 }
 
 /** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
@@ -203,6 +204,7 @@ const config: Ref<VaultConfigPreview> = ref({
 });
 const initialized: Ref<boolean> = ref(false);
 const rootDir: Ref<string> = ref("");
+const openError: Ref<string> = ref("");
 const loading: Ref<boolean> = ref(false);
 const error: Ref<string> = ref("");
 
@@ -215,6 +217,7 @@ async function refreshStatus(): Promise<void> {
     const status = await invoke<VaultStatus>("vault_status");
     initialized.value = status.initialized;
     rootDir.value = status.root_dir;
+    openError.value = status.open_error ?? "";
     error.value = "";
   } catch (e) {
     error.value = String(e);
@@ -371,6 +374,7 @@ export function useVault() {
     config,
     initialized,
     rootDir,
+    openError,
     loading,
     error,
     isTauri,
