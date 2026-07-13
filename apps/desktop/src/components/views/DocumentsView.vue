@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   ArrowRightLeft,
   ChartNetwork,
   Download,
+  Link2,
   List,
   Maximize2,
   Minimize2,
+  Plus,
+  RefreshCw,
   RotateCcw,
   Upload,
+  X,
+  XCircle,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
+import { useDesktopState } from "../../composables/useDesktopState";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 import {
@@ -19,7 +25,13 @@ import {
   getParentLabel,
   shouldShowBaseVersion,
 } from "../../utils/versionTree";
-import type { Document, Version } from "../../data/mock";
+import type {
+  Document,
+  DocumentType,
+  HealthStatus,
+  ModificationStatus,
+  Version,
+} from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
 
 const { t } = useI18n();
@@ -31,18 +43,38 @@ const {
   selectedVersion,
   selectedVersionId,
   searchQuery,
+  typeFilter,
+  tagFilter,
+  modifiedOnly,
+  healthFilter,
+  activeFilterCount,
+  allTags,
   selectDocument,
   selectVersion,
+  toggleType,
+  toggleTag,
+  toggleHealth,
+  clearFilters,
 } = useDocuments();
+const desktop = useDesktopState();
 const { log } = useActivityLog();
-const { runAction } = useVaultActions();
+const { runAction, commitModifiedDocument, relinkSourceFile, stopTracking } =
+  useVaultActions();
+
+const typeOptions: DocumentType[] = ["docx", "xlsx", "pptx"];
+const healthOptions: HealthStatus[] = ["synced", "needsReview"];
 
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
 const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
+const newTag = ref("");
 
 const versions = computed(() => selectedDocument.value?.versions ?? []);
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
+const modificationStatus = computed<ModificationStatus>(
+  () => selectedDocument.value?.modification ?? "none",
+);
+const trackedPath = computed(() => selectedDocument.value?.trackedPath ?? null);
 
 function currentVersionLabel(document: Document): string {
   return document.versions.find((v) => v.status === "current")?.label ?? "-";
@@ -84,6 +116,58 @@ function setGraphMaximized(maximized: boolean) {
   isGraphMaximized.value = maximized;
   log(t(maximized ? "log.graphMaximized" : "log.graphMinimized"));
 }
+
+function addTagForSelected() {
+  const doc = selectedDocument.value;
+  const value = newTag.value.trim();
+  if (!doc || !value) return;
+  desktop.addTag(doc.id, value);
+  newTag.value = "";
+}
+
+function removeTagFromSelected(tag: string) {
+  const doc = selectedDocument.value;
+  if (!doc) return;
+  desktop.removeTag(doc.id, tag);
+}
+
+function commitModifiedForSelected() {
+  const doc = selectedDocument.value;
+  if (doc) void commitModifiedDocument(doc.id);
+}
+
+function relinkSelected() {
+  const doc = selectedDocument.value;
+  if (doc) void relinkSourceFile(doc.id);
+}
+
+function stopTrackingSelected() {
+  const doc = selectedDocument.value;
+  if (doc) stopTracking(doc.id);
+}
+
+async function manualRefresh() {
+  await desktop.refreshModifications();
+  log(t("source.refresh"));
+}
+
+// Background modification detection: poll tracked source files every 5s so the
+// "modified" / "missing" badges stay current without a manual refresh. The
+// two-tier probe (stat first, sha256 only on change) keeps this cheap. Mocked
+// in browser dev; a no-op when nothing is tracked.
+const POLL_INTERVAL_MS = 5000;
+let pollHandle: ReturnType<typeof setInterval> | null = null;
+
+onMounted(() => {
+  void desktop.refreshModifications();
+  pollHandle = setInterval(() => {
+    void desktop.refreshModifications();
+  }, POLL_INTERVAL_MS);
+});
+
+onBeforeUnmount(() => {
+  if (pollHandle !== null) clearInterval(pollHandle);
+});
 </script>
 
 <template>
@@ -113,6 +197,82 @@ function setGraphMaximized(maximized: boolean) {
         </div>
       </div>
 
+      <div class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-label">{{ t("filters.type") }}</span>
+          <button
+            v-for="tp in typeOptions"
+            :key="tp"
+            type="button"
+            class="chip"
+            :class="{ active: typeFilter.has(tp) }"
+            @click="toggleType(tp)"
+          >
+            {{ tp }}
+          </button>
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">{{ t("filters.health") }}</span>
+          <button
+            v-for="hs in healthOptions"
+            :key="hs"
+            type="button"
+            class="chip"
+            :class="{ active: healthFilter.has(hs) }"
+            @click="toggleHealth(hs)"
+          >
+            {{ t(`status.${hs}`) }}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="chip"
+          :class="{ active: modifiedOnly }"
+          @click="modifiedOnly = !modifiedOnly"
+        >
+          {{ t("filters.modifiedOnly") }}
+        </button>
+
+        <div v-if="allTags.length" class="filter-group filter-tags">
+          <span class="filter-label">{{ t("filters.tags") }}</span>
+          <button
+            v-for="tag in allTags"
+            :key="tag"
+            type="button"
+            class="chip"
+            :class="{ active: tagFilter.includes(tag) }"
+            @click="toggleTag(tag)"
+          >
+            {{ tag }}
+          </button>
+        </div>
+
+        <span class="filter-spacer"></span>
+
+        <span v-if="activeFilterCount > 0" class="filter-count">{{
+          t("filters.active", { count: activeFilterCount })
+        }}</span>
+        <button
+          v-if="activeFilterCount > 0"
+          type="button"
+          class="chip clear"
+          @click="clearFilters"
+        >
+          {{ t("filters.clear") }}
+        </button>
+        <button
+          class="icon-button"
+          type="button"
+          :title="t('source.refresh')"
+          :aria-label="t('source.refresh')"
+          @click="manualRefresh"
+        >
+          <RefreshCw aria-hidden="true" />
+        </button>
+      </div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -121,6 +281,7 @@ function setGraphMaximized(maximized: boolean) {
               <th>{{ t("documents.columns.owner") }}</th>
               <th>{{ t("documents.columns.currentVersion") }}</th>
               <th>{{ t("documents.columns.status") }}</th>
+              <th>{{ t("documents.columns.modification") }}</th>
               <th>{{ t("documents.columns.updated") }}</th>
             </tr>
           </thead>
@@ -137,8 +298,15 @@ function setGraphMaximized(maximized: boolean) {
               @keydown.space.prevent="chooseDocument(document)"
             >
               <td>
-                <span class="file-type">{{ document.type }}</span>
-                <strong>{{ document.name }}</strong>
+                <div class="name-cell">
+                  <span class="file-type">{{ document.type }}</span>
+                  <strong>{{ document.name }}</strong>
+                </div>
+                <div v-if="document.tags?.length" class="row-tags">
+                  <span v-for="tag in document.tags" :key="tag" class="row-tag">{{
+                    tag
+                  }}</span>
+                </div>
               </td>
               <td>{{ document.owner }}</td>
               <td>{{ currentVersionLabel(document) }}</td>
@@ -147,10 +315,17 @@ function setGraphMaximized(maximized: boolean) {
                   t(`status.${document.health}`)
                 }}</span>
               </td>
+              <td>
+                <span
+                  class="mod-pill"
+                  :data-mod="document.modification ?? 'none'"
+                  >{{ t(`modification.${document.modification ?? "none"}`) }}</span
+                >
+              </td>
               <td>{{ document.updatedAt }}</td>
             </tr>
             <tr v-if="filteredDocuments.length === 0">
-              <td colspan="5" class="empty-state">
+              <td colspan="6" class="empty-state">
                 <div v-if="documents.length === 0" class="empty-cta">
                   <p>{{ t("documents.emptyNoDocs") }}</p>
                   <button
@@ -210,6 +385,96 @@ function setGraphMaximized(maximized: boolean) {
           </button>
         </div>
       </div>
+
+      <section class="doc-section" :aria-label="t('tags.title')">
+        <h3>{{ t("tags.title") }}</h3>
+        <div class="tag-chips">
+          <span
+            v-for="tag in selectedDocument?.tags ?? []"
+            :key="tag"
+            class="tag-chip"
+          >
+            {{ tag }}
+            <button
+              type="button"
+              class="tag-remove"
+              :aria-label="t('actions.clear')"
+              :title="t('actions.clear')"
+              @click="removeTagFromSelected(tag)"
+            >
+              <X aria-hidden="true" />
+            </button>
+          </span>
+          <span v-if="!selectedDocument?.tags?.length" class="muted">{{
+            t("tags.empty")
+          }}</span>
+        </div>
+        <form class="tag-add" @submit.prevent="addTagForSelected">
+          <input
+            v-model="newTag"
+            type="text"
+            class="tag-input"
+            :placeholder="t('tags.addPlaceholder')"
+            :disabled="!selectedDocument"
+          />
+          <button
+            class="secondary"
+            type="submit"
+            :disabled="!selectedDocument || !newTag.trim()"
+          >
+            <Plus aria-hidden="true" />
+            {{ t("tags.add") }}
+          </button>
+        </form>
+      </section>
+
+      <section class="doc-section" :aria-label="t('source.title')">
+        <h3>{{ t("source.title") }}</h3>
+        <dl>
+          <div>
+            <dt>{{ t("source.status") }}</dt>
+            <dd>
+              <span class="mod-pill" :data-mod="modificationStatus">{{
+                t(`modification.${modificationStatus}`)
+              }}</span>
+            </dd>
+          </div>
+          <div v-if="trackedPath">
+            <dt>{{ t("source.path") }}</dt>
+            <dd class="mono-path" :title="trackedPath">{{ trackedPath }}</dd>
+          </div>
+        </dl>
+        <p v-if="modificationStatus === 'none'" class="muted source-hint">
+          {{ t("source.notTracked") }}
+        </p>
+        <p v-if="modificationStatus === 'missing'" class="source-hint danger">
+          {{ t("source.missingHint") }}
+        </p>
+        <div class="source-actions">
+          <button
+            class="primary"
+            type="button"
+            :disabled="modificationStatus !== 'modified'"
+            @click="commitModifiedForSelected"
+          >
+            <Upload aria-hidden="true" />
+            {{ t("source.commitModified") }}
+          </button>
+          <button class="secondary" type="button" @click="relinkSelected">
+            <Link2 aria-hidden="true" />
+            {{ t("source.relink") }}
+          </button>
+          <button
+            v-if="trackedPath"
+            class="secondary"
+            type="button"
+            @click="stopTrackingSelected"
+          >
+            <XCircle aria-hidden="true" />
+            {{ t("source.stopTracking") }}
+          </button>
+        </div>
+      </section>
 
       <section
         class="version-list"
@@ -758,5 +1023,266 @@ tbody tr.selected {
 
 .graph-context h2 {
   font-size: 18px;
+}
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-tags {
+  flex-basis: 100%;
+}
+
+.filter-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.filter-spacer {
+  flex: 1;
+}
+
+.filter-count {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chip {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--bg-hover);
+}
+
+.chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.chip.clear {
+  color: var(--danger-text);
+}
+
+/* Table name cell + inline tags */
+.name-cell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.row-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Modification pill (source-file status) */
+.mod-pill {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.mod-pill[data-mod="unchanged"] {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.mod-pill[data-mod="modified"] {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.mod-pill[data-mod="missing"] {
+  background: color-mix(in srgb, var(--danger-text) 16%, var(--bg-surface));
+  color: var(--danger-text);
+}
+
+/* Detail-panel sections (tags + source tracking) */
+.doc-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.doc-section dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.doc-section dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-section dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.doc-section dd {
+  margin: 0;
+  text-align: right;
+}
+
+.mono-path {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.source-hint {
+  margin: 0;
+}
+
+.source-hint.danger {
+  color: var(--danger-text);
+}
+
+/* Tag chips + add form */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.tag-remove {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.tag-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tag-remove svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2.5;
+}
+
+.tag-add {
+  display: flex;
+  gap: 6px;
+}
+
+.tag-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tag-add button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.tag-add button svg,
+.source-actions button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+}
+
+/* Source-tracking action buttons */
+.source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 </style>

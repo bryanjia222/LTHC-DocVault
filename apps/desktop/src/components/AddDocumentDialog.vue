@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import BaseModal from "./BaseModal.vue";
 import { useDialogs } from "../composables/useDialogs";
 import { useVault } from "../composables/useVault";
+import { useDesktopState } from "../composables/useDesktopState";
 import { useActivityLog } from "../composables/useActivityLog";
 import { deriveNameFromPath, pickOfficeFile } from "../utils/file";
 
@@ -18,7 +19,8 @@ import { deriveNameFromPath, pickOfficeFile } from "../utils/file";
 const { t } = useI18n();
 const { log } = useActivityLog();
 const { addDocumentOpen, closeAddDocument } = useDialogs();
-const { commit, isTauri } = useVault();
+const { commit, isTauri, documents } = useVault();
+const desktop = useDesktopState();
 
 const path = ref("");
 const name = ref("");
@@ -61,10 +63,21 @@ async function submit() {
   submitting.value = true;
   error.value = "";
   try {
+    // Snapshot the doc ids before the commit so the pending-track resolver can
+    // identify the freshly imported document once the commit job succeeds.
+    const snapshotIds = documents.value.map((d) => d.id);
+    const resolvedName = name.value.trim() || deriveNameFromPath(path.value);
     const id = await commit({
       path: path.value,
-      new_name: name.value.trim() || deriveNameFromPath(path.value),
+      new_name: resolvedName,
       author: author.value.trim() || undefined,
+    });
+    // Begin tracking the imported source file; App.vue baselines it on success.
+    desktop.registerPendingTrack(id, {
+      kind: "new",
+      path: path.value,
+      name: resolvedName,
+      snapshotIds,
     });
     submitted.value = true;
     log(t("log.jobStarted", { action: t("actionLogs.addDocument"), id }));

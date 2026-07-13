@@ -18,12 +18,15 @@ import { useCommandPalette } from "./composables/useCommandPalette";
 import { useActivityLog } from "./composables/useActivityLog";
 import { useVault } from "./composables/useVault";
 import type { RawJob } from "./composables/useVault";
+import { useDesktopState } from "./composables/useDesktopState";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
 const { toggle } = useCommandPalette();
 const { log } = useActivityLog();
+const desktop = useDesktopState();
 const {
+  documents,
   initialized,
   rootDir,
   openError,
@@ -51,8 +54,13 @@ function onGlobalKeydown(event: KeyboardEvent) {
  * message is built from the backend's authoritative event (not the cancel
  * request), so the log reflects what actually happened: a job that finished
  * before the cancel registered is logged as succeeded/failed, not cancelled.
+ *
+ * Also resolves any pending source-file tracking request keyed to this job: a
+ * successful commit (new version of an existing doc, or a freshly imported doc)
+ * captures a fresh baseline so the file is watched from its just-committed
+ * state. Failed/cancelled jobs drop the pending request without baselining.
  */
-function onJobTerminal(raw: RawJob): void {
+async function onJobTerminal(raw: RawJob): Promise<void> {
   const action = t(`jobs.${raw.kind}`);
   const target = raw.target_label;
   if (raw.status === "succeeded") {
@@ -62,12 +70,37 @@ function onJobTerminal(raw: RawJob): void {
   } else if (raw.status === "cancelled") {
     log(t("log.jobCancelled", { action, target }));
   }
+
+  const pending = desktop.takePendingTrack(raw.id);
+  if (!pending || raw.status !== "succeeded") return;
+  try {
+    if (pending.kind === "known") {
+      const baseline = await desktop.probeAndBaseline(pending.docId, pending.path);
+      desktop.setTracked(baseline);
+    } else {
+      // Newly imported document: ensure the new doc is in the list, then find
+      // it by name (falling back to any id not in the pre-commit snapshot).
+      await loadDocuments();
+      const created =
+        documents.value.find(
+          (d) => !pending.snapshotIds.includes(d.id) && d.name === pending.name,
+        ) ??
+        documents.value.find((d) => !pending.snapshotIds.includes(d.id));
+      if (created) {
+        const baseline = await desktop.probeAndBaseline(created.id, pending.path);
+        desktop.setTracked(baseline);
+      }
+    }
+  } catch (e) {
+    console.error("pending track resolution failed", e);
+  }
 }
 
 async function onInit() {
   initError.value = "";
   try {
     await init();
+    await desktop.loadDesktopState();
     unsubJobs = await subscribeJobs(onJobTerminal);
   } catch (e) {
     initError.value = String(e);
@@ -78,6 +111,7 @@ onMounted(async () => {
   await refreshStatus();
   if (initialized.value) {
     await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
+    await desktop.loadDesktopState();
     unsubJobs = await subscribeJobs(onJobTerminal);
   }
   booting.value = false;

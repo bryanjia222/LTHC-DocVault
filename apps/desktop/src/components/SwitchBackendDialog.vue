@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import BaseModal from "./BaseModal.vue";
 import { useDialogs } from "../composables/useDialogs";
 import { useVault } from "../composables/useVault";
+import { useDesktopState } from "../composables/useDesktopState";
 
 /*
  * Switch-backend dialog. Moves the connect form out of the Settings page into a
@@ -16,6 +17,7 @@ import { useVault } from "../composables/useVault";
 const { t } = useI18n();
 const { switchBackendOpen, closeSwitchBackend } = useDialogs();
 const { config, connect, isTauri } = useVault();
+const desktop = useDesktopState();
 
 const dir = ref("");
 const backend = ref<"local-copy" | "restic">("local-copy");
@@ -57,6 +59,9 @@ async function submit() {
       restic_password:
         backend.value === "restic" ? password.value : undefined,
     });
+    // Desktop state (tags + tracked sources) is scoped per vault root, so
+    // reload the slice for the now-active vault.
+    await desktop.loadDesktopState();
     status.value =
       outcome.mode === "initialized"
         ? t("connect.initialized", { backend: t(`backend.${outcome.backend}`) })
