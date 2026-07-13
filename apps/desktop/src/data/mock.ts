@@ -12,6 +12,48 @@ export type Backend = "restic" | "local-copy";
 export type HealthStatus = "synced" | "needsReview";
 export type VersionStatus = "current" | "archived";
 
+/**
+ * Modification status of a tracked source file, derived by comparing a fresh
+ * probe against the import-time baseline:
+ * - `none`: no source file is tracked for this document (not imported on this machine).
+ * - `unchanged`: the file matches the baseline (stat, or stat+sha after a full probe).
+ * - `modified`: the file has changed since import -> a new version can be committed.
+ * - `missing`: the tracked path no longer exists (deleted/moved) -> re-specify the source.
+ */
+export type ModificationStatus = "none" | "unchanged" | "modified" | "missing";
+
+/** A tracked source file with its import-time baseline snapshot. */
+export interface TrackedFile {
+  documentId: string;
+  path: string;
+  size: number;
+  mtimeMs: number;
+  /** Omitted for files above the hash threshold (too large to hash). */
+  sha256?: string | null;
+}
+
+/** Fast stat result (no content hashing). */
+export interface FileStat {
+  path: string;
+  exists: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+/** Full probe: stat plus an optional sha256 (present only for small files). */
+export interface FileProbe {
+  exists: boolean;
+  size: number;
+  mtimeMs: number;
+  sha256?: string | null;
+}
+
+/** Desktop-local annotations for the active vault (tags + tracked files). */
+export interface DesktopState {
+  tags: Record<string, string[]>;
+  tracked: TrackedFile[];
+}
+
 export interface Version {
   id: string;
   label: string;
@@ -33,6 +75,12 @@ export interface Document {
   versions: Version[];
   backend: Backend;
   health: HealthStatus;
+  /** Desktop-local tags (not stored in the vault). Merged in by useDocuments. */
+  tags?: string[];
+  /** Tracked source-file modification status. Merged in by useDocuments. */
+  modification?: ModificationStatus;
+  /** The tracked source-file path, if any. Merged in by useDocuments. */
+  trackedPath?: string | null;
 }
 
 export type JobKind = "commit" | "export" | "checkout";
@@ -217,4 +265,55 @@ export const vaultConfig: VaultConfigPreview = {
   logLevel: "info",
   logFile: "C:/Users/Bryan/AppData/Roaming/DocVault/logs/docvault.log",
   resticVersion: "0.19.1",
+};
+
+/*
+ * Desktop-local state + probe fixtures for browser dev. Under Tauri these come
+ * from get_desktop_state / stat_files / probe_file instead. mockProbes drives
+ * the SAME deriveModificationStatus logic as the real path, so browser dev
+ * demonstrates a "modified" doc (合同归档) and an "unchanged" one (季度预算);
+ * 产品路线图 has no tracked file -> "none".
+ */
+
+const baselineContract = Date.UTC(2026, 6, 9, 10, 42); // 2026-07-09 10:42 UTC
+const baselineBudget = Date.UTC(2026, 6, 9, 9, 18); // 2026-07-09 09:18 UTC
+
+export const desktopState: DesktopState = {
+  tags: {
+    "550e8400": ["法务", "重要"],
+    "7c1b28d1": ["财务"],
+  },
+  tracked: [
+    {
+      documentId: "550e8400",
+      path: "C:/Users/Bryan/Documents/contract-review.docx",
+      size: 1887436,
+      mtimeMs: baselineContract,
+      sha256: "a".repeat(64),
+    },
+    {
+      documentId: "7c1b28d1",
+      path: "C:/Users/Bryan/Documents/q3-budget.xlsx",
+      size: 843776,
+      mtimeMs: baselineBudget,
+      sha256: "b".repeat(64),
+    },
+  ],
+};
+
+export const mockProbes: Record<string, FileProbe> = {
+  // Edited after import: size & sha differ from baseline -> "modified".
+  "550e8400": {
+    exists: true,
+    size: 1920000,
+    mtimeMs: Date.UTC(2026, 6, 12, 14, 0),
+    sha256: "c".repeat(64),
+  },
+  // Unchanged: matches baseline stat + sha.
+  "7c1b28d1": {
+    exists: true,
+    size: 843776,
+    mtimeMs: baselineBudget,
+    sha256: "b".repeat(64),
+  },
 };

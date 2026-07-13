@@ -1,8 +1,12 @@
 import type {
   Backend,
+  DesktopState,
   Document,
   DocumentType,
+  FileProbe,
+  FileStat,
   Job,
+  TrackedFile,
   VaultConfigPreview,
   Version,
 } from "../data/mock";
@@ -79,6 +83,37 @@ export interface RawJob {
   target_label: string;
   started_at: number;
   finished_at: number | null;
+}
+
+// --- desktop-local state (tags + tracked source files); snake_case from serde ---
+
+export interface RawTrackedFile {
+  document_id: string;
+  path: string;
+  size: number;
+  mtime_ms: number;
+  /** Absent when the file was above the hash threshold at import time. */
+  sha256?: string;
+}
+
+export interface RawDesktopState {
+  tags: Record<string, string[]>;
+  tracked: RawTrackedFile[];
+}
+
+export interface RawFileStat {
+  path: string;
+  exists: boolean;
+  size: number;
+  mtime_ms: number;
+}
+
+export interface RawFileProbe {
+  exists: boolean;
+  size: number;
+  mtime_ms: number;
+  /** Present only when the file exists and is within the hash threshold. */
+  sha256?: string;
 }
 
 // --- formatting helpers (UI concerns; kept out of Rust) ---
@@ -176,5 +211,40 @@ export function mapJob(raw: RawJob): Job {
     startedAt: formatEpoch(raw.started_at),
     finishedAt:
       raw.finished_at != null ? formatEpoch(raw.finished_at) : undefined,
+  };
+}
+
+export function mapTrackedFile(raw: RawTrackedFile): TrackedFile {
+  return {
+    documentId: raw.document_id,
+    path: raw.path,
+    size: raw.size,
+    mtimeMs: raw.mtime_ms,
+    sha256: raw.sha256 ?? null,
+  };
+}
+
+export function mapDesktopState(raw: RawDesktopState): DesktopState {
+  return {
+    tags: raw.tags,
+    tracked: raw.tracked.map(mapTrackedFile),
+  };
+}
+
+export function mapFileStat(raw: RawFileStat): FileStat {
+  return {
+    path: raw.path,
+    exists: raw.exists,
+    size: raw.size,
+    mtimeMs: raw.mtime_ms,
+  };
+}
+
+export function mapFileProbe(raw: RawFileProbe): FileProbe {
+  return {
+    exists: raw.exists,
+    size: raw.size,
+    mtimeMs: raw.mtime_ms,
+    sha256: raw.sha256 ?? null,
   };
 }

@@ -4,6 +4,7 @@ import { useActivityLog } from "./useActivityLog";
 import { useDialogs } from "./useDialogs";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
+import { useDesktopState } from "./useDesktopState";
 import { useVault } from "./useVault";
 import { useTheme } from "../theme";
 import { extOf, pickOfficeFile } from "../utils/file";
@@ -22,7 +23,7 @@ export function useVaultActions() {
   const { log } = useActivityLog();
   const { setSection } = useNavigation();
   const { toggleTheme, isDark } = useTheme();
-  const { selectedDocument, selectedVersion } = useDocuments();
+  const { selectedDocument, selectedVersion, documents } = useDocuments();
   const {
     commit,
     exportVersion,
@@ -30,6 +31,7 @@ export function useVaultActions() {
     loadDocuments,
     isTauri,
   } = useVault();
+  const desktop = useDesktopState();
   const { openAddDocument } = useDialogs();
 
   function runAction(actionKey: string) {
@@ -79,8 +81,11 @@ export function useVaultActions() {
       return;
     }
     try {
-      // Commit a new version to the selected document.
+      // Commit a new version to the selected document. Register a pending track
+      // so App.vue captures the picked file as the document's tracked source
+      // (fresh baseline) once the commit job succeeds.
       const id = await commit({ path, document_id: doc.id });
+      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path });
       log(t("log.jobStarted", { action: t("actionLogs.commit"), id }));
     } catch (e) {
       log(
@@ -160,6 +165,81 @@ export function useVaultActions() {
     }
   }
 
+  /**
+   * Commit the document's tracked source file as a new version directly - no
+   * file dialog, since the path is already known. Only meaningful when the
+   * tracker reports "modified"; the UI disables the button otherwise. Registers
+   * a pending track so App.vue refreshes the baseline (back to "unchanged") once
+   * the commit succeeds.
+   */
+  async function commitModifiedDocument(docId: string) {
+    const actionKey = "actionLogs.commitModified" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    const path = desktop.trackedPathFor(docId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!path) {
+      log(t("log.noTrackedFile", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    try {
+      const id = await commit({ path, document_id: docId });
+      desktop.registerPendingTrack(id, { kind: "known", docId, path });
+      log(t("log.jobStarted", { action: t(actionKey), id }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /**
+   * Re-specify a document's tracked source file: pick a working copy, probe it
+   * for a fresh baseline, and record it. The recovery path for a missing source
+   * (deleted/moved/changed machines) and for documents not yet tracked on this
+   * machine. Status returns to "unchanged" until the file is edited again.
+   */
+  async function relinkSourceFile(docId: string) {
+    const actionKey = "actionLogs.relinkSource" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) return;
+    if (!isTauri()) return;
+    const path = await pickOfficeFile();
+    if (!path) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    try {
+      const baseline = await desktop.probeAndBaseline(docId, path);
+      desktop.setTracked(baseline);
+      log(t("log.relinked", { name: doc.name, path }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /** Stop tracking a document's source file (removes the baseline). */
+  function stopTracking(docId: string) {
+    const doc = documents.value.find((d) => d.id === docId);
+    desktop.clearTracked(docId);
+    log(t("log.stoppedTracking", { name: doc?.name ?? t("log.noDocument") }));
+  }
+
   function navigate(sectionId: NavigationId) {
     setSection(sectionId);
     const labelKey = `nav.${sectionId}`;
@@ -175,5 +255,12 @@ export function useVaultActions() {
     );
   }
 
-  return { runAction, navigate, toggleCurrentTheme };
+  return {
+    runAction,
+    navigate,
+    toggleCurrentTheme,
+    commitModifiedDocument,
+    relinkSourceFile,
+    stopTracking,
+  };
 }

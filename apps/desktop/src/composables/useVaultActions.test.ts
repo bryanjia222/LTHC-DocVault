@@ -5,6 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useVaultActions } from "./useVaultActions";
 import { useVault } from "./useVault";
 import { useDocuments } from "./useDocuments";
+import { useDesktopState } from "./useDesktopState";
 import { useDialogs } from "./useDialogs";
 import { withI18nContext } from "../test/compose";
 import type { Document } from "../data/mock";
@@ -45,6 +46,7 @@ const docA: Document = {
 const { documents } = useVault();
 const docs = useDocuments();
 const dialogs = useDialogs();
+const desktop = useDesktopState();
 
 let actions: ReturnType<typeof useVaultActions>;
 
@@ -63,6 +65,9 @@ beforeEach(() => {
   docs.selectedDocumentId.value = docA.id;
   docs.selectedVersionId.value = docA.versions[0].id;
   docs.searchQuery.value = "";
+  desktop.tags.value = {};
+  desktop.tracked.value = [];
+  desktop.probes.value = {};
   vi.mocked(invoke).mockClear();
   vi.mocked(open).mockClear();
   vi.mocked(save).mockClear();
@@ -186,5 +191,122 @@ describe("useVaultActions - commit", () => {
     actions.runAction("actionLogs.commit");
     await flush();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("registers a pending track so the baseline refreshes after the commit job resolves", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce("/in/changes.docx");
+    vi.mocked(invoke).mockResolvedValue("job-pending");
+    actions.runAction("actionLogs.commit");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("commit_document", {
+        path: "/in/changes.docx",
+        document_id: docA.id,
+      });
+    });
+    expect(desktop.takePendingTrack("job-pending")).toEqual({
+      kind: "known",
+      docId: docA.id,
+      path: "/in/changes.docx",
+    });
+  });
+});
+
+describe("useVaultActions - commit modified document", () => {
+  it("commits the tracked source path directly with no file dialog", async () => {
+    asTauri();
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    vi.mocked(invoke).mockResolvedValue("job-mod");
+    await actions.commitModifiedDocument(docA.id);
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("commit_document", {
+        path: "/tracked.docx",
+        document_id: docA.id,
+      });
+    });
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("registers a pending track for the commit-modified job", async () => {
+    asTauri();
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    vi.mocked(invoke).mockResolvedValue("job-mod2");
+    await actions.commitModifiedDocument(docA.id);
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("commit_document", expect.anything());
+    });
+    expect(desktop.takePendingTrack("job-mod2")).toEqual({
+      kind: "known",
+      docId: docA.id,
+      path: "/tracked.docx",
+    });
+  });
+
+  it("does not invoke when no source file is tracked for the document", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue("job-mod");
+    await actions.commitModifiedDocument(docA.id);
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    await actions.commitModifiedDocument(docA.id);
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVaultActions - relink source file", () => {
+  it("probes the picked file and records it as the tracked baseline", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce("/new/source.docx");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "probe_file") {
+        return { exists: true, size: 9, mtime_ms: 7, sha256: "abc" };
+      }
+      return undefined;
+    });
+    await actions.relinkSourceFile(docA.id);
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("probe_file", {
+        path: "/new/source.docx",
+        max_bytes: expect.any(Number),
+      });
+    });
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("set_desktop_state", expect.anything());
+    });
+    expect(desktop.trackedPathFor(docA.id)).toBe("/new/source.docx");
+  });
+
+  it("does not invoke when the file picker is cancelled", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce(null);
+    await actions.relinkSourceFile(docA.id);
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVaultActions - stop tracking", () => {
+  it("clears the tracked baseline for the document", async () => {
+    asTauri();
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await actions.stopTracking(docA.id);
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("set_desktop_state", expect.anything());
+    });
+    expect(desktop.trackedPathFor(docA.id)).toBeNull();
   });
 });

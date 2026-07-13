@@ -2,12 +2,15 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import { useDocuments } from "./useDocuments";
 import { useVault } from "./useVault";
+import { useDesktopState } from "./useDesktopState";
 import type { Document } from "../data/mock";
 
 /*
- * useDocuments layers selection + search over useVault's `documents` ref. It is
- * a module-level singleton with no i18n/DOM deps, so we drive it directly:
- * reset the shared refs in beforeEach, then assert filtering and selection.
+ * useDocuments layers enrichment (desktop-local tags / modification / tracked
+ * path) + multi-dimension filtering over useVault's `documents` ref. It is a
+ * module-level singleton with no i18n/DOM deps. Detailed filter cases live in
+ * utils/filter.test.ts; here we cover enrichment, the filter wiring, selection,
+ * and totals.
  */
 
 const docA: Document = {
@@ -64,48 +67,101 @@ const docB: Document = {
 };
 
 const { documents } = useVault();
+const desktop = useDesktopState();
 const docs = useDocuments();
 
 beforeEach(() => {
   documents.value = [docA, docB];
   docs.selectedDocumentId.value = "";
   docs.selectedVersionId.value = "";
-  docs.searchQuery.value = "";
+  docs.clearFilters();
+  desktop.tags.value = {};
+  desktop.tracked.value = [];
+  desktop.probes.value = {};
 });
 
-describe("useDocuments - filtering", () => {
-  it("returns all documents when the query is empty", () => {
-    expect(docs.filteredDocuments.value).toEqual([docA, docB]);
+describe("useDocuments - enrichment", () => {
+  it("merges desktop tags onto vault documents (empty list when untagged)", () => {
+    desktop.tags.value = { docA: ["legal"] };
+    expect(docs.documents.value.find((d) => d.id === "docA")?.tags).toEqual([
+      "legal",
+    ]);
+    expect(docs.documents.value.find((d) => d.id === "docB")?.tags).toEqual([]);
   });
 
-  it("treats a whitespace-only query as empty", () => {
-    docs.searchQuery.value = "   ";
-    expect(docs.filteredDocuments.value).toEqual([docA, docB]);
+  it("reports modification status from the desktop tracker", () => {
+    expect(docs.documents.value.find((d) => d.id === "docA")?.modification).toBe(
+      "none",
+    );
+    desktop.tracked.value = [
+      { documentId: "docA", path: "/a.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    desktop.probes.value = {
+      docA: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
+    };
+    expect(docs.documents.value.find((d) => d.id === "docA")?.modification).toBe(
+      "modified",
+    );
   });
 
-  it("matches by name, case-insensitively", () => {
-    docs.searchQuery.value = "alpha";
-    expect(docs.filteredDocuments.value).toEqual([docA]);
+  it("exposes the tracked source path (null when not tracked)", () => {
+    desktop.tracked.value = [
+      { documentId: "docA", path: "/a.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    expect(docs.documents.value.find((d) => d.id === "docA")?.trackedPath).toBe(
+      "/a.docx",
+    );
+    expect(docs.documents.value.find((d) => d.id === "docB")?.trackedPath).toBeNull();
+  });
+});
+
+describe("useDocuments - filteredDocuments wiring", () => {
+  it("returns all document ids when no filter is active", () => {
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
   });
 
-  it("matches by original filename", () => {
-    docs.searchQuery.value = "xlsx";
-    expect(docs.filteredDocuments.value).toEqual([docB]);
+  it("narrows by the search query", () => {
+    docs.searchQuery.value = "beta";
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
-  it("matches by owner", () => {
-    docs.searchQuery.value = "bob";
-    expect(docs.filteredDocuments.value).toEqual([docB]);
+  it("narrows by the type filter", () => {
+    docs.toggleType("xlsx");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
-  it("matches by id", () => {
-    docs.searchQuery.value = "docA";
-    expect(docs.filteredDocuments.value).toEqual([docA]);
+  it("narrows by the tag filter (OR within facet)", () => {
+    desktop.tags.value = { docA: ["legal"], docB: ["finance"] };
+    docs.toggleTag("finance");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
-  it("returns nothing when no field matches", () => {
-    docs.searchQuery.value = "zzz";
-    expect(docs.filteredDocuments.value).toEqual([]);
+  it("narrows by modified-only", () => {
+    desktop.tracked.value = [
+      { documentId: "docB", path: "/b.xlsx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    desktop.probes.value = {
+      docB: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
+    };
+    docs.modifiedOnly.value = true;
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
+  });
+
+  it("clearFilters resets every dimension and the active count", () => {
+    docs.searchQuery.value = "x";
+    docs.toggleType("docx");
+    docs.toggleTag("whatever");
+    docs.modifiedOnly.value = true;
+    expect(docs.activeFilterCount.value).toBeGreaterThan(0);
+    docs.clearFilters();
+    expect(docs.activeFilterCount.value).toBe(0);
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
   });
 });
 
