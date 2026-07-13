@@ -7,6 +7,8 @@ import AppTopbar from "./components/AppTopbar.vue";
 import AppContextMenu from "./components/AppContextMenu.vue";
 import MetricsBar from "./components/MetricsBar.vue";
 import CommandPalette from "./components/CommandPalette.vue";
+import AddDocumentDialog from "./components/AddDocumentDialog.vue";
+import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import JobsView from "./components/views/JobsView.vue";
 import ArchiveView from "./components/views/ArchiveView.vue";
@@ -123,6 +125,8 @@ onBeforeUnmount(() => {
     </main>
 
     <CommandPalette />
+    <AddDocumentDialog />
+    <SwitchBackendDialog />
     <AppContextMenu />
   </div>
 </template>

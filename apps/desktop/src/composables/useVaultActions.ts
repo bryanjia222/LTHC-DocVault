@@ -1,10 +1,12 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import { useActivityLog } from "./useActivityLog";
+import { useDialogs } from "./useDialogs";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
 import { useVault } from "./useVault";
 import { useTheme } from "../theme";
+import { extOf, pickOfficeFile } from "../utils/file";
 
 /*
  * Centralized action handlers. Every UI action (commit, export, checkout,
@@ -13,8 +15,6 @@ import { useTheme } from "../theme";
  * dialog, spawn a backend job, and log the job id; the job's truthful state
  * arrives later via `job:update` events (mirrored in useVault).
  */
-
-const OFFICE_EXTENSIONS = ["docx", "xlsx", "pptx"] as const;
 
 export function useVaultActions() {
   const { t } = useI18n();
@@ -29,10 +29,11 @@ export function useVaultActions() {
     loadDocuments,
     isTauri,
   } = useVault();
+  const { openAddDocument } = useDialogs();
 
   function runAction(actionKey: string) {
     if (actionKey === "actionLogs.addDocument") {
-      void addDocumentAction();
+      openAddDocument();
       return;
     }
     if (actionKey === "actionLogs.commit") {
@@ -54,35 +55,6 @@ export function useVaultActions() {
     log(t("log.actionRequested", { action: t(actionKey), name, version }));
     if (actionKey === "actionLogs.refresh") {
       void loadDocuments();
-    }
-  }
-
-  async function addDocumentAction() {
-    log(
-      t("log.actionRequested", {
-        action: t("actionLogs.addDocument"),
-        name: t("log.noDocument"),
-        version: t("log.latest"),
-      }),
-    );
-    if (!isTauri()) return;
-    const path = await pickOfficeFile();
-    if (!path) {
-      log(t("log.actionCancelled", { action: t("actionLogs.addDocument") }));
-      return;
-    }
-    try {
-      // Always create a new document, named from the file stem. This is the
-      // entry point for an empty vault (no selection needed).
-      const id = await commit({ path, new_name: deriveNameFromPath(path) });
-      log(t("log.jobStarted", { action: t("actionLogs.addDocument"), id }));
-    } catch (e) {
-      log(
-        t("log.actionFailed", {
-          action: t("actionLogs.addDocument"),
-          error: String(e),
-        }),
-      );
     }
   }
 
@@ -188,23 +160,4 @@ export function useVaultActions() {
   }
 
   return { runAction, navigate, toggleCurrentTheme };
-}
-
-async function pickOfficeFile(): Promise<string | null> {
-  const result = await open({
-    multiple: false,
-    filters: [{ name: "Office", extensions: [...OFFICE_EXTENSIONS] }],
-  });
-  if (!result) return null;
-  return Array.isArray(result) ? (result[0] ?? null) : result;
-}
-
-function deriveNameFromPath(path: string): string {
-  const file = path.replace(/\\/g, "/").split("/").pop() ?? path;
-  return file.replace(/\.[^.]+$/, "");
-}
-
-function extOf(filename: string): string | null {
-  const dot = filename.lastIndexOf(".");
-  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : null;
 }

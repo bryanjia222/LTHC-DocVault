@@ -49,6 +49,18 @@ export const enUS = {
     themeDark: "Dark",
     search: "Search",
   },
+  addDocument: {
+    title: "Add document",
+    subtitle: "Pick an Office file to archive as a new document.",
+    fileLabel: "File",
+    filePlaceholder: "Select a file…",
+    browse: "Browse…",
+    nameLabel: "Document name",
+    namePlaceholder: "Document name",
+    authorLabel: "Author (optional)",
+    authorPlaceholder: "Author",
+    submit: "Add",
+  },
   actionLogs: {
     refresh: "Refresh vault",
     commandPalette: "Open command palette",
@@ -160,6 +172,9 @@ export const enUS = {
     backend: "Backend",
     password: "Restic password",
     submit: "Connect / Initialize",
+    title: "Switch vault / backend",
+    switchHint: "Pick a vault directory and backend to switch to.",
+    switchAction: "Switch…",
     initialized: "Initialized a new vault ({backend})",
     opened: "Attached existing vault ({backend})",
     unrecognized:
@@ -171,6 +186,9 @@ export const enUS = {
   contextMenu: {
     reload: "Reload",
     inspect: "Inspect",
+  },
+  dialog: {
+    close: "Close",
   },
   archive: {
     title: "Archive repository",

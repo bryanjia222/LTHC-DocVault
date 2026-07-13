@@ -1,0 +1,35 @@
+import { ref } from "vue";
+
+/*
+ * App-wide modal open-state. Module-level singletons so any component (the
+ * centralized action handler, a Settings button) can open a dialog that is
+ * mounted once at the app root. Each dialog resets its own form fields when it
+ * opens, so the open flags carry no payload - just "show this dialog".
+ */
+
+const addDocumentOpen = ref(false);
+const switchBackendOpen = ref(false);
+
+export function useDialogs() {
+  function openAddDocument() {
+    addDocumentOpen.value = true;
+  }
+  function closeAddDocument() {
+    addDocumentOpen.value = false;
+  }
+  function openSwitchBackend() {
+    switchBackendOpen.value = true;
+  }
+  function closeSwitchBackend() {
+    switchBackendOpen.value = false;
+  }
+
+  return {
+    addDocumentOpen,
+    switchBackendOpen,
+    openAddDocument,
+    closeAddDocument,
+    openSwitchBackend,
+    closeSwitchBackend,
+  };
+}

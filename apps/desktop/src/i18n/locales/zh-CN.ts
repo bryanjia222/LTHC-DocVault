@@ -48,6 +48,18 @@ export const zhCN = {
     themeDark: "深色",
     search: "搜索",
   },
+  addDocument: {
+    title: "添加文档",
+    subtitle: "选择一个 Office 文件以归档为新文档。",
+    fileLabel: "文件",
+    filePlaceholder: "选择文件…",
+    browse: "浏览…",
+    nameLabel: "文档名称",
+    namePlaceholder: "文档名称",
+    authorLabel: "作者（可选）",
+    authorPlaceholder: "作者",
+    submit: "添加",
+  },
   actionLogs: {
     refresh: "刷新仓库",
     commandPalette: "打开命令面板",
@@ -158,6 +170,9 @@ export const zhCN = {
     backend: "后端类型",
     password: "Restic 密码",
     submit: "连接 / 初始化",
+    title: "切换仓库 / 后端",
+    switchHint: "选择仓库目录与后端进行切换。",
+    switchAction: "切换…",
     initialized: "已初始化新仓库（{backend}）",
     opened: "已接入现有仓库（{backend}）",
     unrecognized: "目录非空且不是可识别的 DocVault 仓库。",
@@ -167,6 +182,9 @@ export const zhCN = {
   contextMenu: {
     reload: "重新加载",
     inspect: "检查元素",
+  },
+  dialog: {
+    close: "关闭",
   },
   archive: {
     title: "归档仓库",
