@@ -1,0 +1,190 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
+
+import { useVaultActions } from "./useVaultActions";
+import { useVault } from "./useVault";
+import { useDocuments } from "./useDocuments";
+import { useDialogs } from "./useDialogs";
+import { withI18nContext } from "../test/compose";
+import type { Document } from "../data/mock";
+
+/*
+ * useVaultActions centralizes the commit/export/checkout handlers and calls
+ * `useI18n()` (via useActivityLog too), so it must run inside an i18n context.
+ * These tests pin the invoke *contract* for each action - especially that
+ * checkout switches the current version with NO file dialog and NO output_path
+ * (the regression where checkout opened a save dialog).
+ *
+ * `isTauri()` is false in jsdom by default; tests that exercise the invoke path
+ * set window.__TAURI_INTERNALS__. invoke/open/save are vi.fn mocks from setup.
+ */
+
+const docA: Document = {
+  id: "docA",
+  name: "Alpha",
+  originalFilename: "alpha.docx",
+  type: "docx",
+  owner: "Alice",
+  updatedAt: "",
+  backend: "local-copy",
+  health: "synced",
+  versions: [
+    {
+      id: "a1",
+      label: "a1",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "current",
+    },
+  ],
+};
+
+const { documents } = useVault();
+const docs = useDocuments();
+const dialogs = useDialogs();
+
+let actions: ReturnType<typeof useVaultActions>;
+
+/** Make `isTauri()` return true so the invoke branch executes. */
+function asTauri(): void {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+}
+
+/** Drain the microtask queue so fire-and-forget async actions settle. */
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+beforeEach(() => {
+  documents.value = [docA];
+  docs.selectedDocumentId.value = docA.id;
+  docs.selectedVersionId.value = docA.versions[0].id;
+  docs.searchQuery.value = "";
+  vi.mocked(invoke).mockClear();
+  vi.mocked(open).mockClear();
+  vi.mocked(save).mockClear();
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  actions = withI18nContext(() => useVaultActions());
+});
+
+afterEach(() => {
+  vi.mocked(console.info).mockRestore();
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+});
+
+describe("useVaultActions - runAction routing", () => {
+  it("opens the add-document dialog for actionLogs.addDocument", () => {
+    actions.runAction("actionLogs.addDocument");
+    expect(dialogs.addDocumentOpen.value).toBe(true);
+  });
+
+  it("reloads documents for actionLogs.refresh under Tauri", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+    actions.runAction("actionLogs.refresh");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("list_documents_with_versions");
+    });
+  });
+});
+
+describe("useVaultActions - checkout", () => {
+  it("does not invoke when not running under Tauri", async () => {
+    actions.runAction("actionLogs.checkout");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("switches the current version with no file dialog and no output_path", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue("job-1");
+    actions.runAction("actionLogs.checkout");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("checkout_version", {
+        document_id: docA.id,
+        version: docA.versions[0].label,
+      });
+    });
+    // Checkout must not open a save dialog - it switches the pointer only.
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke when no document is selected", async () => {
+    asTauri();
+    documents.value = [];
+    actions.runAction("actionLogs.checkout");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke when the selected document has no versions", async () => {
+    asTauri();
+    const noVersions: Document = { ...docA, id: "docNoVer", versions: [] };
+    documents.value = [noVersions];
+    docs.selectedDocumentId.value = "docNoVer";
+    actions.runAction("actionLogs.checkout");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVaultActions - export", () => {
+  it("writes the selected version to the chosen file path", async () => {
+    asTauri();
+    vi.mocked(save).mockResolvedValueOnce("/out/Alpha_a1.docx");
+    vi.mocked(invoke).mockResolvedValue("job-2");
+    actions.runAction("actionLogs.export");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("export_version", {
+        document_id: docA.id,
+        version: docA.versions[0].label,
+        output_path: "/out/Alpha_a1.docx",
+      });
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "Alpha_a1.docx" }),
+    );
+  });
+
+  it("does not invoke when the save dialog is cancelled", async () => {
+    asTauri();
+    vi.mocked(save).mockResolvedValueOnce(null);
+    actions.runAction("actionLogs.export");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVaultActions - commit", () => {
+  it("commits a picked file as a new version of the selected document", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce("/in/changes.docx");
+    vi.mocked(invoke).mockResolvedValue("job-3");
+    actions.runAction("actionLogs.commit");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("commit_document", {
+        path: "/in/changes.docx",
+        document_id: docA.id,
+      });
+    });
+  });
+
+  it("does not invoke when the file picker is cancelled", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce(null);
+    actions.runAction("actionLogs.commit");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke when no document is selected", async () => {
+    asTauri();
+    documents.value = [];
+    actions.runAction("actionLogs.commit");
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
