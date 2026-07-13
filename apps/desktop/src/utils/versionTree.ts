@@ -4,40 +4,44 @@ import type { Version } from "../data/mock";
  * Pure helpers for reasoning about version history shape (linear vs branching).
  * Used to decide whether the tree view is available and whether to show a
  * "based on vX" annotation on a version row.
+ *
+ * A history is "linear" when it is a single chain with no forks: one root and
+ * no version has more than one child. The check is structural (child counts),
+ * so it is independent of the array order and the label format - it works for
+ * the newest-first mock fixtures and for real backend versions (ids "v1".."vN",
+ * parent_version_id) alike.
  */
 
-export function hasLinearIncrementingHistory(versions: Version[]): boolean {
+export function hasBranchingHistory(versions: Version[]): boolean {
   if (versions.length <= 1) {
+    return false;
+  }
+
+  const childCount = new Map<string, number>();
+  let roots = 0;
+
+  for (const version of versions) {
+    if (version.parentId) {
+      childCount.set(
+        version.parentId,
+        (childCount.get(version.parentId) ?? 0) + 1,
+      );
+    } else {
+      roots += 1;
+    }
+  }
+
+  if (roots > 1) {
     return true;
   }
 
-  for (let index = 0; index < versions.length; index += 1) {
-    const version = versions[index];
-    const match = /^v(\d+)$/.exec(version.label);
-
-    if (!match) {
-      return false;
-    }
-
-    if (index > 0) {
-      const previousVersion = versions[index - 1];
-      const previousMatch = /^v(\d+)$/.exec(previousVersion.label);
-
-      if (
-        !previousMatch ||
-        Number(match[1]) !== Number(previousMatch[1]) + 1 ||
-        version.parentId !== previousVersion.id
-      ) {
-        return false;
-      }
+  for (const count of childCount.values()) {
+    if (count > 1) {
+      return true;
     }
   }
 
-  return true;
-}
-
-export function hasBranchingHistory(versions: Version[]): boolean {
-  return !hasLinearIncrementingHistory(versions);
+  return false;
 }
 
 export function getParentLabel(version: Version, versions: Version[]): string {

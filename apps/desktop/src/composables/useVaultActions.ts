@@ -11,9 +11,10 @@ import { extOf, pickOfficeFile } from "../utils/file";
 /*
  * Centralized action handlers. Every UI action (commit, export, checkout,
  * refresh, navigate, toggle theme) flows through here so the activity log
- * records a consistent message. Commit / export / checkout open a native file
- * dialog, spawn a backend job, and log the job id; the job's truthful state
- * arrives later via `job:update` events (mirrored in useVault).
+ * records a consistent message. Commit and export open a native file dialog,
+ * spawn a backend job, and log the job id; checkout switches the current
+ * version pointer without a file dialog. The job's truthful state arrives
+ * later via `job:update` events (mirrored in useVault).
  */
 
 export function useVaultActions() {
@@ -92,23 +93,7 @@ export function useVaultActions() {
   }
 
   async function exportAction() {
-    await exportOrCheckout("actionLogs.export", "exportVersion");
-  }
-
-  async function checkoutAction() {
-    await exportOrCheckout("actionLogs.checkout", "checkoutVersion");
-  }
-
-  /**
-   * Shared flow for export and checkout: both need a selected document +
-   * version and a save location. Export writes the file; checkout also marks
-   * the version as current (the backend handles both; the UI refreshes on the
-   * resulting `job:update`).
-   */
-  async function exportOrCheckout(
-    actionKey: "actionLogs.export" | "actionLogs.checkout",
-    fn: "exportVersion" | "checkoutVersion",
-  ) {
+    const actionKey = "actionLogs.export" as const;
     const doc = selectedDocument.value;
     const ver = selectedVersion.value;
     log(
@@ -133,11 +118,42 @@ export function useVaultActions() {
       return;
     }
     try {
-      const params = { document_id: doc.id, version: ver.label, output_path: out };
-      const id =
-        fn === "exportVersion"
-          ? await exportVersion(params)
-          : await checkoutVersion(params);
+      // Export writes the selected version to a file; it does not change which
+      // version is current.
+      const id = await exportVersion({
+        document_id: doc.id,
+        version: ver.label,
+        output_path: out,
+      });
+      log(t("log.jobStarted", { action: t(actionKey), id }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  async function checkoutAction() {
+    const actionKey = "actionLogs.checkout" as const;
+    const doc = selectedDocument.value;
+    const ver = selectedVersion.value;
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: ver?.label ?? t("log.latest"),
+      }),
+    );
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    try {
+      // Checkout switches the current version pointer without writing a file.
+      // The backend marks the version current; the UI refreshes on `job:update`.
+      const id = await checkoutVersion({
+        document_id: doc.id,
+        version: ver.label,
+      });
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
