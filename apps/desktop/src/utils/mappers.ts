@@ -1,0 +1,180 @@
+import type {
+  Backend,
+  Document,
+  DocumentType,
+  Job,
+  VaultConfigPreview,
+  Version,
+} from "../data/mock";
+
+/*
+ * Pure mappers that translate raw `docvault_types` / `docvault_jobs` payloads
+ * (snake_case, as serialized by serde) into the UI view-model (plain strings,
+ * formatted bytes/dates). Extracted from useVault so they are unit-testable
+ * without the Tauri / reactive layer. These functions are deterministic and
+ * side-effect free - the only non-pure call is `new Date()` inside formatEpoch,
+ * which is driven solely by its epoch argument (no clock reads).
+ */
+
+// --- raw backend shapes (snake_case, as serialized by serde) ---
+
+export interface RawManifestEntry {
+  path: string;
+  size: number;
+  sha256: string;
+  content_type?: string;
+}
+
+export interface RawDocument {
+  id: string;
+  name: string;
+  current_version_id: string | null;
+  created_at: number;
+}
+
+export interface RawVersion {
+  id: string;
+  document_id: string;
+  number: number;
+  original_filename: string;
+  archive_reference: string;
+  backup_backend: string;
+  snapshot_id: string | null;
+  manifest: { entries: RawManifestEntry[] };
+  parent_version_id: string | null;
+  author: string | null;
+  note: string | null;
+  created_at: number;
+}
+
+export interface RawDocumentWithVersions {
+  document: RawDocument;
+  versions: RawVersion[];
+}
+
+export interface RawConfig {
+  backend: string;
+  data_dir: string;
+  repo_dir: string;
+  db_path: string;
+  restic_path: string;
+  log_level: string;
+  log_file: string;
+  restic_version: string;
+}
+
+export interface VaultStatus {
+  initialized: boolean;
+  root_dir: string;
+  open_error?: string;
+}
+
+/** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
+export interface RawJob {
+  id: string;
+  kind: "commit" | "export" | "checkout";
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  progress: number | null;
+  error: string | null;
+  target_label: string;
+  started_at: number;
+  finished_at: number | null;
+}
+
+// --- formatting helpers (UI concerns; kept out of Rust) ---
+
+export function formatBytes(entries: RawManifestEntry[]): string {
+  const bytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  const scaled = bytes / 1024 ** i;
+  const decimals = scaled >= 10 || i === 0 ? 0 : 1;
+  return `${scaled.toFixed(decimals)} ${units[i]}`;
+}
+
+export function formatEpoch(epoch: number): string {
+  if (!epoch) return "";
+  const date = new Date(epoch * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function deriveType(filename: string): DocumentType {
+  const ext = filename.slice(filename.lastIndexOf(".") + 1).toLowerCase();
+  if (ext === "docx" || ext === "xlsx" || ext === "pptx") return ext;
+  return "docx";
+}
+
+// --- payload -> view-model mappers ---
+
+export function mapVersion(raw: RawVersion, currentId: string | null): Version {
+  return {
+    id: raw.id,
+    label: raw.id,
+    parentId: raw.parent_version_id ?? undefined,
+    author: raw.author ?? "",
+    note: raw.note ?? "",
+    size: formatBytes(raw.manifest.entries),
+    createdAt: formatEpoch(raw.created_at),
+    status: raw.id === currentId ? "current" : "archived",
+  };
+}
+
+export function mapDocument(raw: RawDocumentWithVersions): Document {
+  const versions = [...raw.versions].sort(
+    (a, b) => b.created_at - a.created_at,
+  );
+  const latest = versions[0];
+  const currentId = raw.document.current_version_id;
+  return {
+    id: raw.document.id,
+    name: raw.document.name,
+    originalFilename: latest?.original_filename ?? raw.document.name,
+    type: deriveType(latest?.original_filename ?? raw.document.name),
+    owner: latest?.author ?? "",
+    updatedAt: formatEpoch(latest?.created_at ?? raw.document.created_at),
+    versions: versions.map((version) => mapVersion(version, currentId)),
+    backend: (latest?.backup_backend as Backend) ?? "local-copy",
+    health: versions.length > 0 ? "synced" : "needsReview",
+  };
+}
+
+export function mapConfig(raw: RawConfig): VaultConfigPreview {
+  return {
+    backend: raw.backend as Backend,
+    dataDir: raw.data_dir,
+    repoDir: raw.repo_dir,
+    resticPath: raw.restic_path,
+    resticPassword: "",
+    dbPath: raw.db_path,
+    logLevel: raw.log_level,
+    logFile: raw.log_file,
+    resticVersion: raw.restic_version,
+  };
+}
+
+export function mapJob(raw: RawJob): Job {
+  // Indeterminate running jobs show an empty bar (0%); succeeded jobs fill it.
+  // Real `progress` (0..1) arrives once restic `percent_done` streaming lands.
+  const progress =
+    raw.progress != null
+      ? Math.round(raw.progress * 100)
+      : raw.status === "succeeded"
+        ? 100
+        : 0;
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    target: raw.target_label,
+    progress,
+    status: raw.status,
+    error: raw.error ?? undefined,
+    startedAt: formatEpoch(raw.started_at),
+    finishedAt:
+      raw.finished_at != null ? formatEpoch(raw.finished_at) : undefined,
+  };
+}
