@@ -249,7 +249,7 @@ fn ensure_local_copy_config(paths: &VaultPaths) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::dto::ConnectError;
-    use docvault_jobs::JobKind;
+    use docvault_jobs::{JobKind, JobOutcome};
     use docvault_storage::{VaultPaths, VaultStorage};
     use std::path::Path;
     use std::thread;
@@ -332,7 +332,9 @@ mod tests {
         connect_vault_core(&state, root.to_str().unwrap(), "local-copy", None).unwrap();
         let job_id = state
             .jobs
-            .spawn(JobKind::Commit, "report", Arc::new(|_| {}), |_| Ok(()));
+            .spawn(JobKind::Commit, "report", Arc::new(|_| {}), |_, _| {
+                JobOutcome::Succeeded
+            });
         let mut waited = 0;
         while state
             .jobs

@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
 };
 
 use docvault_types::{Document, Version};
@@ -21,10 +22,11 @@ impl VaultStorage {
         document: &Document,
         version_id: &str,
         source_path: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<ArchiveReference> {
         match self.settings.backend {
             BackupBackend::LocalCopy => self.archive_local_copy(document, version_id, source_path),
-            BackupBackend::Restic => self.archive_restic(document, version_id, source_path),
+            BackupBackend::Restic => self.archive_restic(document, version_id, source_path, cancel),
         }
     }
 
@@ -68,6 +70,7 @@ impl VaultStorage {
         document: &Document,
         version_id: &str,
         source_path: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<ArchiveReference> {
         debug!(
             document_id = document.id.as_str(),
@@ -75,12 +78,12 @@ impl VaultStorage {
             source = %source_path.display(),
             "archiving source with restic backend"
         );
-        self.ensure_restic_repo()?;
+        self.ensure_restic_repo(cancel)?;
         let package_dir = self.restic_package_dir(document, version_id);
         reset_dir(&package_dir)?;
         docvault_ooxml::unpack_package(source_path, &package_dir)?;
 
-        let snapshot_id = self.restic_backup(document, version_id, &package_dir)?;
+        let snapshot_id = self.restic_backup(document, version_id, &package_dir, cancel)?;
         Ok(ArchiveReference {
             backend: BackupBackend::Restic,
             reference: format!("restic:{}:{version_id}", document.id.as_str()),
@@ -105,6 +108,7 @@ impl VaultStorage {
         document: &Document,
         version: &Version,
         output_path: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<PathBuf> {
         let destination = self.restore_destination(version, output_path)?;
         info!(
@@ -122,7 +126,7 @@ impl VaultStorage {
                 )?;
             }
             BackupBackend::Restic => {
-                self.restore_restic_version(document, version, &destination)?;
+                self.restore_restic_version(document, version, &destination, cancel)?;
             }
         }
         Ok(destination)
@@ -133,6 +137,7 @@ impl VaultStorage {
         document: &Document,
         version: &Version,
         destination: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<()> {
         let snapshot_id = version
             .snapshot_id
@@ -145,7 +150,7 @@ impl VaultStorage {
             .join(document.id.as_str())
             .join(&version.id);
         reset_dir(&restore_root)?;
-        self.restic_restore(snapshot_id, &restore_root)?;
+        self.restic_restore(snapshot_id, &restore_root, cancel)?;
 
         let restored_package = restore_root.join("package");
         docvault_ooxml::pack_package(restored_package, destination)?;

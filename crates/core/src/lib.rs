@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
@@ -39,6 +40,7 @@ impl DocVault {
         source_path: impl AsRef<Path>,
         document_ref: DocumentRef,
         metadata: CommitMetadata,
+        cancel: &AtomicBool,
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
         info!(path = %source_path.display(), "starting document commit");
@@ -47,9 +49,9 @@ impl DocVault {
             return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
         }
 
-        let result = self
-            .storage
-            .add_document_version(document_ref, source_path, metadata)?;
+        let result =
+            self.storage
+                .add_document_version(document_ref, source_path, metadata, cancel)?;
         info!(
             document_id = result.0.id.as_str(),
             version_id = result.1.id.as_str(),
@@ -71,9 +73,14 @@ impl DocVault {
         document_ref: &DocumentRef,
         requested_version: &str,
         output_path: impl AsRef<Path>,
+        cancel: &AtomicBool,
     ) -> StorageResult<PathBuf> {
-        self.storage
-            .export_version(document_ref, requested_version, output_path.as_ref())
+        self.storage.export_version(
+            document_ref,
+            requested_version,
+            output_path.as_ref(),
+            cancel,
+        )
     }
 
     pub fn checkout_version(
@@ -81,11 +88,13 @@ impl DocVault {
         document_ref: &DocumentRef,
         requested_version: &str,
         output_path: Option<impl AsRef<Path>>,
+        cancel: &AtomicBool,
     ) -> StorageResult<Option<PathBuf>> {
         self.storage.checkout_version(
             document_ref,
             requested_version,
             output_path.as_ref().map(AsRef::as_ref),
+            cancel,
         )
     }
 
@@ -153,6 +162,7 @@ mod tests {
                 "notes.txt",
                 DocumentRef::Name("notes".to_owned()),
                 CommitMetadata::default(),
+                &docvault_storage::NEVER_CANCELLED,
             )
             .expect_err("txt files should be rejected");
 

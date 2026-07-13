@@ -15,6 +15,7 @@ import { useNavigation } from "./composables/useNavigation";
 import { useCommandPalette } from "./composables/useCommandPalette";
 import { useActivityLog } from "./composables/useActivityLog";
 import { useVault } from "./composables/useVault";
+import type { RawJob } from "./composables/useVault";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
@@ -43,11 +44,29 @@ function onGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
+/**
+ * Record an activity-log entry when a job reaches a terminal status. The
+ * message is built from the backend's authoritative event (not the cancel
+ * request), so the log reflects what actually happened: a job that finished
+ * before the cancel registered is logged as succeeded/failed, not cancelled.
+ */
+function onJobTerminal(raw: RawJob): void {
+  const action = t(`jobs.${raw.kind}`);
+  const target = raw.target_label;
+  if (raw.status === "succeeded") {
+    log(t("log.jobSucceeded", { action, target }));
+  } else if (raw.status === "failed") {
+    log(t("log.jobFailed", { action, target, error: raw.error ?? "" }));
+  } else if (raw.status === "cancelled") {
+    log(t("log.jobCancelled", { action, target }));
+  }
+}
+
 async function onInit() {
   initError.value = "";
   try {
     await init();
-    unsubJobs = await subscribeJobs();
+    unsubJobs = await subscribeJobs(onJobTerminal);
   } catch (e) {
     initError.value = String(e);
   }
@@ -57,7 +76,7 @@ onMounted(async () => {
   await refreshStatus();
   if (initialized.value) {
     await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
-    unsubJobs = await subscribeJobs();
+    unsubJobs = await subscribeJobs(onJobTerminal);
   }
   booting.value = false;
   log(t("log.loaded"));

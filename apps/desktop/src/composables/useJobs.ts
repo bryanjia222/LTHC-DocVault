@@ -7,13 +7,13 @@ import { useVault } from "./useVault";
  * registry via `job:update` events (mock fixtures only in browser dev).
  */
 
-const { jobs } = useVault();
+const { jobs, cancelJob } = useVault();
 
 export function useJobs() {
-  // Only `running` jobs count as active; succeeded/failed are terminal.
+  // Only `running` jobs count as active; succeeded/failed/cancelled are terminal.
   const activeJobCount = computed(
     () => jobs.value.filter((job) => job.status === "running").length,
   );
 
-  return { jobs, activeJobCount };
+  return { jobs, activeJobCount, cancelJob };
 }

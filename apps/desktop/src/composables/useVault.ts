@@ -75,16 +75,23 @@ interface VaultStatus {
 }
 
 /** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
-interface RawJob {
+export interface RawJob {
   id: string;
   kind: "commit" | "export" | "checkout";
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "succeeded" | "failed" | "cancelled";
   progress: number | null;
   error: string | null;
   target_label: string;
   started_at: number;
   finished_at: number | null;
 }
+
+/** Terminal statuses — a job that has stopped running for good. */
+const TERMINAL_STATUSES: ReadonlySet<RawJob["status"]> = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
 
 /** True when running inside a Tauri window (IPC available). */
 export function isTauri(): boolean {
@@ -316,6 +323,17 @@ async function checkoutVersion(params: {
   return invoke<string>("checkout_version", params);
 }
 
+/**
+ * Request cancellation of a running job. Returns true when a running job was
+ * found and the cancel flag set; the job's terminal status (`cancelled`, or
+ * `succeeded`/`failed` if it finished first) still arrives via `job:update`.
+ * The UI must not assume the job is already cancelled when this resolves -
+ * truthfulness comes from the subsequent event, not this return value.
+ */
+async function cancelJob(jobId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_job", { job_id: jobId });
+}
+
 type ConnectOutcome = {
   mode: "initialized" | "opened";
   backend: string;
@@ -342,15 +360,20 @@ async function connect(params: ConnectParams): Promise<ConnectOutcome> {
 /**
  * Subscribe to `job:update` events and mirror the backend's authoritative job
  * state into the reactive `jobs` map. Commits/checkouts that succeed refresh
- * the document list (checkout changes which version is current). Returns an
+ * the document list (checkout changes which version is current). `onTerminal`
+ * (if given) is invoked once per job when it reaches a terminal status, so the
+ * caller can record an activity-log entry in the user's locale. Returns an
  * unsubscribe fn; a no-op when not running under Tauri.
  */
-async function subscribeJobs(): Promise<UnlistenFn> {
+async function subscribeJobs(
+  onTerminal?: (job: RawJob) => void,
+): Promise<UnlistenFn> {
   if (!isTauri()) {
     return () => {};
   }
   return listen<RawJob>("job:update", (event) => {
-    const job = mapJob(event.payload);
+    const raw = event.payload;
+    const job = mapJob(raw);
     const index = jobs.value.findIndex((existing) => existing.id === job.id);
     if (index >= 0) {
       jobs.value.splice(index, 1, job);
@@ -358,11 +381,11 @@ async function subscribeJobs(): Promise<UnlistenFn> {
       jobs.value.unshift(job);
     }
     const refreshKinds: RawJob["kind"][] = ["commit", "checkout"];
-    if (
-      refreshKinds.includes(event.payload.kind) &&
-      event.payload.status === "succeeded"
-    ) {
+    if (refreshKinds.includes(raw.kind) && raw.status === "succeeded") {
       void loadDocuments();
+    }
+    if (TERMINAL_STATUSES.has(raw.status)) {
+      onTerminal?.(raw);
     }
   });
 }
@@ -386,6 +409,7 @@ export function useVault() {
     commit,
     exportVersion,
     checkoutVersion,
+    cancelJob,
     connect,
     subscribeJobs,
   };

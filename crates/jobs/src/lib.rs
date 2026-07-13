@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,16 +20,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use uuid::Uuid;
 
-/// Terminal-aware lifecycle. `Queued`/`Cancelled` are intentionally omitted for
-/// now: the runner spawns immediately (no queue) and cannot interrupt a
-/// blocking storage call, so exposing those states would lie to the UI. They
-/// are deferred follow-ups (see plan decisions E/F).
+/// Terminal-aware lifecycle. `Queued` is intentionally omitted: the runner
+/// spawns immediately (no queue). `Cancelled` is reached only when a job's work
+/// observes the cancel flag and aborts - a job that actually completes first
+/// keeps its real `Succeeded`/`Failed` status, so the UI never lies about what
+/// the backend did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobStatus {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
+}
+
+/// The terminal outcome a job's work reports. Splitting `Cancelled` from
+/// `Failed` keeps cancellation truthful: the runner decides the recorded status
+/// from this outcome (not from a late cancel flag), so a job that finished
+/// before the cancel took effect is not mislabeled.
+#[derive(Debug)]
+pub enum JobOutcome {
+    Succeeded,
+    Failed(String),
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -74,7 +88,13 @@ struct RegistryInner {
     /// Insertion order (oldest first), so [`JobRegistry::list`] can return
     /// newest-first deterministically without relying on timestamp granularity.
     order: Vec<JobId>,
+    /// Live cancel flags for running jobs, dropped once the job is terminal.
+    cancels: HashMap<JobId, Arc<AtomicBool>>,
 }
+
+/// Upper bound on retained job history. Terminal jobs beyond this are pruned
+/// (oldest first); running jobs are never pruned.
+const MAX_RECORDS: usize = 200;
 
 impl JobRegistry {
     pub fn new() -> Self {
@@ -108,17 +128,33 @@ impl JobRegistry {
         let mut inner = self.inner.lock().expect("job registry poisoned");
         inner.records.clear();
         inner.order.clear();
+        inner.cancels.clear();
+    }
+
+    /// Request cancellation of a running job. Returns `false` if the job is
+    /// unknown or already terminal (its cancel token has been dropped). The job
+    /// reaches `Cancelled` only if its work observes the flag and aborts; a job
+    /// that completes first keeps its real status.
+    pub fn cancel(&self, id: &str) -> bool {
+        let inner = self.inner.lock().expect("job registry poisoned");
+        if let Some(token) = inner.cancels.get(id) {
+            token.store(true, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
     }
 
     /// Spawn `work` on a dedicated thread and return its id immediately. The
     /// record is already `Running` by the time this returns; `on_event` has
     /// already fired with the initial snapshot.
     ///
-    /// `work` receives a progress reporter it may call between phases (ignored
-    /// by fast local-copy ops; used by future restic streaming). Errors are
-    /// mapped to `Failed` with `e.to_string()` so the backend's readable
-    /// `Display` reaches the UI unchanged. A panic inside `work` is caught and
-    /// likewise mapped to `Failed`, so the job always reaches a terminal state.
+    /// `work` receives a progress reporter and a cancel flag it should poll
+    /// during long operations (the restic layer checks it between polls). Its
+    /// [`JobOutcome`] decides the terminal status: `Succeeded`/`Failed` carry
+    /// the backend's real result, `Cancelled` only when the work observed the
+    /// flag and aborted. A panic inside `work` is caught and mapped to `Failed`,
+    /// so the job always reaches a terminal state.
     pub fn spawn<F>(
         &self,
         kind: JobKind,
@@ -127,9 +163,10 @@ impl JobRegistry {
         work: F,
     ) -> JobId
     where
-        F: FnOnce(&dyn Fn(Option<f64>)) -> Result<(), String> + Send + 'static,
+        F: FnOnce(&dyn Fn(Option<f64>), &AtomicBool) -> JobOutcome + Send + 'static,
     {
         let id = Uuid::new_v4().to_string();
+        let cancel = Arc::new(AtomicBool::new(false));
         let record = JobRecord {
             id: id.clone(),
             kind,
@@ -144,6 +181,8 @@ impl JobRegistry {
             let mut inner = self.inner.lock().expect("job registry poisoned");
             inner.records.insert(id.clone(), record.clone());
             inner.order.push(id.clone());
+            inner.cancels.insert(id.clone(), Arc::clone(&cancel));
+            prune(&mut inner);
         }
         on_event(record);
 
@@ -164,29 +203,61 @@ impl JobRegistry {
             // catch_unwind so a panic inside `work` still reaches a terminal
             // state and emits the event - otherwise the thread dies silently
             // and the job is stuck `Running` forever (truthfulness contract).
-            let result = match catch_unwind(AssertUnwindSafe(|| work(&progress))) {
-                Ok(inner) => inner,
-                Err(payload) => Err(panic_message(payload)),
+            let outcome = match catch_unwind(AssertUnwindSafe(|| work(&progress, &cancel))) {
+                Ok(outcome) => outcome,
+                Err(payload) => JobOutcome::Failed(panic_message(payload)),
             };
             let terminal = {
                 let mut inner = inner.lock().expect("job registry poisoned");
-                let Some(rec) = inner.records.get_mut(&id_for_thread) else {
-                    return;
-                };
-                rec.finished_at = Some(now_epoch());
-                match result {
-                    Ok(()) => rec.status = JobStatus::Succeeded,
-                    Err(err) => {
-                        rec.status = JobStatus::Failed;
-                        rec.error = Some(err);
+                let terminal = {
+                    let Some(rec) = inner.records.get_mut(&id_for_thread) else {
+                        return;
+                    };
+                    rec.finished_at = Some(now_epoch());
+                    match outcome {
+                        JobOutcome::Succeeded => rec.status = JobStatus::Succeeded,
+                        JobOutcome::Failed(err) => {
+                            rec.status = JobStatus::Failed;
+                            rec.error = Some(err);
+                        }
+                        JobOutcome::Cancelled => rec.status = JobStatus::Cancelled,
                     }
-                }
-                rec.clone()
+                    rec.clone()
+                };
+                // The job is terminal: drop its cancel token (a late cancel is
+                // a no-op) and trim history to the bound.
+                inner.cancels.remove(&id_for_thread);
+                prune(&mut inner);
+                terminal
             };
             on_event(terminal);
         });
 
         id
+    }
+}
+
+/// Evict the oldest terminal jobs until `records` is within `MAX_RECORDS`.
+/// Running jobs are never pruned; if every record is running, pruning stops
+/// early and resumes when those jobs finish.
+fn prune(inner: &mut RegistryInner) {
+    while inner.records.len() > MAX_RECORDS {
+        let Some(evict) = inner
+            .order
+            .iter()
+            .find(|id| {
+                inner
+                    .records
+                    .get(*id)
+                    .is_some_and(|rec| rec.status != JobStatus::Running)
+            })
+            .cloned()
+        else {
+            break;
+        };
+        inner.records.remove(&evict);
+        inner.cancels.remove(&evict);
+        inner.order.retain(|id| *id != evict);
     }
 }
 
@@ -213,7 +284,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 
     #[test]
@@ -225,13 +296,13 @@ mod tests {
             JobKind::Commit,
             "report",
             make_counter(&terminal),
-            |_progress| Ok(()),
+            |_progress, _cancel| JobOutcome::Succeeded,
         );
         let err_id = registry.spawn(
             JobKind::Export,
             "report v1",
             make_counter(&terminal),
-            |_progress| Err("boom".to_owned()),
+            |_progress, _cancel| JobOutcome::Failed("boom".to_owned()),
         );
 
         // Wait for both jobs to reach a terminal state (robust vs scheduling).
@@ -259,8 +330,12 @@ mod tests {
     #[test]
     fn list_returns_newest_first() {
         let registry = JobRegistry::new();
-        let a = registry.spawn(JobKind::Commit, "a", make_noop(), |_| Ok(()));
-        let b = registry.spawn(JobKind::Commit, "b", make_noop(), |_| Ok(()));
+        let a = registry.spawn(JobKind::Commit, "a", make_noop(), |_, _| {
+            JobOutcome::Succeeded
+        });
+        let b = registry.spawn(JobKind::Commit, "b", make_noop(), |_, _| {
+            JobOutcome::Succeeded
+        });
 
         let records = registry.list();
         assert_eq!(records.first().map(|r| r.id.as_str()), Some(b.as_str()));
@@ -280,7 +355,7 @@ mod tests {
             JobKind::Commit,
             "boom",
             make_counter(&terminal),
-            |_progress| panic!("boom"),
+            |_progress, _cancel| panic!("boom"),
         );
 
         let mut waited = 0;
@@ -302,6 +377,101 @@ mod tests {
             record.error
         );
         assert!(record.finished_at.is_some());
+    }
+
+    /// A job that polls the cancel flag and reports `Cancelled` reaches
+    /// `Cancelled` (not `Failed`), with no error.
+    #[test]
+    fn cancelled_job_reports_cancelled() {
+        let registry = JobRegistry::new();
+        let terminal = Arc::new(AtomicUsize::new(0));
+        let id = registry.spawn(
+            JobKind::Commit,
+            "report",
+            make_counter(&terminal),
+            |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| {
+                while !cancel.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                JobOutcome::Cancelled
+            },
+        );
+
+        thread::sleep(Duration::from_millis(20));
+        assert!(registry.cancel(&id));
+
+        let mut waited = 0;
+        while terminal.load(Ordering::SeqCst) == 0 && waited < 500 {
+            thread::sleep(Duration::from_millis(2));
+            waited += 1;
+        }
+        assert_eq!(terminal.load(Ordering::SeqCst), 1);
+
+        let record = registry.get(&id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Cancelled);
+        assert!(record.error.is_none());
+        assert!(record.finished_at.is_some());
+    }
+
+    /// A job that completes before the cancel takes effect keeps its real
+    /// `Succeeded` status; a late cancel is a no-op (the token was dropped).
+    #[test]
+    fn completed_job_stays_succeeded_when_cancel_arrives_late() {
+        let registry = JobRegistry::new();
+        let terminal = Arc::new(AtomicUsize::new(0));
+        let id = registry.spawn(
+            JobKind::Commit,
+            "report",
+            make_counter(&terminal),
+            |_, _| JobOutcome::Succeeded,
+        );
+
+        let mut waited = 0;
+        while terminal.load(Ordering::SeqCst) == 0 && waited < 500 {
+            thread::sleep(Duration::from_millis(2));
+            waited += 1;
+        }
+
+        let cancelled = registry.cancel(&id);
+        assert!(!cancelled, "late cancel should find no live token");
+
+        let record = registry.get(&id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Succeeded);
+    }
+
+    /// History is bounded: terminal jobs beyond `MAX_RECORDS` are pruned
+    /// (oldest first), running jobs are retained.
+    #[test]
+    fn history_is_pruned_beyond_max() {
+        let registry = JobRegistry::new();
+        for _ in 0..(MAX_RECORDS + 5) {
+            registry.spawn(JobKind::Commit, "x", make_noop(), |_, _| {
+                JobOutcome::Succeeded
+            });
+        }
+
+        // Wait for every job to reach a terminal state so terminal pruning has
+        // run; then the list must be capped at MAX_RECORDS.
+        let mut waited = 0;
+        loop {
+            let any_running = registry
+                .list()
+                .iter()
+                .any(|rec| rec.status == JobStatus::Running);
+            if !any_running || waited > 1000 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+            waited += 1;
+        }
+
+        let records = registry.list();
+        assert!(
+            records.len() <= MAX_RECORDS,
+            "history should be capped, got {}",
+            records.len()
+        );
+        assert_eq!(records.len(), MAX_RECORDS);
     }
 
     fn make_counter(terminal: &Arc<AtomicUsize>) -> JobEventCallback {

@@ -1,4 +1,11 @@
-use std::{path::Path, process::Command};
+use std::{
+    io::Read,
+    path::Path,
+    process::{Command, Output, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+    time::{Duration, Instant},
+};
 
 use docvault_types::Document;
 use serde_json::Value;
@@ -6,16 +13,24 @@ use tracing::{debug, error, info};
 
 use crate::{ResticError, StorageError, StorageResult, VaultStorage};
 
+/// Restic command ceilings. `cat config` / `init` / `version` are quick
+/// metadata calls; backup/restore may move large data over a slow or cloud
+/// link and need a generous bound. The poll loop checks the cancel flag and
+/// the deadline this often.
+const RESTIC_SHORT_TIMEOUT: Duration = Duration::from_secs(60);
+const RESTIC_LONG_TIMEOUT: Duration = Duration::from_secs(600);
+const RESTIC_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 impl VaultStorage {
-    pub(crate) fn ensure_restic_repo(&self) -> StorageResult<()> {
+    pub(crate) fn ensure_restic_repo(&self, cancel: &AtomicBool) -> StorageResult<()> {
         debug!(repo = %self.paths.repo_dir.display(), "checking restic repository");
-        let config = self.run_restic(["cat", "config"])?;
+        let config = self.run_restic(["cat", "config"], cancel, RESTIC_SHORT_TIMEOUT)?;
         if config.status.success() {
             return Ok(());
         }
 
         info!(repo = %self.paths.repo_dir.display(), "initializing restic repository");
-        let init = self.run_restic(["init"])?;
+        let init = self.run_restic(["init"], cancel, RESTIC_SHORT_TIMEOUT)?;
         if init.status.success() {
             Ok(())
         } else {
@@ -30,6 +45,7 @@ impl VaultStorage {
         document: &Document,
         version_id: &str,
         package_dir: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<String> {
         let parent = package_dir
             .parent()
@@ -46,6 +62,8 @@ impl VaultStorage {
                 "package",
             ],
             parent,
+            cancel,
+            RESTIC_LONG_TIMEOUT,
         )?;
         if !output.status.success() {
             let error = restic_failed("backup", output.stderr);
@@ -67,10 +85,19 @@ impl VaultStorage {
         Ok(snapshot_id)
     }
 
-    pub(crate) fn restic_restore(&self, snapshot_id: &str, target: &Path) -> StorageResult<()> {
+    pub(crate) fn restic_restore(
+        &self,
+        snapshot_id: &str,
+        target: &Path,
+        cancel: &AtomicBool,
+    ) -> StorageResult<()> {
         std::fs::create_dir_all(target)?;
         let target = target.display().to_string();
-        let output = self.run_restic(["restore", snapshot_id, "--target", target.as_str()])?;
+        let output = self.run_restic(
+            ["restore", snapshot_id, "--target", target.as_str()],
+            cancel,
+            RESTIC_LONG_TIMEOUT,
+        )?;
         if output.status.success() {
             info!(snapshot_id, target, "restic restore completed");
             Ok(())
@@ -81,23 +108,36 @@ impl VaultStorage {
         }
     }
 
-    fn run_restic<const N: usize>(&self, args: [&str; N]) -> StorageResult<std::process::Output> {
-        self.run_restic_command(args, None)
+    fn run_restic<const N: usize>(
+        &self,
+        args: [&str; N],
+        cancel: &AtomicBool,
+        timeout: Duration,
+    ) -> StorageResult<Output> {
+        self.run_restic_command(args, None, cancel, timeout)
     }
 
     fn run_restic_in_dir<const N: usize>(
         &self,
         args: [&str; N],
         current_dir: &Path,
-    ) -> StorageResult<std::process::Output> {
-        self.run_restic_command(args, Some(current_dir))
+        cancel: &AtomicBool,
+        timeout: Duration,
+    ) -> StorageResult<Output> {
+        self.run_restic_command(args, Some(current_dir), cancel, timeout)
     }
 
+    /// Run a restic command, polling for completion so a cancel request or
+    /// timeout can interrupt a stalled/cloud call (otherwise `Command::output`
+    /// would block forever). stdout/stderr are drained on reader threads to
+    /// avoid the child blocking on a full pipe buffer during long backups.
     fn run_restic_command<const N: usize>(
         &self,
         args: [&str; N],
         current_dir: Option<&Path>,
-    ) -> StorageResult<std::process::Output> {
+        cancel: &AtomicBool,
+        timeout: Duration,
+    ) -> StorageResult<Output> {
         debug!(
             restic = %self.settings.restic_path.display(),
             repo = %self.paths.repo_dir.display(),
@@ -110,18 +150,55 @@ impl VaultStorage {
             .args(["-r", self.paths.repo_dir.to_string_lossy().as_ref()])
             .args(args)
             .env("RESTIC_PASSWORD", &self.settings.restic_password)
-            .env("RESTIC_CACHE_DIR", &self.paths.cache_dir);
+            .env("RESTIC_CACHE_DIR", &self.paths.cache_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if let Some(current_dir) = current_dir {
             command.current_dir(current_dir);
         }
-        Ok(command.output()?)
+        let mut child = command.spawn()?;
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+        let stdout_handle = thread::spawn(move || read_all(stdout));
+        let stderr_handle = thread::spawn(move || read_all(stderr));
+
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err(ResticError::Cancelled.into());
+            }
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err(ResticError::TimedOut.into());
+            }
+            thread::sleep(RESTIC_POLL_INTERVAL);
+        };
+        let stdout_buf = stdout_handle.join().unwrap_or_default();
+        let stderr_buf = stderr_handle.join().unwrap_or_default();
+        Ok(Output {
+            status,
+            stdout: stdout_buf,
+            stderr: stderr_buf,
+        })
     }
 
     /// Best-effort `restic version` capture for display. Empty when the binary
     /// is unavailable or exits non-zero. Cached once per vault session by
     /// `VaultStorage::init`/`open` rather than re-spawned on every config read.
     pub(crate) fn capture_restic_version(&self) -> String {
-        let Ok(output) = self.run_restic(["version"]) else {
+        let Ok(output) =
+            self.run_restic(["version"], &crate::NEVER_CANCELLED, RESTIC_SHORT_TIMEOUT)
+        else {
             return String::new();
         };
         if !output.status.success() {
@@ -133,6 +210,12 @@ impl VaultStorage {
             .unwrap_or("")
             .to_owned()
     }
+}
+
+fn read_all<R: Read>(mut reader: R) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let _ = reader.read_to_end(&mut buffer);
+    buffer
 }
 
 fn restic_failed(command: &str, stderr: Vec<u8>) -> StorageError {
@@ -158,7 +241,14 @@ fn snapshot_id_from_backup_json(stdout: &[u8]) -> StorageResult<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs,
+        path::Path,
+        sync::Arc,
+        sync::atomic::{AtomicBool, Ordering},
+        thread,
+        time::Duration,
+    };
 
     use docvault_types::CommitMetadata;
 
@@ -190,6 +280,7 @@ mod tests {
                 DocumentRef::Name("report".to_owned()),
                 &source,
                 CommitMetadata::default(),
+                &crate::NEVER_CANCELLED,
             )
             .unwrap();
 
@@ -220,6 +311,7 @@ mod tests {
                 DocumentRef::Name("report".to_owned()),
                 &source,
                 CommitMetadata::default(),
+                &crate::NEVER_CANCELLED,
             )
             .unwrap_err();
 
@@ -252,9 +344,61 @@ mod tests {
         );
     }
 
+    /// A stalled restic call (cloud hang) must be interruptible by cancellation:
+    /// the child is killed and `ResticError::Cancelled` propagates.
+    #[test]
+    fn restic_command_respects_cancellation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Hang);
+        write_restic_config(&paths, &restic_path);
+        let storage = VaultStorage::init(paths).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_thread = Arc::clone(&cancel);
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancel_for_thread.store(true, Ordering::Relaxed);
+        });
+
+        let error = storage
+            .run_restic(["backup"], &cancel, Duration::from_secs(30))
+            .unwrap_err();
+        handle.join().unwrap();
+
+        assert!(matches!(
+            error,
+            StorageError::Restic(ResticError::Cancelled)
+        ));
+    }
+
+    /// A stalled restic call that is not cancelled must hit the timeout ceiling
+    /// rather than blocking forever.
+    #[test]
+    fn restic_command_times_out() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Hang);
+        write_restic_config(&paths, &restic_path);
+        let storage = VaultStorage::init(paths).unwrap();
+        let cancel = AtomicBool::new(false);
+
+        let error = storage
+            .run_restic(["backup"], &cancel, Duration::from_millis(200))
+            .unwrap_err();
+
+        assert!(matches!(error, StorageError::Restic(ResticError::TimedOut)));
+    }
+
     enum MockRestic {
         Success,
         BackupFails,
+        /// Simulates a stalled/cloud call: `backup` never returns (so `try_wait`
+        /// stays `None`); other subcommands behave like `Success` so init/open
+        /// still complete.
+        Hang,
     }
 
     fn temp_paths(root: &Path) -> VaultPaths {
@@ -305,11 +449,23 @@ mod tests {
 
     #[cfg(windows)]
     fn mock_restic_script(log_path: &Path, behavior: MockRestic) -> String {
-        let failure = match behavior {
-            MockRestic::Success => "",
-            MockRestic::BackupFails => {
-                "if \"%3\"==\"backup\" (\n  echo mock backup failed 1>&2\n  exit /b 9\n)\n"
-            }
+        if matches!(behavior, MockRestic::Hang) {
+            return format!(
+                "@echo off\n\
+                 echo %*>>\"{}\"\n\
+                 if \"%3\"==\"backup\" goto hang\n\
+                 if \"%3\"==\"version\" echo restic 0.19.1\n\
+                 exit /b 0\n\
+                 :hang\n\
+                 ping -n 2 127.0.0.1 > nul\n\
+                 goto hang\n",
+                log_path.display()
+            );
+        }
+        let failure = if matches!(behavior, MockRestic::BackupFails) {
+            "if \"%3\"==\"backup\" (\n  echo mock backup failed 1>&2\n  exit /b 9\n)\n"
+        } else {
+            ""
         };
         format!(
             "@echo off\n\
@@ -325,11 +481,20 @@ mod tests {
 
     #[cfg(not(windows))]
     fn mock_restic_script(log_path: &Path, behavior: MockRestic) -> String {
-        let failure = match behavior {
-            MockRestic::Success => "",
-            MockRestic::BackupFails => {
-                "if [ \"$3\" = \"backup\" ]; then echo mock backup failed >&2; exit 9; fi\n"
-            }
+        if matches!(behavior, MockRestic::Hang) {
+            return format!(
+                "#!/bin/sh\n\
+                 printf '%s\\n' \"$*\" >> '{}'\n\
+                 if [ \"$3\" = \"backup\" ]; then while :; do sleep 1; done; fi\n\
+                 if [ \"$3\" = \"version\" ]; then printf '%s\\n' 'restic 0.19.1'; fi\n\
+                 exit 0\n",
+                log_path.display()
+            );
+        }
+        let failure = if matches!(behavior, MockRestic::BackupFails) {
+            "if [ \"$3\" = \"backup\" ]; then echo mock backup failed >&2; exit 9; fi\n"
+        } else {
+            ""
         };
         format!(
             "#!/bin/sh\n\

@@ -36,7 +36,7 @@ export interface Document {
 }
 
 export type JobKind = "commit" | "export" | "checkout";
-export type JobStatus = "running" | "succeeded" | "failed";
+export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Job {
   id: string;

@@ -8,6 +8,7 @@ mod sqlite;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -20,6 +21,10 @@ pub use config::ResticConfig;
 pub(crate) use config::StorageSettings;
 pub use error::{DatabaseError, ResticError, StorageError, StorageResult};
 pub use paths::VaultPaths;
+
+/// A cancellation flag that is never set. Used for restic calls that run
+/// outside a job (vault init/open), where there is no job to cancel.
+pub static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentRef {
@@ -89,7 +94,7 @@ impl VaultStorage {
         };
         storage.migrate()?;
         if storage.settings.backend == BackupBackend::Restic {
-            storage.ensure_restic_repo()?;
+            storage.ensure_restic_repo(&NEVER_CANCELLED)?;
             storage.restic_version = storage.capture_restic_version();
         }
         info!(root_dir = %storage.paths.root_dir.display(), "vault storage initialized");
@@ -136,6 +141,7 @@ impl VaultStorage {
         document_ref: DocumentRef,
         source_path: &Path,
         metadata: CommitMetadata,
+        cancel: &AtomicBool,
     ) -> StorageResult<(Document, Version)> {
         let now = unix_timestamp();
         info!(source = %source_path.display(), "adding document version");
@@ -175,7 +181,7 @@ impl VaultStorage {
             other => self.resolve_document_ref(&other)?,
         };
 
-        self.add_version_to_document(document, source_path, metadata, now)
+        self.add_version_to_document(document, source_path, metadata, now, cancel)
     }
 
     pub fn add_document_version_to_name_or_create(
@@ -183,8 +189,14 @@ impl VaultStorage {
         name: &str,
         source_path: &Path,
         metadata: CommitMetadata,
+        cancel: &AtomicBool,
     ) -> StorageResult<(Document, Version)> {
-        self.add_document_version(DocumentRef::Name(name.to_owned()), source_path, metadata)
+        self.add_document_version(
+            DocumentRef::Name(name.to_owned()),
+            source_path,
+            metadata,
+            cancel,
+        )
     }
 
     pub fn export_version(
@@ -192,6 +204,7 @@ impl VaultStorage {
         document_ref: &DocumentRef,
         requested_version: &str,
         output_path: &Path,
+        cancel: &AtomicBool,
     ) -> StorageResult<PathBuf> {
         let document = self.resolve_document_ref(document_ref)?;
         let version = self.resolve_requested_version(&document, requested_version)?;
@@ -201,7 +214,7 @@ impl VaultStorage {
             output = %output_path.display(),
             "exporting document version"
         );
-        self.export_resolved_version(&document, &version, output_path)
+        self.export_resolved_version(&document, &version, output_path, cancel)
     }
 
     pub fn checkout_version(
@@ -209,6 +222,7 @@ impl VaultStorage {
         document_ref: &DocumentRef,
         requested_version: &str,
         output_path: Option<&Path>,
+        cancel: &AtomicBool,
     ) -> StorageResult<Option<PathBuf>> {
         let document = self.resolve_document_ref(document_ref)?;
         let version = self.resolve_requested_version(&document, requested_version)?;
@@ -219,7 +233,9 @@ impl VaultStorage {
         );
         self.set_current_version(document.id.as_str(), &version.id)?;
         output_path
-            .map(|output_path| self.export_resolved_version(&document, &version, output_path))
+            .map(|output_path| {
+                self.export_resolved_version(&document, &version, output_path, cancel)
+            })
             .transpose()
     }
 
@@ -237,6 +253,7 @@ impl VaultStorage {
         source_path: &Path,
         metadata: CommitMetadata,
         now: i64,
+        cancel: &AtomicBool,
     ) -> StorageResult<(Document, Version)> {
         let number = self.next_version_number(document.id.as_str())?;
         let version_id = format!("v{number}");
@@ -246,7 +263,7 @@ impl VaultStorage {
             "archiving source for document version"
         );
         let manifest = docvault_ooxml::package_manifest(source_path)?;
-        let archive = self.archive_source(&document, &version_id, source_path)?;
+        let archive = self.archive_source(&document, &version_id, source_path, cancel)?;
         let original_filename = source_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -391,7 +408,12 @@ mod tests {
         source_path: &Path,
     ) -> (Document, Version) {
         storage
-            .add_document_version(document_ref, source_path, CommitMetadata::default())
+            .add_document_version(
+                document_ref,
+                source_path,
+                CommitMetadata::default(),
+                &NEVER_CANCELLED,
+            )
             .unwrap()
     }
 
@@ -411,6 +433,7 @@ mod tests {
                     author: Some("Bryan".to_owned()),
                     note: Some("Initial commit".to_owned()),
                 },
+                &NEVER_CANCELLED,
             )
             .unwrap();
 
@@ -436,6 +459,7 @@ mod tests {
                 &DocumentRef::Name("report".to_owned()),
                 "latest",
                 &paths.root_dir.join("restored"),
+                &NEVER_CANCELLED,
             )
             .unwrap();
         assert_eq!(read_document_xml(&restored), b"version one");
@@ -537,7 +561,12 @@ mod tests {
         commit(&storage, DocumentRef::Name("report".to_owned()), &second);
 
         storage
-            .checkout_version(&DocumentRef::Name("report".to_owned()), "v1", None)
+            .checkout_version(
+                &DocumentRef::Name("report".to_owned()),
+                "v1",
+                None,
+                &NEVER_CANCELLED,
+            )
             .unwrap();
 
         let current = storage
@@ -559,7 +588,12 @@ mod tests {
         commit(&storage, DocumentRef::Name("report".to_owned()), &first);
         commit(&storage, DocumentRef::Name("report".to_owned()), &second);
         storage
-            .checkout_version(&DocumentRef::Name("report".to_owned()), "v1", None)
+            .checkout_version(
+                &DocumentRef::Name("report".to_owned()),
+                "v1",
+                None,
+                &NEVER_CANCELLED,
+            )
             .unwrap();
 
         let (_, version) = commit(&storage, DocumentRef::Name("report".to_owned()), &third);
@@ -584,6 +618,7 @@ mod tests {
                 &DocumentRef::Name("report".to_owned()),
                 "v1",
                 &paths.root_dir.join("exports"),
+                &NEVER_CANCELLED,
             )
             .unwrap();
 

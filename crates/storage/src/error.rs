@@ -84,4 +84,8 @@ pub enum ResticError {
     Failed { command: String, stderr: String },
     #[error("restic backup did not return a snapshot id")]
     SnapshotMissing,
+    #[error("restic command cancelled")]
+    Cancelled,
+    #[error("restic command timed out")]
+    TimedOut,
 }

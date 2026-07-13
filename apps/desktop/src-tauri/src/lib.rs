@@ -47,6 +47,7 @@ pub fn run() {
             jobs::export_version,
             jobs::checkout_version,
             jobs::list_jobs,
+            jobs::cancel_job,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocVault desktop");

@@ -167,7 +167,12 @@ fn commit_document(args: CommitArgs) -> Result<()> {
     };
     let storage = VaultStorage::init(VaultPaths::from_env())?;
     let vault = DocVault::new(storage);
-    let (_, version) = vault.commit_document(&args.path, document_ref.clone(), metadata)?;
+    let (_, version) = vault.commit_document(
+        &args.path,
+        document_ref.clone(),
+        metadata,
+        &docvault_storage::NEVER_CANCELLED,
+    )?;
     println!(
         "Committed {} as {}",
         document_ref.display_name(),
@@ -304,7 +309,12 @@ fn export_version(args: VersionOutputArgs) -> Result<()> {
     let requested_version = requested_version(args.version, args.version_id);
     let storage = VaultStorage::open(VaultPaths::from_env())?;
     let vault = DocVault::new(storage);
-    let exported = vault.export_version(&document_ref, &requested_version, args.output)?;
+    let exported = vault.export_version(
+        &document_ref,
+        &requested_version,
+        args.output,
+        &docvault_storage::NEVER_CANCELLED,
+    )?;
     println!("Exported to {}", exported.display());
     Ok(())
 }
@@ -314,8 +324,12 @@ fn checkout_version(args: CheckoutArgs) -> Result<()> {
     let requested_version = requested_version(args.version, args.version_id);
     let storage = VaultStorage::open(VaultPaths::from_env())?;
     let vault = DocVault::new(storage);
-    let exported =
-        vault.checkout_version(&document_ref, &requested_version, args.output.as_ref())?;
+    let exported = vault.checkout_version(
+        &document_ref,
+        &requested_version,
+        args.output.as_ref(),
+        &docvault_storage::NEVER_CANCELLED,
+    )?;
     match exported {
         Some(path) => println!(
             "Checked out {requested_version} as current and exported to {}",

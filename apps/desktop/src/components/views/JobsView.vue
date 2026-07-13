@@ -5,7 +5,7 @@ import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 
 const { t } = useI18n();
-const { jobs } = useJobs();
+const { jobs, cancelJob } = useJobs();
 const { logEntries, clear } = useActivityLog();
 const { runAction } = useVaultActions();
 </script>
@@ -44,6 +44,14 @@ const { runAction } = useVaultActions();
           <em class="job-status" :data-status="job.status">{{
             t(`status.${job.status}`)
           }}</em>
+          <button
+            v-if="job.status === 'running'"
+            class="job-cancel"
+            type="button"
+            @click="cancelJob(job.id)"
+          >
+            {{ t("actions.cancel") }}
+          </button>
         </div>
         <p v-if="jobs.length === 0" class="empty-state">
           {{ t("jobs.empty") }}
@@ -102,7 +110,7 @@ const { runAction } = useVaultActions();
 
 .job-row {
   display: grid;
-  grid-template-columns: 82px minmax(180px, 1fr) 180px 72px;
+  grid-template-columns: 82px minmax(180px, 1fr) 180px 72px 56px;
   align-items: center;
   gap: 12px;
   min-height: 38px;
@@ -134,6 +142,27 @@ const { runAction } = useVaultActions();
 }
 
 .job-status[data-status="failed"] {
+  color: var(--danger-text);
+}
+
+.job-status[data-status="cancelled"] {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.job-cancel {
+  justify-self: end;
+  padding: 2px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.job-cancel:hover {
+  border-color: var(--danger-text);
   color: var(--danger-text);
 }
 

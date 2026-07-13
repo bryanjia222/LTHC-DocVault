@@ -13,10 +13,12 @@
 //! ever spawned.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use docvault_jobs::{JobEventCallback, JobKind, JobRecord};
-use docvault_storage::DocumentRef;
+use docvault_core::CoreError;
+use docvault_jobs::{JobEventCallback, JobKind, JobOutcome, JobRecord};
+use docvault_storage::{DocumentRef, ResticError, StorageError};
 use docvault_types::CommitMetadata;
 use tauri::{AppHandle, Emitter, State};
 use tracing::warn;
@@ -41,8 +43,8 @@ pub fn commit_document(
         JobKind::Commit,
         target_label,
         on_event,
-        move |_: &dyn Fn(Option<f64>)| -> Result<(), String> {
-            execute_commit(&vault, &path, document_ref, metadata)
+        move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+            execute_commit(&vault, &path, document_ref, metadata, cancel)
         },
     );
     Ok(job_id)
@@ -65,8 +67,8 @@ pub fn export_version(
         JobKind::Export,
         target_label,
         on_event,
-        move |_: &dyn Fn(Option<f64>)| -> Result<(), String> {
-            execute_export(&vault, &document_ref, &version, &output)
+        move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+            execute_export(&vault, &document_ref, &version, &output, cancel)
         },
     );
     Ok(job_id)
@@ -89,8 +91,8 @@ pub fn checkout_version(
         JobKind::Checkout,
         target_label,
         on_event,
-        move |_: &dyn Fn(Option<f64>)| -> Result<(), String> {
-            execute_checkout(&vault, &document_ref, &version, output.as_deref())
+        move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+            execute_checkout(&vault, &document_ref, &version, output.as_deref(), cancel)
         },
     );
     Ok(job_id)
@@ -101,6 +103,14 @@ pub fn list_jobs(state: State<'_, AppState>) -> Result<Vec<JobRecord>, String> {
     Ok(state.jobs.list())
 }
 
+/// Request cancellation of a running job. Returns whether a live job was found
+/// to cancel; the job reaches `Cancelled` only if its work observes the flag
+/// (a job that finishes first keeps its real `Succeeded`/`Failed` status).
+#[tauri::command(rename_all = "snake_case")]
+pub fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<bool, String> {
+    Ok(state.jobs.cancel(&job_id))
+}
+
 // --- executors: the real work, extracted so tests exercise the same code ---
 
 fn execute_commit(
@@ -108,15 +118,22 @@ fn execute_commit(
     path: impl AsRef<Path>,
     document_ref: DocumentRef,
     metadata: CommitMetadata,
-) -> Result<(), String> {
-    let vault = vault.lock().map_err(|e| e.to_string())?;
-    let vault = vault
-        .as_ref()
-        .ok_or_else(|| "vault not initialized".to_owned())?;
-    vault
-        .commit_document(path, document_ref, metadata)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    cancel: &AtomicBool,
+) -> JobOutcome {
+    let vault = match vault.lock() {
+        Ok(guard) => guard,
+        Err(e) => return JobOutcome::Failed(e.to_string()),
+    };
+    let Some(vault) = vault.as_ref() else {
+        return JobOutcome::Failed("vault not initialized".to_owned());
+    };
+    match vault.commit_document(path, document_ref, metadata, cancel) {
+        Ok(_) => JobOutcome::Succeeded,
+        Err(CoreError::Storage(StorageError::Restic(ResticError::Cancelled))) => {
+            JobOutcome::Cancelled
+        }
+        Err(e) => JobOutcome::Failed(e.to_string()),
+    }
 }
 
 fn execute_export(
@@ -124,15 +141,20 @@ fn execute_export(
     document_ref: &DocumentRef,
     version: &str,
     output: &Path,
-) -> Result<(), String> {
-    let vault = vault.lock().map_err(|e| e.to_string())?;
-    let vault = vault
-        .as_ref()
-        .ok_or_else(|| "vault not initialized".to_owned())?;
-    vault
-        .export_version(document_ref, version, output)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    cancel: &AtomicBool,
+) -> JobOutcome {
+    let vault = match vault.lock() {
+        Ok(guard) => guard,
+        Err(e) => return JobOutcome::Failed(e.to_string()),
+    };
+    let Some(vault) = vault.as_ref() else {
+        return JobOutcome::Failed("vault not initialized".to_owned());
+    };
+    match vault.export_version(document_ref, version, output, cancel) {
+        Ok(_) => JobOutcome::Succeeded,
+        Err(StorageError::Restic(ResticError::Cancelled)) => JobOutcome::Cancelled,
+        Err(e) => JobOutcome::Failed(e.to_string()),
+    }
 }
 
 fn execute_checkout(
@@ -140,15 +162,20 @@ fn execute_checkout(
     document_ref: &DocumentRef,
     version: &str,
     output: Option<&Path>,
-) -> Result<(), String> {
-    let vault = vault.lock().map_err(|e| e.to_string())?;
-    let vault = vault
-        .as_ref()
-        .ok_or_else(|| "vault not initialized".to_owned())?;
-    vault
-        .checkout_version(document_ref, version, output)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    cancel: &AtomicBool,
+) -> JobOutcome {
+    let vault = match vault.lock() {
+        Ok(guard) => guard,
+        Err(e) => return JobOutcome::Failed(e.to_string()),
+    };
+    let Some(vault) = vault.as_ref() else {
+        return JobOutcome::Failed("vault not initialized".to_owned());
+    };
+    match vault.checkout_version(document_ref, version, output, cancel) {
+        Ok(_) => JobOutcome::Succeeded,
+        Err(StorageError::Restic(ResticError::Cancelled)) => JobOutcome::Cancelled,
+        Err(e) => JobOutcome::Failed(e.to_string()),
+    }
 }
 
 /// Resolve a commit target: an existing document by id (name looked up so the
@@ -196,7 +223,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -302,11 +329,64 @@ mod tests {
             JobKind::Commit,
             "report",
             on_event,
-            move |_: &dyn Fn(Option<f64>)| -> Result<(), String> {
-                execute_commit(&vault, &path, document_ref, CommitMetadata::default())
+            move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+                execute_commit(
+                    &vault,
+                    &path,
+                    document_ref,
+                    CommitMetadata::default(),
+                    cancel,
+                )
             },
         );
         (job_id, terminal)
+    }
+
+    /// A job whose work observes the cancel flag and reports `Cancelled` must
+    /// reach `Cancelled` (not `Failed`), with no error, and emit its terminal
+    /// event. Mirrors how a stalled restic call surfaces cancellation.
+    #[test]
+    fn cancel_request_marks_running_job_cancelled() {
+        let registry = JobRegistry::new();
+        let terminal = Arc::new(AtomicUsize::new(0));
+        let on_event = {
+            let terminal = Arc::clone(&terminal);
+            Arc::new(move |record: JobRecord| {
+                if record.status != JobStatus::Running {
+                    terminal.fetch_add(1, Ordering::SeqCst);
+                }
+            }) as JobEventCallback
+        };
+        let job_id = registry.spawn(
+            JobKind::Export,
+            "report v1",
+            on_event,
+            |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+                while !cancel.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                JobOutcome::Cancelled
+            },
+        );
+
+        thread::sleep(Duration::from_millis(20));
+        assert!(registry.cancel(&job_id), "cancel should find a live job");
+
+        let mut waited = 0;
+        while terminal.load(Ordering::SeqCst) == 0 && waited < 1000 {
+            thread::sleep(Duration::from_millis(2));
+            waited += 1;
+        }
+        assert_eq!(
+            terminal.load(Ordering::SeqCst),
+            1,
+            "cancelled job must emit its terminal event"
+        );
+
+        let record = registry.get(&job_id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Cancelled);
+        assert!(record.error.is_none(), "cancelled job carries no error");
+        assert!(record.finished_at.is_some());
     }
 
     fn wait_for_terminal(terminal: &AtomicUsize) {
