@@ -108,13 +108,46 @@ impl VaultStorage {
         }
     }
 
+    /// Forget (and prune) the given restic snapshots so the space a deleted
+    /// document's versions occupied is reclaimed. A single `forget --prune`
+    /// call takes all snapshot ids at once. Failure is propagated so the caller
+    /// can abort the delete and keep the DB rows consistent with the repo
+    /// (snapshots that still exist); the user can retry.
+    pub(crate) fn restic_forget(
+        &self,
+        snapshot_ids: &[String],
+        cancel: &AtomicBool,
+    ) -> StorageResult<()> {
+        if snapshot_ids.is_empty() {
+            return Ok(());
+        }
+        let mut args: Vec<&str> = Vec::with_capacity(snapshot_ids.len() + 2);
+        args.push("forget");
+        for id in snapshot_ids {
+            args.push(id.as_str());
+        }
+        args.push("--prune");
+        let output = self.run_restic_command(&args, None, cancel, RESTIC_LONG_TIMEOUT)?;
+        if output.status.success() {
+            info!(
+                snapshot_count = snapshot_ids.len(),
+                "restic forget+prune completed"
+            );
+            Ok(())
+        } else {
+            let error = restic_failed("forget", output.stderr);
+            error!(%error, "restic forget failed");
+            Err(error)
+        }
+    }
+
     fn run_restic<const N: usize>(
         &self,
         args: [&str; N],
         cancel: &AtomicBool,
         timeout: Duration,
     ) -> StorageResult<Output> {
-        self.run_restic_command(args, None, cancel, timeout)
+        self.run_restic_command(&args, None, cancel, timeout)
     }
 
     fn run_restic_in_dir<const N: usize>(
@@ -124,16 +157,16 @@ impl VaultStorage {
         cancel: &AtomicBool,
         timeout: Duration,
     ) -> StorageResult<Output> {
-        self.run_restic_command(args, Some(current_dir), cancel, timeout)
+        self.run_restic_command(&args, Some(current_dir), cancel, timeout)
     }
 
     /// Run a restic command, polling for completion so a cancel request or
     /// timeout can interrupt a stalled/cloud call (otherwise `Command::output`
     /// would block forever). stdout/stderr are drained on reader threads to
     /// avoid the child blocking on a full pipe buffer during long backups.
-    fn run_restic_command<const N: usize>(
+    fn run_restic_command(
         &self,
-        args: [&str; N],
+        args: &[&str],
         current_dir: Option<&Path>,
         cancel: &AtomicBool,
         timeout: Duration,
@@ -320,6 +353,43 @@ mod tests {
             StorageError::Restic(ResticError::Failed { command, stderr })
                 if command == "backup" && stderr.contains("mock backup failed")
         ));
+    }
+
+    #[test]
+    fn delete_forgets_restic_snapshots() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let (document, version) = storage
+            .add_document_version(
+                DocumentRef::Name("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+                &crate::NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(version.snapshot_id.as_deref(), Some("snap123"));
+
+        storage
+            .delete_document(
+                &DocumentRef::IdPrefix(document.id.as_str().to_owned()),
+                &crate::NEVER_CANCELLED,
+            )
+            .unwrap();
+
+        // Document + versions are gone from the DB.
+        assert!(storage.list_documents().unwrap().is_empty());
+
+        // restic forget was invoked with the snapshot id and --prune.
+        let log = fs::read_to_string(&log_path).unwrap();
+        assert!(log.contains("forget"));
+        assert!(log.contains("snap123"));
+        assert!(log.contains("--prune"));
     }
 
     #[test]

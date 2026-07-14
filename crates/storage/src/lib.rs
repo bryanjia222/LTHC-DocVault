@@ -14,7 +14,7 @@ use std::{
 
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use rusqlite::Connection;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 pub use config::ResticConfig;
@@ -245,6 +245,63 @@ impl VaultStorage {
             return Ok(None);
         };
         self.find_version(document.id.as_str(), &current_version_id)
+    }
+
+    /// Delete a document and all of its versions. For the restic backend the
+    /// version snapshots are forgotten (and pruned) first so the DB and repo
+    /// stay consistent; a forget failure aborts the delete (the rows remain,
+    /// the user can retry). The local-copy archive directory is removed
+    /// best-effort afterwards. The on-disk source file is never touched -
+    /// DocVault does not own the user's working copy.
+    pub fn delete_document(
+        &self,
+        document_ref: &DocumentRef,
+        cancel: &AtomicBool,
+    ) -> StorageResult<()> {
+        let document = self.resolve_document_ref(document_ref)?;
+        let versions = self.versions_for_document(document.id.as_str())?;
+        if self.settings.backend == BackupBackend::Restic {
+            let snapshot_ids: Vec<String> = versions
+                .iter()
+                .filter_map(|version| version.snapshot_id.clone())
+                .collect();
+            if !snapshot_ids.is_empty() {
+                self.restic_forget(&snapshot_ids, cancel)?;
+            }
+        }
+        self.remove_document(document.id.as_str())?;
+        // Best-effort: a missing/busy dir is logged, not fatal - the DB rows
+        // (the source of truth for existence) are already gone.
+        let version_dir = self.paths.versions_dir.join(document.id.as_str());
+        if version_dir.exists()
+            && let Err(error) = fs::remove_dir_all(&version_dir)
+        {
+            warn!(
+                document_id = document.id.as_str(),
+                path = %version_dir.display(),
+                error = %error,
+                "failed to remove local archive directory after delete"
+            );
+        }
+        info!(document_id = document.id.as_str(), "document deleted");
+        Ok(())
+    }
+
+    /// Rename a document's display name. Does not touch the on-disk source file
+    /// or any version's `original_filename` (historical).
+    pub fn rename_document(
+        &self,
+        document_ref: &DocumentRef,
+        new_name: &str,
+    ) -> StorageResult<()> {
+        let document = self.resolve_document_ref(document_ref)?;
+        self.set_document_name(document.id.as_str(), new_name)?;
+        info!(
+            document_id = document.id.as_str(),
+            new_name,
+            "document renamed"
+        );
+        Ok(())
     }
 
     pub(crate) fn add_version_to_document(
@@ -628,6 +685,83 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(current.id, "v2");
+    }
+
+    #[test]
+    fn delete_removes_document_versions_and_archive_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+        let (document, version) =
+            commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+
+        // The local-copy archive exists before delete.
+        let archive_path = paths.versions_dir.join(&version.archive_reference);
+        assert!(archive_path.exists());
+
+        storage
+            .delete_document(
+                &DocumentRef::IdPrefix(document.id.as_str().to_owned()),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+
+        assert!(storage.list_documents().unwrap().is_empty());
+        assert!(storage
+            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+            .is_err());
+        // The per-document archive directory is removed.
+        assert!(!paths.versions_dir.join(document.id.as_str()).exists());
+    }
+
+    #[test]
+    fn delete_unknown_document_errors() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+
+        let error = storage
+            .delete_document(
+                &DocumentRef::IdPrefix("nonexistent".to_owned()),
+                &NEVER_CANCELLED,
+            )
+            .unwrap_err();
+        assert!(matches!(error, StorageError::DocumentIdNotFound(_)));
+    }
+
+    #[test]
+    fn rename_updates_name_without_touching_versions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths).unwrap();
+        let (document, version) =
+            commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+
+        storage
+            .rename_document(
+                &DocumentRef::IdPrefix(document.id.as_str().to_owned()),
+                "quarterly-report",
+            )
+            .unwrap();
+
+        let renamed = storage.list_documents().unwrap();
+        assert_eq!(renamed.len(), 1);
+        assert_eq!(renamed[0].name, "quarterly-report");
+        assert_eq!(renamed[0].id, document.id);
+
+        // Versions are historical and untouched.
+        let versions = storage
+            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].id, version.id);
+        assert_eq!(versions[0].archive_reference, version.archive_reference);
+        assert_eq!(versions[0].original_filename, version.original_filename);
     }
 
     fn config_path(path: &Path) -> String {

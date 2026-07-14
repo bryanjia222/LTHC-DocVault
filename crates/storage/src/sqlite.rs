@@ -161,6 +161,32 @@ impl VaultStorage {
         Ok(())
     }
 
+    /// Delete a document's row and all of its version rows. Callers orchestrate
+    /// restic forget + local archive cleanup around this so the DB and the
+    /// backend stay consistent.
+    pub(crate) fn remove_document(&self, document_id: &str) -> StorageResult<()> {
+        self.connection
+            .execute("DELETE FROM versions WHERE document_id = ?1", [document_id])?;
+        self.connection
+            .execute("DELETE FROM documents WHERE id = ?1", [document_id])?;
+        Ok(())
+    }
+
+    /// Update a document's display name. Versions (and their `original_filename`)
+    /// are historical and untouched; archives are keyed by document id, so their
+    /// references are unaffected by a rename.
+    pub(crate) fn set_document_name(
+        &self,
+        document_id: &str,
+        new_name: &str,
+    ) -> StorageResult<()> {
+        self.connection.execute(
+            "UPDATE documents SET name = ?1 WHERE id = ?2",
+            params![new_name, document_id],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn next_version_number(&self, document_id: &str) -> StorageResult<i64> {
         let current = self.connection.query_row(
             "SELECT COALESCE(MAX(number), 0) FROM versions WHERE document_id = ?1",

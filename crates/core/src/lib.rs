@@ -102,6 +102,27 @@ impl DocVault {
         self.storage.current_version(document_ref)
     }
 
+    /// Delete a document and all of its versions (forgetting restic snapshots
+    /// for the restic backend). The user's on-disk source file is not touched.
+    pub fn delete_document(
+        &self,
+        document_ref: &DocumentRef,
+        cancel: &AtomicBool,
+    ) -> CoreResult<()> {
+        self.storage.delete_document(document_ref, cancel)?;
+        Ok(())
+    }
+
+    /// Rename a document's display name. Does not touch the source file or any
+    /// version's `original_filename`.
+    pub fn rename_document(
+        &self,
+        document_ref: &DocumentRef,
+        new_name: &str,
+    ) -> StorageResult<()> {
+        self.storage.rename_document(document_ref, new_name)
+    }
+
     pub fn paths(&self) -> &docvault_storage::VaultPaths {
         self.storage.paths()
     }

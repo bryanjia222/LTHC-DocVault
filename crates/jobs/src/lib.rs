@@ -51,6 +51,7 @@ pub enum JobKind {
     Commit,
     Export,
     Checkout,
+    Delete,
 }
 
 /// Authoritative record for a single job. Serialized verbatim to the UI, which
