@@ -262,6 +262,22 @@ describe("useVaultActions - commit modified document", () => {
     await flush();
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it("forwards the optional note to the commit command", async () => {
+    asTauri();
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    vi.mocked(invoke).mockResolvedValue("job-note");
+    await actions.commitModifiedDocument(docA.id, "updated copy");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("commit_document", {
+        path: "/tracked.docx",
+        document_id: docA.id,
+        note: "updated copy",
+      });
+    });
+  });
 });
 
 describe("useVaultActions - relink source file", () => {
@@ -308,5 +324,75 @@ describe("useVaultActions - stop tracking", () => {
       expect(invoke).toHaveBeenCalledWith("set_desktop_state", expect.anything());
     });
     expect(desktop.trackedPathFor(docA.id)).toBeNull();
+  });
+});
+
+describe("useVaultActions - reset / seed (dev)", () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+  afterEach(() => {
+    confirmSpy?.mockRestore();
+  });
+
+  it("invokes reset_vault after confirming in empty mode", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    actions.resetVaultAction("empty");
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("reset_vault");
+    });
+  });
+
+  it("invokes seed_demo_docs after confirming in seeded mode", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    actions.resetVaultAction("seeded");
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("seed_demo_docs");
+    });
+  });
+
+  it("does not invoke when the confirm dialog is cancelled", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    actions.resetVaultAction("empty");
+    actions.resetVaultAction("seeded");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    actions.resetVaultAction("empty");
+    actions.resetVaultAction("seeded");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("useVaultActions - refresh all", () => {
+  it("reloads documents under Tauri", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+    await actions.refreshAll();
+    expect(invoke).toHaveBeenCalledWith("list_documents_with_versions");
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await actions.refreshAll();
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,8 @@ import MetricsBar from "./components/MetricsBar.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import AddDocumentDialog from "./components/AddDocumentDialog.vue";
 import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
+import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
+import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import JobsView from "./components/views/JobsView.vue";
 import ArchiveView from "./components/views/ArchiveView.vue";
@@ -161,6 +163,8 @@ onBeforeUnmount(() => {
     <CommandPalette />
     <AddDocumentDialog />
     <SwitchBackendDialog />
+    <CommitModifiedDialog />
+    <DocumentStatusDialog />
     <AppContextMenu />
   </div>
 </template>

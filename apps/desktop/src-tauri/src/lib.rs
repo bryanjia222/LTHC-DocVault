@@ -1,4 +1,5 @@
 mod commands;
+mod devtools;
 mod dto;
 mod jobs;
 mod local_state;
@@ -53,6 +54,8 @@ pub fn run() {
             local_state::set_desktop_state,
             local_state::stat_files,
             local_state::probe_file,
+            devtools::reset_vault,
+            devtools::seed_demo_docs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocVault desktop");

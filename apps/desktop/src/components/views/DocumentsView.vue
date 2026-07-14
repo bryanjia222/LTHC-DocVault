@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ArrowRightLeft,
   ChartNetwork,
   Download,
+  Info,
   Link2,
   List,
   Maximize2,
   Minimize2,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -16,8 +18,10 @@ import {
   XCircle,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+import { nextTick } from "vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
+import { useDialogs } from "../../composables/useDialogs";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 import {
@@ -57,9 +61,9 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
+const { openCommitModified, openDocumentStatus } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, commitModifiedDocument, relinkSourceFile, stopTracking } =
-  useVaultActions();
+const { runAction, relinkSourceFile, stopTracking, refreshAll } = useVaultActions();
 
 const typeOptions: DocumentType[] = ["docx", "xlsx", "pptx"];
 const healthOptions: HealthStatus[] = ["synced", "needsReview"];
@@ -68,6 +72,12 @@ const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
 const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
 const newTag = ref("");
+const tagInputOpen = ref(false);
+const tagInputRef = ref<HTMLInputElement | null>(null);
+const docMenuOpen = ref(false);
+const docMenuPos = ref({ x: 0, y: 0 });
+const versionMenuOpen = ref(false);
+const versionMenuPos = ref({ x: 0, y: 0 });
 
 const versions = computed(() => selectedDocument.value?.versions ?? []);
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
@@ -125,15 +135,22 @@ function addTagForSelected() {
   newTag.value = "";
 }
 
+function openTagInput() {
+  tagInputOpen.value = true;
+  void nextTick(() => {
+    tagInputRef.value?.focus();
+  });
+}
+
+function closeTagInput() {
+  tagInputOpen.value = false;
+  newTag.value = "";
+}
+
 function removeTagFromSelected(tag: string) {
   const doc = selectedDocument.value;
   if (!doc) return;
   desktop.removeTag(doc.id, tag);
-}
-
-function commitModifiedForSelected() {
-  const doc = selectedDocument.value;
-  if (doc) void commitModifiedDocument(doc.id);
 }
 
 function relinkSelected() {
@@ -146,9 +163,79 @@ function stopTrackingSelected() {
   if (doc) stopTracking(doc.id);
 }
 
-async function manualRefresh() {
-  await desktop.refreshModifications();
-  log(t("source.refresh"));
+// Two right-click context menus:
+//  - Document menu (left table rows): relink / stop tracking / document status
+//    / export / refresh - acts on the right-clicked document (selected on open).
+//  - Version menu (right version-history rows): export this version / refresh -
+//    acts on the right-clicked version (selected on open).
+// `.stop` keeps the global AppContextMenu (window-level) from also firing.
+function openDocMenu(event: MouseEvent, document: Document) {
+  selectDocument(document);
+  const current = document.versions.find((v) => v.status === "current");
+  if (current) selectVersion(current);
+  docMenuPos.value = { x: event.clientX, y: event.clientY };
+  docMenuOpen.value = true;
+}
+
+function closeDocMenu() {
+  docMenuOpen.value = false;
+}
+
+function openVersionMenu(event: MouseEvent, version: Version) {
+  selectVersion(version);
+  versionMenuPos.value = { x: event.clientX, y: event.clientY };
+  versionMenuOpen.value = true;
+}
+
+function closeVersionMenu() {
+  versionMenuOpen.value = false;
+}
+
+function docMenuRelink() {
+  closeDocMenu();
+  relinkSelected();
+}
+
+function docMenuStopTracking() {
+  closeDocMenu();
+  stopTrackingSelected();
+}
+
+function docMenuStatus() {
+  closeDocMenu();
+  openDocumentStatus();
+}
+
+function docMenuExport() {
+  closeDocMenu();
+  runAction("actionLogs.export");
+}
+
+function docMenuRefresh() {
+  closeDocMenu();
+  void refreshAll();
+}
+
+function versionMenuCheckout() {
+  closeVersionMenu();
+  runAction("actionLogs.checkout");
+}
+
+function versionMenuExport() {
+  closeVersionMenu();
+  runAction("actionLogs.export");
+}
+
+function versionMenuRefresh() {
+  closeVersionMenu();
+  void refreshAll();
+}
+
+function onContextMenuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    closeDocMenu();
+    closeVersionMenu();
+  }
 }
 
 // Background modification detection: poll tracked source files every 5s so the
@@ -165,8 +252,19 @@ onMounted(() => {
   }, POLL_INTERVAL_MS);
 });
 
+// Esc closes whichever right-click menu is open; listener bound only while one
+// is open.
+watch([docMenuOpen, versionMenuOpen], ([d, v]) => {
+  if (d || v) {
+    window.addEventListener("keydown", onContextMenuKeydown);
+  } else {
+    window.removeEventListener("keydown", onContextMenuKeydown);
+  }
+});
+
 onBeforeUnmount(() => {
   if (pollHandle !== null) clearInterval(pollHandle);
+  window.removeEventListener("keydown", onContextMenuKeydown);
 });
 </script>
 
@@ -262,15 +360,6 @@ onBeforeUnmount(() => {
         >
           {{ t("filters.clear") }}
         </button>
-        <button
-          class="icon-button"
-          type="button"
-          :title="t('source.refresh')"
-          :aria-label="t('source.refresh')"
-          @click="manualRefresh"
-        >
-          <RefreshCw aria-hidden="true" />
-        </button>
       </div>
 
       <div class="table-wrap">
@@ -296,6 +385,7 @@ onBeforeUnmount(() => {
               @click="chooseDocument(document)"
               @keydown.enter="chooseDocument(document)"
               @keydown.space.prevent="chooseDocument(document)"
+              @contextmenu.prevent.stop="openDocMenu($event, document)"
             >
               <td>
                 <div class="name-cell">
@@ -344,24 +434,22 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <aside class="detail-panel surface" :aria-label="t('details.label')">
+    <aside
+      class="detail-panel surface"
+      :aria-label="t('details.label')"
+    >
       <div class="panel-header compact">
         <div>
           <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
-          <p>
-            {{ selectedDocument?.id }} ·
-            {{
-              selectedDocument ? t(`backend.${selectedDocument.backend}`) : ""
-            }}
-          </p>
         </div>
         <div class="action-row">
           <button
             class="icon-action-button"
             type="button"
-            :title="t('actions.commit')"
-            :aria-label="t('actions.commit')"
-            @click="runAction('actionLogs.commit')"
+            :disabled="modificationStatus !== 'modified'"
+            :title="t('source.commitModified')"
+            :aria-label="t('source.commitModified')"
+            @click="openCommitModified()"
           >
             <Upload aria-hidden="true" />
           </button>
@@ -405,74 +493,33 @@ onBeforeUnmount(() => {
               <X aria-hidden="true" />
             </button>
           </span>
-          <span v-if="!selectedDocument?.tags?.length" class="muted">{{
-            t("tags.empty")
-          }}</span>
-        </div>
-        <form class="tag-add" @submit.prevent="addTagForSelected">
+          <span
+            v-if="!selectedDocument?.tags?.length && !tagInputOpen"
+            class="muted"
+            >{{ t("tags.empty") }}</span
+          >
+          <button
+            v-if="!tagInputOpen"
+            type="button"
+            class="tag-add-btn"
+            :disabled="!selectedDocument"
+            :title="t('tags.addPlaceholder')"
+            :aria-label="t('tags.addPlaceholder')"
+            @click="openTagInput"
+          >
+            <Plus aria-hidden="true" />
+          </button>
           <input
+            v-else
+            ref="tagInputRef"
             v-model="newTag"
             type="text"
             class="tag-input"
             :placeholder="t('tags.addPlaceholder')"
-            :disabled="!selectedDocument"
+            @keydown.enter.prevent="addTagForSelected"
+            @keydown.esc="closeTagInput"
+            @blur="closeTagInput"
           />
-          <button
-            class="secondary"
-            type="submit"
-            :disabled="!selectedDocument || !newTag.trim()"
-          >
-            <Plus aria-hidden="true" />
-            {{ t("tags.add") }}
-          </button>
-        </form>
-      </section>
-
-      <section class="doc-section" :aria-label="t('source.title')">
-        <h3>{{ t("source.title") }}</h3>
-        <dl>
-          <div>
-            <dt>{{ t("source.status") }}</dt>
-            <dd>
-              <span class="mod-pill" :data-mod="modificationStatus">{{
-                t(`modification.${modificationStatus}`)
-              }}</span>
-            </dd>
-          </div>
-          <div v-if="trackedPath">
-            <dt>{{ t("source.path") }}</dt>
-            <dd class="mono-path" :title="trackedPath">{{ trackedPath }}</dd>
-          </div>
-        </dl>
-        <p v-if="modificationStatus === 'none'" class="muted source-hint">
-          {{ t("source.notTracked") }}
-        </p>
-        <p v-if="modificationStatus === 'missing'" class="source-hint danger">
-          {{ t("source.missingHint") }}
-        </p>
-        <div class="source-actions">
-          <button
-            class="primary"
-            type="button"
-            :disabled="modificationStatus !== 'modified'"
-            @click="commitModifiedForSelected"
-          >
-            <Upload aria-hidden="true" />
-            {{ t("source.commitModified") }}
-          </button>
-          <button class="secondary" type="button" @click="relinkSelected">
-            <Link2 aria-hidden="true" />
-            {{ t("source.relink") }}
-          </button>
-          <button
-            v-if="trackedPath"
-            class="secondary"
-            type="button"
-            @click="stopTrackingSelected"
-          >
-            <XCircle aria-hidden="true" />
-            {{ t("source.stopTracking") }}
-          </button>
         </div>
       </section>
 
@@ -562,6 +609,7 @@ onBeforeUnmount(() => {
               }"
               type="button"
               @click="chooseVersion(version)"
+              @contextmenu.prevent.stop="openVersionMenu($event, version)"
             >
               <span class="version-summary">
                 <strong>{{ version.label }}</strong>
@@ -597,7 +645,18 @@ onBeforeUnmount(() => {
           <div>
             <dt>{{ t("details.note") }}</dt>
             <dd>
-              {{ selectedVersion ? selectedVersion.note : t("details.noNote") }}
+              <span class="note-text">{{
+                selectedVersion ? selectedVersion.note : t("details.noNote")
+              }}</span>
+              <button
+                class="note-edit-hint"
+                type="button"
+                disabled
+                :title="t('details.noteEditHint')"
+                :aria-label="t('details.noteEditHint')"
+              >
+                <Pencil aria-hidden="true" />
+              </button>
             </dd>
           </div>
         </dl>
@@ -651,20 +710,16 @@ onBeforeUnmount(() => {
         <div class="panel-header compact">
           <div>
             <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
-            <p>
-              {{ selectedDocument?.id }} ·
-              {{
-                selectedDocument ? t(`backend.${selectedDocument.backend}`) : ""
-              }}
-            </p>
+            <p>{{ selectedDocument?.id }}</p>
           </div>
           <div class="action-row">
             <button
               class="icon-action-button"
               type="button"
-              :title="t('actions.commit')"
-              :aria-label="t('actions.commit')"
-              @click="runAction('actionLogs.commit')"
+              :disabled="modificationStatus !== 'modified'"
+              :title="t('source.commitModified')"
+              :aria-label="t('source.commitModified')"
+              @click="openCommitModified()"
             >
               <Upload aria-hidden="true" />
             </button>
@@ -706,14 +761,133 @@ onBeforeUnmount(() => {
             <div>
               <dt>{{ t("details.note") }}</dt>
               <dd>
-                {{
+                <span class="note-text">{{
                   selectedVersion ? selectedVersion.note : t("details.noNote")
-                }}
+                }}</span>
+                <button
+                  class="note-edit-hint"
+                  type="button"
+                  disabled
+                  :title="t('details.noteEditHint')"
+                  :aria-label="t('details.noteEditHint')"
+                >
+                  <Pencil aria-hidden="true" />
+                </button>
               </dd>
             </div>
           </dl>
         </section>
       </aside>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="docMenuOpen"
+      class="ctx-backdrop"
+      @click="closeDocMenu"
+      @contextmenu.prevent.stop="closeDocMenu"
+    >
+      <div
+        class="ctx-menu surface"
+        role="menu"
+        :style="{ left: `${docMenuPos.x}px`, top: `${docMenuPos.y}px` }"
+        @click.stop
+      >
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuRelink"
+        >
+          <Link2 aria-hidden="true" />
+          {{ t("source.relink") }}
+        </button>
+        <button
+          v-if="trackedPath"
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuStopTracking"
+        >
+          <XCircle aria-hidden="true" />
+          {{ t("source.stopTracking") }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuStatus"
+        >
+          <Info aria-hidden="true" />
+          {{ t("source.documentStatus") }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuExport"
+        >
+          <Download aria-hidden="true" />
+          {{ t("actions.export") }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuRefresh"
+        >
+          <RefreshCw aria-hidden="true" />
+          {{ t("actions.refresh") }}
+        </button>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="versionMenuOpen"
+      class="ctx-backdrop"
+      @click="closeVersionMenu"
+      @contextmenu.prevent.stop="closeVersionMenu"
+    >
+      <div
+        class="ctx-menu surface"
+        role="menu"
+        :style="{ left: `${versionMenuPos.x}px`, top: `${versionMenuPos.y}px` }"
+        @click.stop
+      >
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="versionMenuCheckout"
+        >
+          <ArrowRightLeft aria-hidden="true" />
+          {{ t("versionMenu.checkout", { label: selectedVersion?.label ?? "" }) }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="versionMenuExport"
+        >
+          <Download aria-hidden="true" />
+          {{ t("versionMenu.export", { label: selectedVersion?.label ?? "" }) }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="versionMenuRefresh"
+        >
+          <RefreshCw aria-hidden="true" />
+          {{ t("actions.refresh") }}
+        </button>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -1163,32 +1337,16 @@ tbody tr.selected {
   text-align: right;
 }
 
-.mono-path {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono-font);
-  font-size: 12px;
-}
-
 .muted {
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.source-hint {
-  margin: 0;
-}
-
-.source-hint.danger {
-  color: var(--danger-text);
-}
-
-/* Tag chips + add form */
+/* Tag chips + inline add ("+") */
 .tag-chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 
@@ -1229,21 +1387,48 @@ tbody tr.selected {
   stroke-width: 2.5;
 }
 
-.tag-add {
-  display: flex;
-  gap: 6px;
+.tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tag-add-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.tag-add-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tag-add-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 
 .tag-input {
   flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 10px;
+  min-width: 80px;
+  height: 24px;
+  padding: 0 8px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: var(--bg-surface);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .tag-input:focus {
@@ -1252,37 +1437,104 @@ tbody tr.selected {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.tag-add button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 0 10px;
-  font-size: 12px;
+/* Disabled commit button (only active when source is "modified") */
+.icon-action-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.tag-add button svg,
-.source-actions button svg {
-  width: 14px;
-  height: 14px;
+/* Note pen hint (visual only - edit not wired yet) */
+.note-edit-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  vertical-align: middle;
+  cursor: not-allowed;
+}
+
+.note-edit-hint svg {
+  width: 13px;
+  height: 13px;
   fill: none;
   stroke: currentcolor;
   stroke-width: 2;
 }
 
-/* Source-tracking action buttons */
-.source-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+/* Right-click source context menu */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
 }
 
-.source-actions button {
-  display: inline-flex;
+.ctx-menu {
+  position: absolute;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--overlay-shadow);
+}
+
+.ctx-item {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
   font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-item:hover:not(.ctx-info) {
+  background: var(--bg-hover);
+}
+
+.ctx-info {
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.ctx-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ctx-path {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.ctx-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-soft);
+}
+
+.ctx-item svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 </style>

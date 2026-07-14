@@ -3,14 +3,20 @@ import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
 import { useVault } from "../../composables/useVault";
+import { useVaultActions } from "../../composables/useVaultActions";
 import { useDevMode } from "../../composables/useDevMode";
 import { useDialogs } from "../../composables/useDialogs";
 
 const { t, locale } = useI18n();
 const { isDark, setTheme } = useTheme();
 const { config } = useVault();
+const { resetVaultAction } = useVaultActions();
 const { isDevMode } = useDevMode();
 const { openSwitchBackend } = useDialogs();
+
+// Dev-only reset card: vite strips this in production builds, so the
+// destructive test actions never ship to end users.
+const isDev = import.meta.env.DEV;
 </script>
 
 <template>
@@ -145,6 +151,19 @@ const { openSwitchBackend } = useDialogs();
         </dl>
       </div>
     </div>
+
+    <div v-if="isDev" class="surface settings-card dev-card">
+      <h3>{{ t("dev.title") }}</h3>
+      <p class="field-hint">{{ t("dev.hint") }}</p>
+      <div class="dev-actions">
+        <button class="secondary" type="button" @click="resetVaultAction('empty')">
+          {{ t("dev.resetEmpty") }}
+        </button>
+        <button class="secondary" type="button" @click="resetVaultAction('seeded')">
+          {{ t("dev.resetSeeded") }}
+        </button>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -268,5 +287,21 @@ const { openSwitchBackend } = useDialogs();
   margin: 6px 0 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.dev-card {
+  padding: 18px;
+}
+
+.dev-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dev-actions button {
+  height: 32px;
+  padding: 0 14px;
 }
 </style>

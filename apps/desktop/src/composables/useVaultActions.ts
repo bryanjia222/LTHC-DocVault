@@ -29,6 +29,8 @@ export function useVaultActions() {
     exportVersion,
     checkoutVersion,
     loadDocuments,
+    resetVault,
+    seedDemoDocs,
     isTauri,
   } = useVault();
   const desktop = useDesktopState();
@@ -59,6 +61,25 @@ export function useVaultActions() {
     if (actionKey === "actionLogs.refresh") {
       void loadDocuments();
     }
+  }
+
+  /**
+   * Full manual refresh for the context-menu "刷新" entry: reloads the document
+   * list (versions included) and re-probes tracked source files. Mirrors the
+   * runAction refresh log line. No-op outside Tauri (both underlying calls are).
+   */
+  async function refreshAll() {
+    const name = selectedDocument.value
+      ? selectedDocument.value.name
+      : t("log.noDocument");
+    log(
+      t("log.actionRequested", {
+        action: t("actionLogs.refresh"),
+        name,
+        version: t("log.latest"),
+      }),
+    );
+    await Promise.all([loadDocuments(), desktop.refreshModifications()]);
   }
 
   async function commitVersionAction() {
@@ -170,9 +191,10 @@ export function useVaultActions() {
    * file dialog, since the path is already known. Only meaningful when the
    * tracker reports "modified"; the UI disables the button otherwise. Registers
    * a pending track so App.vue refreshes the baseline (back to "unchanged") once
-   * the commit succeeds.
+   * the commit succeeds. `note` is the optional commit message collected by the
+   * commit-modified dialog; omitted (undefined) when blank.
    */
-  async function commitModifiedDocument(docId: string) {
+  async function commitModifiedDocument(docId: string, note?: string) {
     const actionKey = "actionLogs.commitModified" as const;
     const doc = documents.value.find((d) => d.id === docId);
     const path = desktop.trackedPathFor(docId);
@@ -193,7 +215,11 @@ export function useVaultActions() {
     }
     if (!isTauri()) return;
     try {
-      const id = await commit({ path, document_id: docId });
+      const id = await commit({
+        path,
+        document_id: docId,
+        note: note || undefined,
+      });
       desktop.registerPendingTrack(id, { kind: "known", docId, path });
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
@@ -240,6 +266,45 @@ export function useVaultActions() {
     log(t("log.stoppedTracking", { name: doc?.name ?? t("log.noDocument") }));
   }
 
+  /**
+   * Reset the desktop to a known state for testing: "empty" wipes the isolated
+   * test vault; "seeded" also imports three sample docs with tags + source
+   * baselines. Dev/test only. Confirms first (destructive) and reloads desktop
+   * state so tags/tracked refresh immediately. No-op outside Tauri.
+   */
+  function resetVaultAction(mode: "empty" | "seeded"): void {
+    const actionKey =
+      mode === "seeded" ? "actionLogs.seedDemo" : "actionLogs.resetVault";
+    const confirmKey =
+      mode === "seeded" ? "dev.confirmSeeded" : "dev.confirmEmpty";
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!window.confirm(t(confirmKey))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    void runReset(mode, actionKey);
+  }
+
+  async function runReset(
+    mode: "empty" | "seeded",
+    actionKey: string,
+  ): Promise<void> {
+    try {
+      if (mode === "seeded") await seedDemoDocs();
+      else await resetVault();
+      await desktop.loadDesktopState();
+      log(mode === "seeded" ? t("log.seeded", { count: 3 }) : t("dev.resetDone"));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
   function navigate(sectionId: NavigationId) {
     setSection(sectionId);
     const labelKey = `nav.${sectionId}`;
@@ -262,5 +327,7 @@ export function useVaultActions() {
     commitModifiedDocument,
     relinkSourceFile,
     stopTracking,
+    resetVaultAction,
+    refreshAll,
   };
 }

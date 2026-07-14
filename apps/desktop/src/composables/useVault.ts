@@ -209,6 +209,28 @@ async function connect(params: ConnectParams): Promise<ConnectOutcome> {
 }
 
 /**
+ * Reset the desktop to a fresh-install state: an isolated test vault is emptied
+ * (no documents/tags/tracked sources). Dev/test only - never touches a
+ * manually-connected vault. No-op outside Tauri (browser dev has no backend).
+ */
+async function resetVault(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("reset_vault");
+  await Promise.all([refreshStatus(), loadDocuments(), loadConfig(), loadJobs()]);
+}
+
+/**
+ * Reset, then import the three sample docs with tags + source baselines so the
+ * tag/filter/modification-tracking flows are all exercised. Dev/test only.
+ * No-op outside Tauri.
+ */
+async function seedDemoDocs(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("seed_demo_docs");
+  await Promise.all([refreshStatus(), loadDocuments(), loadConfig(), loadJobs()]);
+}
+
+/**
  * Subscribe to `job:update` events and mirror the backend's authoritative job
  * state into the reactive `jobs` map. Commits/checkouts that succeed refresh
  * the document list (checkout changes which version is current). `onTerminal`
@@ -262,6 +284,8 @@ export function useVault() {
     checkoutVersion,
     cancelJob,
     connect,
+    resetVault,
+    seedDemoDocs,
     subscribeJobs,
   };
 }

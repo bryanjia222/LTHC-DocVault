@@ -31,18 +31,18 @@ use crate::state::{self, AppState};
 /// On-disk shape: a versioned map of vault root -> slice. `version` is reserved
 /// for future migration; today it is always written as 1.
 #[derive(Default, Serialize, Deserialize)]
-struct DesktopStateFile {
+pub(crate) struct DesktopStateFile {
     #[serde(default)]
-    version: u32,
+    pub(crate) version: u32,
     #[serde(default)]
-    vaults: BTreeMap<String, DesktopStateSlice>,
+    pub(crate) vaults: BTreeMap<String, DesktopStateSlice>,
 }
 
 // --- pure helpers (no AppHandle; unit-testable) ---
 
 /// Read & deserialize the state file. A missing file is not an error - it yields
 /// an empty (default) state, so first run is transparent.
-fn load_file_at(path: &Path) -> Result<DesktopStateFile, String> {
+pub(crate) fn load_file_at(path: &Path) -> Result<DesktopStateFile, String> {
     match fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DesktopStateFile::default()),
@@ -51,7 +51,7 @@ fn load_file_at(path: &Path) -> Result<DesktopStateFile, String> {
 }
 
 /// Serialize & write the state file, creating the parent dir if needed.
-fn save_file_at(path: &Path, file: &DesktopStateFile) -> Result<(), String> {
+pub(crate) fn save_file_at(path: &Path, file: &DesktopStateFile) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -68,7 +68,7 @@ fn slice_for_root(file: &DesktopStateFile, root: &str) -> DesktopStateSlice {
 /// Canonicalize a vault root path into a stable map key. Falls back to the raw
 /// display string when canonicalization fails (e.g. the path no longer exists),
 /// so a transiently-unavailable vault still resolves to its stored slice.
-fn canonical_key(path: &Path) -> String {
+pub(crate) fn canonical_key(path: &Path) -> String {
     fs::canonicalize(path)
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| path.display().to_string())
@@ -98,7 +98,7 @@ fn stat_at(path: &Path) -> FileStat {
 /// file exists and its size is within `max_bytes`, so large files are never
 /// hashed. A read failure on an existing small file yields `sha256: None` (the
 /// tracker then treats a stat change as "modified" rather than crashing).
-fn probe_at(path: &Path, max_bytes: u64) -> FileProbe {
+pub(crate) fn probe_at(path: &Path, max_bytes: u64) -> FileProbe {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(_) => {
@@ -152,7 +152,7 @@ fn compute_sha256(path: &Path) -> Option<String> {
 
 // --- AppHandle-bound wrappers + commands ---
 
-fn state_path(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn state_path(app: &AppHandle) -> Option<PathBuf> {
     app.path()
         .app_config_dir()
         .ok()

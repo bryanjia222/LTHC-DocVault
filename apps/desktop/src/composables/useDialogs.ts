@@ -9,6 +9,8 @@ import { ref } from "vue";
 
 const addDocumentOpen = ref(false);
 const switchBackendOpen = ref(false);
+const commitModifiedOpen = ref(false);
+const documentStatusOpen = ref(false);
 
 export function useDialogs() {
   function openAddDocument() {
@@ -23,13 +25,31 @@ export function useDialogs() {
   function closeSwitchBackend() {
     switchBackendOpen.value = false;
   }
+  function openCommitModified() {
+    commitModifiedOpen.value = true;
+  }
+  function closeCommitModified() {
+    commitModifiedOpen.value = false;
+  }
+  function openDocumentStatus() {
+    documentStatusOpen.value = true;
+  }
+  function closeDocumentStatus() {
+    documentStatusOpen.value = false;
+  }
 
   return {
     addDocumentOpen,
     switchBackendOpen,
+    commitModifiedOpen,
+    documentStatusOpen,
     openAddDocument,
     closeAddDocument,
     openSwitchBackend,
     closeSwitchBackend,
+    openCommitModified,
+    closeCommitModified,
+    openDocumentStatus,
+    closeDocumentStatus,
   };
 }
