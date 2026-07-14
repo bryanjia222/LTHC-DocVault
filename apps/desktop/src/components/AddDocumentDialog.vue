@@ -72,10 +72,10 @@ async function submit() {
       new_name: resolvedName,
       author: author.value.trim() || undefined,
     });
-    // Begin tracking the imported source file; App.vue baselines it on success.
+    // Begin tracking the imported document; App.vue baselines the tool-owned
+    // library copy (derived from the new doc id) on success - no path needed.
     desktop.registerPendingTrack(id, {
       kind: "new",
-      path: path.value,
       name: resolvedName,
       snapshotIds,
     });

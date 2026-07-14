@@ -198,6 +198,51 @@ async function renameDocument(params: {
 }
 
 /**
+ * Resolve the deterministic library path for a document's current-version
+ * working copy (`<vault_root>/library/<docId>.<ext>`). Synchronous. Used to
+ * point add/checkout/commit-modified flows at the tool-owned working copy
+ * instead of an arbitrary user-chosen source path.
+ */
+async function libraryPath(params: {
+  document_id: string;
+}): Promise<string> {
+  return invoke<string>("library_path", params);
+}
+
+/**
+ * Open the document's library copy in the OS default editor. Materializes the
+ * copy from the current version first if it is missing (the automated
+ * replacement for relink). Synchronous - resolves once the editor is launched.
+ */
+async function openLibraryCopy(params: {
+  document_id: string;
+}): Promise<void> {
+  await invoke<void>("open_library_copy", params);
+}
+
+/**
+ * Remove the library copy for a document (the tool-owned working file). Used on
+ * delete so the working copy does not outlive its document. Missing file/dir is
+ * a no-op. Synchronous.
+ */
+async function removeLibraryCopy(params: {
+  document_id: string;
+}): Promise<void> {
+  await invoke<void>("remove_library_copy", params);
+}
+
+/**
+ * Ensure every document has a materialized library copy and a tracked baseline
+ * (rebuilds missing copies from the current version, repoints stale tracked
+ * paths). Called after init/load so the library model is consistent. No-op
+ * outside Tauri.
+ */
+async function ensureLibraryCopies(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("ensure_library_copies");
+}
+
+/**
  * Request cancellation of a running job. Returns true when a running job was
  * found and the cancel flag set; the job's terminal status (`cancelled`, or
  * `succeeded`/`failed` if it finished first) still arrives via `job:update`.
@@ -307,6 +352,10 @@ export function useVault() {
     checkoutVersion,
     deleteDocument,
     renameDocument,
+    libraryPath,
+    openLibraryCopy,
+    removeLibraryCopy,
+    ensureLibraryCopies,
     cancelJob,
     connect,
     resetVault,

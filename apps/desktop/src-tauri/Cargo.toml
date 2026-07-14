@@ -17,6 +17,9 @@ serde_json = "1"
 toml = "0.9"
 sha2 = "0.10"
 tracing = "0.1"
+# Launch the OS default editor (Word/WPS) on a library working copy. Pure Rust
+# call from a command, so no Tauri plugin / capability is needed.
+open = "5"
 docvault-core = { path = "../../../crates/core" }
 docvault-storage = { path = "../../../crates/storage" }
 docvault-types = { path = "../../../shared/types" }

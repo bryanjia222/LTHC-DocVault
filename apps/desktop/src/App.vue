@@ -39,6 +39,8 @@ const {
   loadConfig,
   loadJobs,
   subscribeJobs,
+  libraryPath,
+  ensureLibraryCopies,
 } = useVault();
 
 const booting = ref(true);
@@ -90,7 +92,10 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
         ) ??
         documents.value.find((d) => !pending.snapshotIds.includes(d.id));
       if (created) {
-        const baseline = await desktop.probeAndBaseline(created.id, pending.path);
+        // Baseline the tool-owned library copy (materialized by the commit
+        // executor), not the user's original source file.
+        const libPath = await libraryPath({ document_id: created.id });
+        const baseline = await desktop.probeAndBaseline(created.id, libPath);
         desktop.setTracked(baseline);
       }
     }
@@ -104,6 +109,11 @@ async function onInit() {
   try {
     await init();
     await desktop.loadDesktopState();
+    // Reconcile the library model: materialize any missing working copies and
+    // repoint stale tracked paths, then reload + re-probe so the UI reflects it.
+    await ensureLibraryCopies();
+    await desktop.loadDesktopState();
+    await desktop.refreshModifications();
     unsubJobs = await subscribeJobs(onJobTerminal);
   } catch (e) {
     initError.value = String(e);
@@ -115,6 +125,9 @@ onMounted(async () => {
   if (initialized.value) {
     await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
     await desktop.loadDesktopState();
+    await ensureLibraryCopies();
+    await desktop.loadDesktopState();
+    await desktop.refreshModifications();
     unsubJobs = await subscribeJobs(onJobTerminal);
   }
   booting.value = false;

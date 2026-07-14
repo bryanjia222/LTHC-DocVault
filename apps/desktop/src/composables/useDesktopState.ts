@@ -47,10 +47,12 @@ const probes: Ref<Record<string, FileProbe>> = ref({});
 const loaded: Ref<boolean> = ref(false);
 
 /** A pending source-file tracking request, keyed by the commit job id that
- * produced it. Resolved by App.vue when the commit job succeeds. */
+ * produced it. Resolved by App.vue when the commit job succeeds. The "new"
+ * variant carries no path: under the library model the tracked path is the
+ * tool-owned library copy, derived from the doc id at resolution time. */
 export type PendingTrack =
   | { kind: "known"; docId: string; path: string }
-  | { kind: "new"; path: string; name: string; snapshotIds: string[] };
+  | { kind: "new"; name: string; snapshotIds: string[] };
 
 const pendingTracks: Ref<Record<string, PendingTrack>> = ref({});
 

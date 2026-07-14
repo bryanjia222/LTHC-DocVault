@@ -11,11 +11,12 @@ import { withI18nContext } from "../test/compose";
 import type { Document } from "../data/mock";
 
 /*
- * useVaultActions centralizes the commit/export/checkout handlers and calls
- * `useI18n()` (via useActivityLog too), so it must run inside an i18n context.
- * These tests pin the invoke *contract* for each action - especially that
- * checkout switches the current version with NO file dialog and NO output_path
- * (the regression where checkout opened a save dialog).
+ * useVaultActions centralizes the commit/export/checkout/open handlers and
+ * calls `useI18n()` (via useActivityLog too), so it must run inside an i18n
+ * context. These tests pin the invoke *contract* for each action - especially
+ * that checkout derives the library path and passes it as output_path (so the
+ * library copy is overwritten on version switch) without opening a save dialog,
+ * and that open launches the editor on the library copy.
  *
  * `isTauri()` is false in jsdom by default; tests that exercise the invoke path
  * set window.__TAURI_INTERNALS__. invoke/open/save are vi.fn mocks from setup.
@@ -103,18 +104,31 @@ describe("useVaultActions - checkout", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("switches the current version with no file dialog and no output_path", async () => {
+  it("derives the library path and writes it via output_path (no save dialog)", async () => {
     asTauri();
-    vi.mocked(invoke).mockResolvedValue("job-1");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "library_path") return "/vault/library/docA.docx";
+      return "job-1";
+    });
     actions.runAction("actionLogs.checkout");
     await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("library_path", {
+        document_id: docA.id,
+      });
       expect(invoke).toHaveBeenCalledWith("checkout_version", {
         document_id: docA.id,
         version: docA.versions[0].label,
+        output_path: "/vault/library/docA.docx",
       });
     });
-    // Checkout must not open a save dialog - it switches the pointer only.
+    // Checkout must not open a save dialog - the library path is derived.
     expect(save).not.toHaveBeenCalled();
+    // A pending track refreshes the baseline once the library copy is rewritten.
+    expect(desktop.takePendingTrack("job-1")).toEqual({
+      kind: "known",
+      docId: docA.id,
+      path: "/vault/library/docA.docx",
+    });
   });
 
   it("does not invoke when no document is selected", async () => {
@@ -196,7 +210,10 @@ describe("useVaultActions - commit", () => {
   it("registers a pending track so the baseline refreshes after the commit job resolves", async () => {
     asTauri();
     vi.mocked(open).mockResolvedValueOnce("/in/changes.docx");
-    vi.mocked(invoke).mockResolvedValue("job-pending");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "library_path") return "/vault/library/docA.docx";
+      return "job-pending";
+    });
     actions.runAction("actionLogs.commit");
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("commit_document", {
@@ -204,10 +221,12 @@ describe("useVaultActions - commit", () => {
         document_id: docA.id,
       });
     });
+    // The pending track points at the library copy (materialized by the
+    // executor), not the user's picked source file.
     expect(desktop.takePendingTrack("job-pending")).toEqual({
       kind: "known",
       docId: docA.id,
-      path: "/in/changes.docx",
+      path: "/vault/library/docA.docx",
     });
   });
 });
@@ -280,50 +299,30 @@ describe("useVaultActions - commit modified document", () => {
   });
 });
 
-describe("useVaultActions - relink source file", () => {
-  it("probes the picked file and records it as the tracked baseline", async () => {
+describe("useVaultActions - open document", () => {
+  it("opens the library copy in the OS default editor", async () => {
     asTauri();
-    vi.mocked(open).mockResolvedValueOnce("/new/source.docx");
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "probe_file") {
-        return { exists: true, size: 9, mtime_ms: 7, sha256: "abc" };
-      }
-      return undefined;
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await actions.openDocument(docA.id);
+    expect(invoke).toHaveBeenCalledWith("open_library_copy", {
+      document_id: docA.id,
     });
-    await actions.relinkSourceFile(docA.id);
-    await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("probe_file", {
-        path: "/new/source.docx",
-        max_bytes: expect.any(Number),
-      });
-    });
-    await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("set_desktop_state", expect.anything());
-    });
-    expect(desktop.trackedPathFor(docA.id)).toBe("/new/source.docx");
+    // Open derives the library path server-side; no file dialog is involved.
+    expect(open).not.toHaveBeenCalled();
   });
 
-  it("does not invoke when the file picker is cancelled", async () => {
+  it("does not invoke when no document is selected", async () => {
     asTauri();
-    vi.mocked(open).mockResolvedValueOnce(null);
-    await actions.relinkSourceFile(docA.id);
+    documents.value = [];
+    await actions.openDocument();
     await flush();
     expect(invoke).not.toHaveBeenCalled();
   });
-});
 
-describe("useVaultActions - stop tracking", () => {
-  it("clears the tracked baseline for the document", async () => {
-    asTauri();
-    desktop.tracked.value = [
-      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
-    ];
-    vi.mocked(invoke).mockResolvedValue(undefined);
-    await actions.stopTracking(docA.id);
-    await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("set_desktop_state", expect.anything());
-    });
-    expect(desktop.trackedPathFor(docA.id)).toBeNull();
+  it("does not invoke when not running under Tauri", async () => {
+    await actions.openDocument(docA.id);
+    await flush();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 
@@ -420,6 +419,10 @@ describe("useVaultActions - delete document", () => {
     // Desktop-local annotations are cleared right away (optimistic cleanup).
     expect(desktop.tags.value[docA.id]).toBeUndefined();
     expect(desktop.trackedPathFor(docA.id)).toBeNull();
+    // The tool-owned library working copy is removed too (best-effort).
+    expect(invoke).toHaveBeenCalledWith("remove_library_copy", {
+      document_id: docA.id,
+    });
   });
 
   it("does not invoke when the confirm dialog is cancelled", async () => {

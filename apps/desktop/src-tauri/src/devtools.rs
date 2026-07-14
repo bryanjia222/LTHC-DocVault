@@ -23,14 +23,11 @@ use docvault_storage::DocumentRef;
 use docvault_types::{CommitMetadata, Document};
 use tauri::{AppHandle, Manager, State};
 
-use crate::dto::{ConnectError, DesktopStateSlice, TrackedFile};
-use crate::local_state::{canonical_key, load_file_at, probe_at, save_file_at, state_path};
+use crate::dto::{ConnectError, DesktopStateSlice};
+use crate::library::ensure_library_copies_for;
+use crate::local_state::{canonical_key, load_file_at, save_file_at, state_path};
 use crate::prefs;
 use crate::state::{self, AppState};
-
-/// Files above this are not sha256-hashed when baselining, matching the
-/// frontend's `MODIFICATION_HASH_THRESHOLD_BYTES`.
-const HASH_THRESHOLD_BYTES: u64 = 50 * 1024 * 1024;
 
 /// The three sample docs imported by [`seed_demo_docs`]: (filename, doc name).
 const SEED_ENTRIES: &[(&str, &str)] = &[
@@ -71,14 +68,16 @@ fn purge_vault_root(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Synchronously commit the three sample docs as new documents and return each
-/// with the source path it was imported from. Uses the vault directly (not the
-/// job runner) so seeding is atomic and the caller gets the new document ids.
+/// Synchronously commit the three sample docs as new documents and return them.
+/// Uses the vault directly (not the job runner) so seeding is atomic. The library
+/// copies + tracked baselines are written separately by [`write_seed_slice`]
+/// (which calls `ensure_library_copies_for`), so only the `Document` is needed
+/// here - the example-doc source paths are no longer tracked.
 fn seed_three_docs(
     vault: &DocVault,
     example_docs: &Path,
     cancel: &AtomicBool,
-) -> Result<Vec<(Document, PathBuf)>, String> {
+) -> Result<Vec<Document>, String> {
     let mut out = Vec::with_capacity(SEED_ENTRIES.len());
     for (file, name) in SEED_ENTRIES {
         let path = example_docs.join(file);
@@ -92,23 +91,27 @@ fn seed_three_docs(
         let (document, _version) = vault
             .commit_document(&path, DocumentRef::NewName((*name).to_owned()), metadata, cancel)
             .map_err(|e| e.to_string())?;
-        out.push((document, path));
+        out.push(document);
     }
     Ok(out)
 }
 
-/// Write the seeded slice (tags + tracked source baselines) for `root_key` into
-/// the desktop-state file, replacing any prior slice for that root. Tags are
-/// assigned by document name; each tracked entry captures a fresh probe so the
-/// status reads "unchanged" until the source file is edited.
+/// Write the seeded slice (tags + tracked library copies) for `root_key` into
+/// the desktop-state file, replacing any prior slice for that root. Library
+/// copies are materialized and tracked via [`ensure_library_copies_for`] (the
+/// tracked path is the library copy, not the example-doc source). Tags are
+/// assigned by document name.
 fn write_seed_slice(
+    vault: &DocVault,
     state_file: &Path,
     root_key: &str,
-    docs: &[(Document, PathBuf)],
+    docs: &[Document],
 ) -> Result<(), String> {
     let mut file = load_file_at(state_file)?;
+    let mut slice = DesktopStateSlice::default();
+    ensure_library_copies_for(vault, &mut slice)?;
     let mut tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (doc, _path) in docs {
+    for doc in docs {
         let doc_tags = match doc.name.as_str() {
             "Report" => vec!["draft".to_owned(), "important".to_owned()],
             "Slides" => vec!["draft".to_owned()],
@@ -119,21 +122,8 @@ fn write_seed_slice(
             tags.insert(doc.id.as_str().to_owned(), doc_tags);
         }
     }
-    let tracked = docs
-        .iter()
-        .map(|(doc, path)| {
-            let probe = probe_at(path, HASH_THRESHOLD_BYTES);
-            TrackedFile {
-                document_id: doc.id.as_str().to_owned(),
-                path: path.display().to_string(),
-                size: probe.size,
-                mtime_ms: probe.mtime_ms,
-                sha256: probe.sha256,
-            }
-        })
-        .collect();
-    file.vaults
-        .insert(root_key.to_owned(), DesktopStateSlice { tags, tracked });
+    slice.tags = tags;
+    file.vaults.insert(root_key.to_owned(), slice);
     save_file_at(state_file, &file)
 }
 
@@ -214,7 +204,11 @@ pub fn seed_demo_docs(app: AppHandle, state: State<AppState>) -> Result<(), Stri
         seed_three_docs(vault, &example_docs, &cancel)?
     };
     if let Some(state_file) = state_path(&app) {
-        write_seed_slice(&state_file, &canonical_key(&root), &docs)?;
+        let vault = state::lock_vault(&state.vault);
+        let vault = vault
+            .as_ref()
+            .ok_or("vault not initialized after reset")?;
+        write_seed_slice(vault, &state_file, &canonical_key(&root), &docs)?;
     }
     Ok(())
 }
@@ -224,7 +218,6 @@ mod tests {
     use super::*;
     use crate::local_state::DesktopStateFile;
     use docvault_storage::{VaultPaths, VaultStorage};
-    use docvault_types::DocumentId;
 
     /// `example_docs_dir()` if it actually exists on this machine, else `None`
     /// (tests that need real OOXML files skip themselves when absent).
@@ -280,7 +273,7 @@ mod tests {
         let docs = seed_three_docs(&vault, &example_docs, &cancel).unwrap();
 
         assert_eq!(docs.len(), 3);
-        let names: Vec<String> = docs.iter().map(|(d, _)| d.name.clone()).collect();
+        let names: Vec<String> = docs.iter().map(|d| d.name.clone()).collect();
         assert!(names.contains(&"Report".to_owned()));
         assert!(names.contains(&"Slides".to_owned()));
         assert!(names.contains(&"Table".to_owned()));
@@ -288,32 +281,53 @@ mod tests {
     }
 
     #[test]
-    fn write_seed_slice_records_tags_and_tracked() {
+    fn write_seed_slice_records_tags_and_library_path() {
         let temp = tempfile::tempdir().unwrap();
-        let state_file = temp.path().join("desktop-state.json");
-        let src = temp.path().join("report_v1.docx");
-        fs::write(&src, b"fake-content").unwrap();
-        let docs = vec![(
-            Document {
-                id: DocumentId::new("doc1"),
-                name: "Report".to_owned(),
-                current_version_id: None,
-                created_at: 0,
-            },
-            src.clone(),
-        )];
+        let root = temp.path().join("vault");
+        let paths = VaultPaths::from_root(&root);
+        fs::create_dir_all(&paths.root_dir).unwrap();
+        let cfg = format!(
+            "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
+            paths.data_dir.display().to_string().replace('\\', "/"),
+            paths.repo_dir.display().to_string().replace('\\', "/"),
+            paths.db_path.display().to_string().replace('\\', "/"),
+        );
+        fs::write(&paths.config_path, cfg).unwrap();
+        let vault = DocVault::new(VaultStorage::init(paths).unwrap());
+        let cancel = AtomicBool::new(false);
 
-        write_seed_slice(&state_file, "/test-root", &docs).unwrap();
+        // Commit a real .docx so the document has a current version to materialize.
+        let package_dir = temp.path().join("pkg").join("Report");
+        fs::create_dir_all(package_dir.join("word")).unwrap();
+        fs::write(package_dir.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(package_dir.join("word").join("document.xml"), b"v1").unwrap();
+        let source = temp.path().join("report.docx");
+        docvault_ooxml::pack_package(package_dir, &source).unwrap();
+        let (doc, _ver) = vault
+            .commit_document(
+                &source,
+                DocumentRef::NewName("Report".to_owned()),
+                CommitMetadata::default(),
+                &cancel,
+            )
+            .unwrap();
+        let doc_id = doc.id.as_str().to_owned();
+        let state_file = temp.path().join("desktop-state.json");
+
+        write_seed_slice(&vault, &state_file, "/test-root", std::slice::from_ref(&doc)).unwrap();
 
         let file = load_file_at(&state_file).unwrap();
         let slice = file.vaults.get("/test-root").expect("slice written");
         assert_eq!(
-            slice.tags.get("doc1").unwrap(),
+            slice.tags.get(&doc_id).unwrap(),
             &["draft".to_owned(), "important".to_owned()]
         );
         assert_eq!(slice.tracked.len(), 1);
-        assert_eq!(slice.tracked[0].document_id, "doc1");
-        assert_eq!(slice.tracked[0].path, src.display().to_string());
+        assert_eq!(slice.tracked[0].document_id, doc_id);
+        // The tracked path is the library copy, not the example-doc source.
+        let expected = root.join("library").join(format!("{doc_id}.docx"));
+        assert_eq!(slice.tracked[0].path, expected.display().to_string());
+        assert!(expected.exists(), "library copy materialized");
         assert!(slice.tracked[0].size > 0, "baseline size probed");
     }
 

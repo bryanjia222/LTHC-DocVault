@@ -4,8 +4,8 @@ import {
   ArrowRightLeft,
   ChartNetwork,
   Download,
+  ExternalLink,
   Info,
-  Link2,
   List,
   Maximize2,
   Minimize2,
@@ -16,7 +16,6 @@ import {
   Trash2,
   Upload,
   X,
-  XCircle,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { nextTick } from "vue";
@@ -64,7 +63,7 @@ const {
 const desktop = useDesktopState();
 const { openCommitModified, openDocumentStatus, openRename } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, relinkSourceFile, stopTracking, refreshAll, deleteDocument } =
+const { runAction, openDocument, refreshAll, deleteDocument } =
   useVaultActions();
 
 const typeOptions: DocumentType[] = ["docx", "xlsx", "pptx"];
@@ -86,7 +85,6 @@ const hasBranching = computed(() => hasBranchingHistory(versions.value));
 const modificationStatus = computed<ModificationStatus>(
   () => selectedDocument.value?.modification ?? "none",
 );
-const trackedPath = computed(() => selectedDocument.value?.trackedPath ?? null);
 
 function currentVersionLabel(document: Document): string {
   return document.versions.find((v) => v.status === "current")?.label ?? "-";
@@ -155,19 +153,9 @@ function removeTagFromSelected(tag: string) {
   desktop.removeTag(doc.id, tag);
 }
 
-function relinkSelected() {
-  const doc = selectedDocument.value;
-  if (doc) void relinkSourceFile(doc.id);
-}
-
-function stopTrackingSelected() {
-  const doc = selectedDocument.value;
-  if (doc) stopTracking(doc.id);
-}
-
 // Two right-click context menus:
-//  - Document menu (left table rows): relink / stop tracking / document status
-//    / export / refresh - acts on the right-clicked document (selected on open).
+//  - Document menu (left table rows): open / rename / document status / export
+//    / refresh - acts on the right-clicked document (selected on open).
 //  - Version menu (right version-history rows): export this version / refresh -
 //    acts on the right-clicked version (selected on open).
 // `.stop` keeps the global AppContextMenu (window-level) from also firing.
@@ -193,14 +181,10 @@ function closeVersionMenu() {
   versionMenuOpen.value = false;
 }
 
-function docMenuRelink() {
+function docMenuOpenDocument() {
   closeDocMenu();
-  relinkSelected();
-}
-
-function docMenuStopTracking() {
-  closeDocMenu();
-  stopTrackingSelected();
+  const doc = selectedDocument.value;
+  if (doc) void openDocument(doc.id);
 }
 
 function docMenuStatus() {
@@ -455,6 +439,15 @@ onBeforeUnmount(() => {
           <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
         </div>
         <div class="action-row">
+          <button
+            class="icon-action-button"
+            type="button"
+            :title="t('actions.open')"
+            :aria-label="t('actions.open')"
+            @click="runAction('actionLogs.open')"
+          >
+            <ExternalLink aria-hidden="true" />
+          </button>
           <button
             class="icon-action-button"
             type="button"
@@ -809,29 +802,19 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
+          @click="docMenuOpenDocument"
+        >
+          <ExternalLink aria-hidden="true" />
+          {{ t("source.open") }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
           @click="docMenuRename"
         >
           <Pencil aria-hidden="true" />
           {{ t("source.rename") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuRelink"
-        >
-          <Link2 aria-hidden="true" />
-          {{ t("source.relink") }}
-        </button>
-        <button
-          v-if="trackedPath"
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuStopTracking"
-        >
-          <XCircle aria-hidden="true" />
-          {{ t("source.stopTracking") }}
         </button>
         <div class="ctx-divider"></div>
         <button
@@ -1169,7 +1152,7 @@ tbody tr.selected {
 
 .action-row {
   display: grid;
-  grid-template-columns: repeat(3, 34px);
+  grid-template-columns: repeat(4, 34px);
   justify-content: start;
   gap: 8px;
 }

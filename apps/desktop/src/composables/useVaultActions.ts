@@ -34,6 +34,9 @@ export function useVaultActions() {
     resetVault,
     seedDemoDocs,
     isTauri,
+    libraryPath,
+    openLibraryCopy,
+    removeLibraryCopy,
   } = useVault();
   const desktop = useDesktopState();
   const { openAddDocument } = useDialogs();
@@ -53,6 +56,10 @@ export function useVaultActions() {
     }
     if (actionKey === "actionLogs.checkout") {
       void checkoutAction();
+      return;
+    }
+    if (actionKey === "actionLogs.open") {
+      void openDocument();
       return;
     }
     const name = selectedDocument.value
@@ -104,11 +111,13 @@ export function useVaultActions() {
       return;
     }
     try {
-      // Commit a new version to the selected document. Register a pending track
-      // so App.vue captures the picked file as the document's tracked source
-      // (fresh baseline) once the commit job succeeds.
+      // Commit a new version to the selected document from an external file
+      // (the manual-commit escape hatch). Register a pending track pointing at
+      // the library copy - the executor materializes it from the new current
+      // version, and App.vue baselines it once the commit job succeeds.
       const id = await commit({ path, document_id: doc.id });
-      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path });
+      const libPath = await libraryPath({ document_id: doc.id });
+      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path: libPath });
       log(t("log.jobStarted", { action: t("actionLogs.commit"), id }));
     } catch (e) {
       log(
@@ -176,12 +185,17 @@ export function useVaultActions() {
     }
     if (!isTauri()) return;
     try {
-      // Checkout switches the current version pointer without writing a file.
-      // The backend marks the version current; the UI refreshes on `job:update`.
+      // Checkout switches the current version pointer AND overwrites the
+      // library copy with that version's content (output_path). Register a
+      // pending track so App.vue refreshes the baseline (the library copy was
+      // just rewritten, so status returns to "unchanged").
+      const libPath = await libraryPath({ document_id: doc.id });
       const id = await checkoutVersion({
         document_id: doc.id,
         version: ver.label,
+        output_path: libPath,
       });
+      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path: libPath });
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
@@ -219,6 +233,14 @@ export function useVaultActions() {
     try {
       const id = await sendDelete({ document_id: doc.id });
       desktop.clearDoc(doc.id);
+      // Best-effort: remove the tool-owned library working copy so it does not
+      // outlive its document. Failure is non-fatal - the doc is already being
+      // unmanaged and the copy can be rebuilt from the archive if needed.
+      try {
+        await removeLibraryCopy({ document_id: doc.id });
+      } catch (e) {
+        console.warn("removeLibraryCopy failed", e);
+      }
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
@@ -302,14 +324,18 @@ export function useVaultActions() {
   }
 
   /**
-   * Re-specify a document's tracked source file: pick a working copy, probe it
-   * for a fresh baseline, and record it. The recovery path for a missing source
-   * (deleted/moved/changed machines) and for documents not yet tracked on this
-   * machine. Status returns to "unchanged" until the file is edited again.
+   * Open the document's library copy (the tool-owned current-version working
+   * copy) in the OS default editor. The backend materializes the copy from the
+   * current version first if it is missing (the automated replacement for
+   * relink). `docId` defaults to the selected document so the command palette
+   * can invoke it without an explicit id. Synchronous - resolves once the
+   * editor is launched; editing happens out-of-band and is picked up by
+   * modification detection on the next refresh.
    */
-  async function relinkSourceFile(docId: string) {
-    const actionKey = "actionLogs.relinkSource" as const;
-    const doc = documents.value.find((d) => d.id === docId);
+  async function openDocument(docId?: string) {
+    const actionKey = "actionLogs.open" as const;
+    const id = docId ?? selectedDocument.value?.id;
+    const doc = documents.value.find((d) => d.id === id);
     log(
       t("log.actionRequested", {
         action: t(actionKey),
@@ -317,27 +343,17 @@ export function useVaultActions() {
         version: t("log.latest"),
       }),
     );
-    if (!doc) return;
-    if (!isTauri()) return;
-    const path = await pickOfficeFile();
-    if (!path) {
-      log(t("log.actionCancelled", { action: t(actionKey) }));
+    if (!id) {
+      log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
+    if (!isTauri()) return;
     try {
-      const baseline = await desktop.probeAndBaseline(docId, path);
-      desktop.setTracked(baseline);
-      log(t("log.relinked", { name: doc.name, path }));
+      await openLibraryCopy({ document_id: id });
+      log(t("log.opened", { name: doc?.name ?? t("log.noDocument") }));
     } catch (e) {
-      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+      log(t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error: String(e) }));
     }
-  }
-
-  /** Stop tracking a document's source file (removes the baseline). */
-  function stopTracking(docId: string) {
-    const doc = documents.value.find((d) => d.id === docId);
-    desktop.clearTracked(docId);
-    log(t("log.stoppedTracking", { name: doc?.name ?? t("log.noDocument") }));
   }
 
   /**
@@ -399,8 +415,7 @@ export function useVaultActions() {
     navigate,
     toggleCurrentTheme,
     commitModifiedDocument,
-    relinkSourceFile,
-    stopTracking,
+    openDocument,
     resetVaultAction,
     refreshAll,
     deleteDocument,

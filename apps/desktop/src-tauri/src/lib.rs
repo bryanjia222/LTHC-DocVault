@@ -2,6 +2,7 @@ mod commands;
 mod devtools;
 mod dto;
 mod jobs;
+mod library;
 mod local_state;
 mod prefs;
 mod state;
@@ -56,6 +57,10 @@ pub fn run() {
             local_state::set_desktop_state,
             local_state::stat_files,
             local_state::probe_file,
+            library::library_path,
+            library::open_library_copy,
+            library::remove_library_copy,
+            library::ensure_library_copies,
             devtools::reset_vault,
             devtools::seed_demo_docs,
         ])

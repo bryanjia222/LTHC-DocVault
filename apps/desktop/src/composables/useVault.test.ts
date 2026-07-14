@@ -11,6 +11,8 @@ import { useVault } from "./useVault";
  *   - src-tauri/src/jobs.rs      (commit_document, export_version,
  *     checkout_version, delete_document, rename_document, list_jobs,
  *     cancel_job)
+ *   - src-tauri/src/library.rs   (library_path, open_library_copy,
+ *     remove_library_copy, ensure_library_copies)
  *
  * Command names must match, arg keys must be snake_case (the backend uses
  * rename_all="snake_case" for the write commands), and Option<T> fields must be
@@ -61,6 +63,8 @@ beforeEach(() => {
         return { mode: "opened", backend: "restic", root_dir: "/r" };
       case "cancel_job":
         return true;
+      case "library_path":
+        return "/vault/library/docA.docx";
       case "commit_document":
       case "export_version":
       case "checkout_version":
@@ -210,5 +214,34 @@ describe("useVault - rename_document contract", () => {
       document_id: "docA",
       new_name: "Renamed",
     });
+  });
+});
+
+describe("useVault - library model contracts", () => {
+  it("library_path sends document_id and resolves the path string", async () => {
+    const path = await vault.libraryPath({ document_id: "docA" });
+    expect(invokeArgs("library_path")).toStrictEqual({
+      document_id: "docA",
+    });
+    expect(path).toBe("/vault/library/docA.docx");
+  });
+
+  it("openLibraryCopy sends document_id and resolves void", async () => {
+    await vault.openLibraryCopy({ document_id: "docA" });
+    expect(invokeArgs("open_library_copy")).toStrictEqual({
+      document_id: "docA",
+    });
+  });
+
+  it("removeLibraryCopy sends document_id and resolves void", async () => {
+    await vault.removeLibraryCopy({ document_id: "docA" });
+    expect(invokeArgs("remove_library_copy")).toStrictEqual({
+      document_id: "docA",
+    });
+  });
+
+  it("ensureLibraryCopies invokes ensure_library_copies with no args", async () => {
+    await vault.ensureLibraryCopies();
+    expect(invoke).toHaveBeenCalledWith("ensure_library_copies");
   });
 });

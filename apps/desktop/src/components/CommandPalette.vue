@@ -5,6 +5,7 @@ import {
   ArrowRightLeft,
   Activity,
   Download,
+  ExternalLink,
   FileText,
   RefreshCw,
   Search,
@@ -52,6 +53,13 @@ const commands = computed<Command[]>(() => {
   }));
 
   const actions: Command[] = [
+    {
+      id: "act-open",
+      label: t("actions.open"),
+      group: "actions",
+      icon: markRaw(ExternalLink),
+      run: () => runAction("actionLogs.open"),
+    },
     {
       id: "act-commit",
       label: t("actions.commit"),

@@ -8,9 +8,10 @@ import type { ModificationStatus } from "../data/mock";
 
 /*
  * Document-status dialog. Opened from the detail panel's right-click menu
- * ("文档状态"). Surfaces the source-tracking status, the tracked source path,
- * and the document id + backend - the metadata that used to occupy the detail
- * panel header. Read-only; relink/stop-tracking remain in the context menu.
+ * ("文档状态"). Surfaces the modification status, the tracked library-copy
+ * path, and the document id + backend - the metadata that used to occupy the
+ * detail panel header. Read-only; open / commit-modified live in the context
+ * menu and action row.
  */
 
 const { t } = useI18n();

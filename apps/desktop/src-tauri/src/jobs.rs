@@ -167,13 +167,36 @@ fn execute_commit(
     let Some(vault) = vault.as_ref() else {
         return JobOutcome::Failed("vault not initialized".to_owned());
     };
-    match vault.commit_document(path, document_ref, metadata, cancel) {
-        Ok(_) => JobOutcome::Succeeded,
+    let source_path = path.as_ref();
+    let (document, _version) = match vault.commit_document(source_path, document_ref, metadata, cancel) {
+        Ok(result) => result,
         Err(CoreError::Storage(StorageError::Restic(ResticError::Cancelled))) => {
-            JobOutcome::Cancelled
+            return JobOutcome::Cancelled;
         }
-        Err(e) => JobOutcome::Failed(e.to_string()),
+        Err(e) => return JobOutcome::Failed(e.to_string()),
+    };
+    // Library model: when the committed source was an external file (add /
+    // manual commit), materialize a library copy from the now-current version so
+    // the tool owns a working copy. When the source IS the library copy
+    // (commit-modified), skip - it already equals the just-committed version, so
+    // re-exporting would be a wasteful no-op (especially costly on restic).
+    let doc_id = document.id.as_str();
+    match crate::library::library_path_for_doc(vault, doc_id) {
+        Ok(lib_path) if source_path != lib_path => {
+            if let Err(e) = vault.export_version(
+                &DocumentRef::IdPrefix(doc_id.to_owned()),
+                "current",
+                &lib_path,
+                cancel,
+            ) {
+                return JobOutcome::Failed(format!(
+                    "committed but failed to materialize library copy: {e}"
+                ));
+            }
+        }
+        _ => {} // source is the library copy, or path unknown - nothing to materialize
     }
+    JobOutcome::Succeeded
 }
 
 fn execute_export(
@@ -336,6 +359,63 @@ mod tests {
             .list_versions(&DocumentRef::IdPrefix(documents[0].id.as_str().to_owned()))
             .unwrap();
         assert_eq!(versions.len(), 1);
+        // Library model: committing an external file materializes a library copy
+        // at <root>/library/<id>.<ext>.
+        let lib_path = crate::library::library_path_for_doc(vault, documents[0].id.as_str())
+            .expect("library path resolves");
+        assert!(lib_path.exists(), "library copy materialized after commit");
+    }
+
+    /// Commit-modified: when the committed source IS the library copy itself,
+    /// the executor skips materialize (source == library path) and just archives
+    /// it as a new version. Verifies the library-model fast path for the normal
+    /// edit-save-commit loop.
+    #[test]
+    fn commit_modified_commits_library_copy_without_rematerialize() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+        let vault: Arc<Mutex<Option<DocVault>>> =
+            Arc::new(Mutex::new(Some(DocVault::new(storage))));
+
+        let docx = write_source(temp.path(), "report.docx", b"version one");
+        let registry = JobRegistry::new();
+        let (job_id, terminal) = spawn_commit(
+            &registry,
+            Arc::clone(&vault),
+            docx.to_string_lossy().to_string(),
+            DocumentRef::NewName("report".to_owned()),
+        );
+        wait_for_terminal(&terminal);
+        assert_eq!(registry.get(&job_id).unwrap().status, JobStatus::Succeeded);
+
+        let (doc_id, lib_path) = {
+            let vault = vault.lock().unwrap();
+            let vault = vault.as_ref().unwrap();
+            let id = vault.list_documents().unwrap()[0].id.as_str().to_owned();
+            let path = crate::library::library_path_for_doc(vault, &id).unwrap();
+            (id, path)
+        };
+        assert!(lib_path.exists(), "library copy exists after add");
+
+        // commit-modified: the source IS the library copy -> executor skips
+        // materialize and archives it directly as a new version.
+        let (job_id2, terminal2) = spawn_commit(
+            &registry,
+            Arc::clone(&vault),
+            lib_path.to_string_lossy().to_string(),
+            DocumentRef::IdPrefix(doc_id.clone()),
+        );
+        wait_for_terminal(&terminal2);
+        let record2 = registry.get(&job_id2).expect("second job recorded");
+        assert_eq!(record2.status, JobStatus::Succeeded, "commit-modified should succeed");
+        assert!(record2.error.is_none(), "unexpected error: {:?}", record2.error);
+
+        let vault = vault.lock().unwrap();
+        let vault = vault.as_ref().unwrap();
+        let versions = vault.list_versions(&DocumentRef::IdPrefix(doc_id)).unwrap();
+        assert_eq!(versions.len(), 2, "commit-modified added a second version");
     }
 
     /// The failure path surfaces the backend's error verbatim and marks the job
