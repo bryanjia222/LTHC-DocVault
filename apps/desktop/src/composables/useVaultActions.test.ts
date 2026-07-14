@@ -396,3 +396,133 @@ describe("useVaultActions - refresh all", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe("useVaultActions - delete document", () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+  afterEach(() => {
+    confirmSpy?.mockRestore();
+  });
+
+  it("confirms, spawns the delete job, and clears desktop annotations", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    desktop.tags.value = { [docA.id]: ["t1"] };
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+
+    expect(invoke).toHaveBeenCalledWith("delete_document", {
+      document_id: docA.id,
+    });
+    // Desktop-local annotations are cleared right away (optimistic cleanup).
+    expect(desktop.tags.value[docA.id]).toBeUndefined();
+    expect(desktop.trackedPathFor(docA.id)).toBeNull();
+  });
+
+  it("does not invoke when the confirm dialog is cancelled", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("does not invoke when no document is selected", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    documents.value = [];
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+});
+
+describe("useVaultActions - rename document", () => {
+  it("renames the selected document and reloads the list", async () => {
+    asTauri();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_documents_with_versions") return [];
+      return undefined;
+    });
+
+    await actions.renameDocument("Beta");
+
+    expect(invoke).toHaveBeenCalledWith("rename_document", {
+      document_id: docA.id,
+      new_name: "Beta",
+    });
+    // Rename reloads the document list so the new name shows immediately.
+    expect(invoke).toHaveBeenCalledWith("list_documents_with_versions");
+  });
+
+  it("trims whitespace before sending the new name", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.renameDocument("  Beta  ");
+
+    expect(invoke).toHaveBeenCalledWith("rename_document", {
+      document_id: docA.id,
+      new_name: "Beta",
+    });
+  });
+
+  it("does not invoke when the name is unchanged", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.renameDocument(docA.name);
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+  });
+
+  it("does not invoke when the name is blank", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.renameDocument("   ");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+  });
+
+  it("does not invoke when no document is selected", async () => {
+    asTauri();
+    documents.value = [];
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.renameDocument("Beta");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.renameDocument("Beta");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+  });
+});

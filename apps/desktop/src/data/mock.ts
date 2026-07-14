@@ -83,7 +83,7 @@ export interface Document {
   trackedPath?: string | null;
 }
 
-export type JobKind = "commit" | "export" | "checkout";
+export type JobKind = "commit" | "export" | "checkout" | "delete";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Job {

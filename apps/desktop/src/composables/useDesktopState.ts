@@ -180,6 +180,25 @@ function clearTracked(docId: string): void {
 }
 
 /**
+ * Remove every desktop-local annotation for a document (tags, tracked source,
+ * probe cache) in one pass and persist. Called when a document is deleted so no
+ * orphaned metadata lingers in desktop-state.json. The document's source file
+ * on disk is not touched (delete only "unmanages" the document).
+ */
+function clearDoc(docId: string): void {
+  if (tags.value[docId]) {
+    const nextTags = { ...tags.value };
+    delete nextTags[docId];
+    tags.value = nextTags;
+  }
+  tracked.value = tracked.value.filter((t) => t.documentId !== docId);
+  const nextProbes = { ...probes.value };
+  delete nextProbes[docId];
+  probes.value = nextProbes;
+  void saveDesktopState();
+}
+
+/**
  * Probe a path and build a tracked-file baseline from it (size + mtime + sha256
  * when the file is within the hash threshold). Used right after a commit
  * (import) or a re-specify to capture the fresh baseline.
@@ -313,6 +332,7 @@ export function useDesktopState() {
     modificationFor,
     setTracked,
     clearTracked,
+    clearDoc,
     probeAndBaseline,
     refreshModifications,
     // pending tracks

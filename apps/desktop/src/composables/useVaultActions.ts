@@ -28,6 +28,8 @@ export function useVaultActions() {
     commit,
     exportVersion,
     checkoutVersion,
+    deleteDocument: sendDelete,
+    renameDocument: sendRename,
     loadDocuments,
     resetVault,
     seedDemoDocs,
@@ -187,6 +189,78 @@ export function useVaultActions() {
   }
 
   /**
+   * Delete the selected document: confirm (destructive), then spawn the backend
+   * delete job. Delete only "unmanages" the document - it removes DB rows, restic
+   * snapshots, and the local archive directory, but never the user's source
+   * file. Desktop-local annotations (tags / tracked source) are cleared right
+   * away so no orphaned metadata lingers; the document list refreshes when the
+   * job succeeds (refreshKinds includes "delete"). The job's truthful state
+   * arrives later via `job:update`.
+   */
+  async function deleteDocument() {
+    const actionKey = "actionLogs.delete" as const;
+    const doc = selectedDocument.value;
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    if (!window.confirm(t("confirm.delete", { name: doc.name }))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    try {
+      const id = await sendDelete({ document_id: doc.id });
+      desktop.clearDoc(doc.id);
+      log(t("log.jobStarted", { action: t(actionKey), id }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /**
+   * Rename the selected document (DB name only; versions are untouched). Called
+   * by the rename dialog after it collects the new name. A blank or unchanged
+   * name is treated as a cancel. Synchronous, so the document list is reloaded
+   * on success and a renamed entry is logged.
+   */
+  async function renameDocument(newName: string) {
+    const actionKey = "actionLogs.rename" as const;
+    const doc = selectedDocument.value;
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === doc.name) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    try {
+      await sendRename({ document_id: doc.id, new_name: trimmed });
+      await loadDocuments();
+      log(t("log.renamed", { name: doc.name, newName: trimmed }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /**
    * Commit the document's tracked source file as a new version directly - no
    * file dialog, since the path is already known. Only meaningful when the
    * tracker reports "modified"; the UI disables the button otherwise. Registers
@@ -329,5 +403,7 @@ export function useVaultActions() {
     stopTracking,
     resetVaultAction,
     refreshAll,
+    deleteDocument,
+    renameDocument,
   };
 }

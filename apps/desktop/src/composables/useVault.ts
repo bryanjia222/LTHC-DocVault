@@ -175,6 +175,29 @@ async function checkoutVersion(params: {
 }
 
 /**
+ * Delete a document (unmanage it): removes the DB rows, restic snapshots, and
+ * the local archive directory. Spawned as a job; returns the job id. The
+ * truthful outcome arrives later via `job:update`. Desktop-local annotations
+ * (tags / tracked source) are cleared by the caller.
+ */
+async function deleteDocument(params: {
+  document_id: string;
+}): Promise<string> {
+  return invoke<string>("delete_document", params);
+}
+
+/**
+ * Rename a document (DB name only - versions are untouched). Synchronous: it
+ * resolves once the name is updated, so the caller reloads the document list.
+ */
+async function renameDocument(params: {
+  document_id: string;
+  new_name: string;
+}): Promise<void> {
+  await invoke<void>("rename_document", params);
+}
+
+/**
  * Request cancellation of a running job. Returns true when a running job was
  * found and the cancel flag set; the job's terminal status (`cancelled`, or
  * `succeeded`/`failed` if it finished first) still arrives via `job:update`.
@@ -253,7 +276,7 @@ async function subscribeJobs(
     } else {
       jobs.value.unshift(job);
     }
-    const refreshKinds: RawJob["kind"][] = ["commit", "checkout"];
+    const refreshKinds: RawJob["kind"][] = ["commit", "checkout", "delete"];
     if (refreshKinds.includes(raw.kind) && raw.status === "succeeded") {
       void loadDocuments();
     }
@@ -282,6 +305,8 @@ export function useVault() {
     commit,
     exportVersion,
     checkoutVersion,
+    deleteDocument,
+    renameDocument,
     cancelJob,
     connect,
     resetVault,

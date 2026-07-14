@@ -48,6 +48,8 @@ pub fn run() {
             jobs::commit_document,
             jobs::export_version,
             jobs::checkout_version,
+            jobs::delete_document,
+            jobs::rename_document,
             jobs::list_jobs,
             jobs::cancel_job,
             local_state::get_desktop_state,

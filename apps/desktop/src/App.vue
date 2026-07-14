@@ -11,6 +11,7 @@ import AddDocumentDialog from "./components/AddDocumentDialog.vue";
 import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
 import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
 import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
+import RenameDialog from "./components/RenameDialog.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import JobsView from "./components/views/JobsView.vue";
 import ArchiveView from "./components/views/ArchiveView.vue";
@@ -165,6 +166,7 @@ onBeforeUnmount(() => {
     <SwitchBackendDialog />
     <CommitModifiedDialog />
     <DocumentStatusDialog />
+    <RenameDialog />
     <AppContextMenu />
   </div>
 </template>

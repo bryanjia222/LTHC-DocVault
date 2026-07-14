@@ -11,6 +11,7 @@ const addDocumentOpen = ref(false);
 const switchBackendOpen = ref(false);
 const commitModifiedOpen = ref(false);
 const documentStatusOpen = ref(false);
+const renameOpen = ref(false);
 
 export function useDialogs() {
   function openAddDocument() {
@@ -37,12 +38,19 @@ export function useDialogs() {
   function closeDocumentStatus() {
     documentStatusOpen.value = false;
   }
+  function openRename() {
+    renameOpen.value = true;
+  }
+  function closeRename() {
+    renameOpen.value = false;
+  }
 
   return {
     addDocumentOpen,
     switchBackendOpen,
     commitModifiedOpen,
     documentStatusOpen,
+    renameOpen,
     openAddDocument,
     closeAddDocument,
     openSwitchBackend,
@@ -51,5 +59,7 @@ export function useDialogs() {
     closeCommitModified,
     openDocumentStatus,
     closeDocumentStatus,
+    openRename,
+    closeRename,
   };
 }

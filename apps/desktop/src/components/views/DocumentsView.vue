@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Trash2,
   Upload,
   X,
   XCircle,
@@ -61,9 +62,10 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
-const { openCommitModified, openDocumentStatus } = useDialogs();
+const { openCommitModified, openDocumentStatus, openRename } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, relinkSourceFile, stopTracking, refreshAll } = useVaultActions();
+const { runAction, relinkSourceFile, stopTracking, refreshAll, deleteDocument } =
+  useVaultActions();
 
 const typeOptions: DocumentType[] = ["docx", "xlsx", "pptx"];
 const healthOptions: HealthStatus[] = ["synced", "needsReview"];
@@ -214,6 +216,16 @@ function docMenuExport() {
 function docMenuRefresh() {
   closeDocMenu();
   void refreshAll();
+}
+
+function docMenuRename() {
+  closeDocMenu();
+  openRename();
+}
+
+function docMenuDelete() {
+  closeDocMenu();
+  void deleteDocument();
 }
 
 function versionMenuCheckout() {
@@ -798,6 +810,15 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
+          @click="docMenuRename"
+        >
+          <Pencil aria-hidden="true" />
+          {{ t("source.rename") }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
           @click="docMenuRelink"
         >
           <Link2 aria-hidden="true" />
@@ -841,6 +862,16 @@ onBeforeUnmount(() => {
         >
           <RefreshCw aria-hidden="true" />
           {{ t("actions.refresh") }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item danger"
+          role="menuitem"
+          @click="docMenuDelete"
+        >
+          <Trash2 aria-hidden="true" />
+          {{ t("source.delete") }}
         </button>
       </div>
     </div>
@@ -1502,6 +1533,10 @@ tbody tr.selected {
 
 .ctx-item:hover:not(.ctx-info) {
   background: var(--bg-hover);
+}
+
+.ctx-item.danger {
+  color: var(--danger-text);
 }
 
 .ctx-info {

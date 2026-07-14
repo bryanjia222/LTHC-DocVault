@@ -9,7 +9,8 @@ import { useVault } from "./useVault";
  *   - src-tauri/src/commands.rs  (vault_status, init_vault,
  *     list_documents_with_versions, get_config, connect_vault)
  *   - src-tauri/src/jobs.rs      (commit_document, export_version,
- *     checkout_version, list_jobs, cancel_job)
+ *     checkout_version, delete_document, rename_document, list_jobs,
+ *     cancel_job)
  *
  * Command names must match, arg keys must be snake_case (the backend uses
  * rename_all="snake_case" for the write commands), and Option<T> fields must be
@@ -63,6 +64,7 @@ beforeEach(() => {
       case "commit_document":
       case "export_version":
       case "checkout_version":
+      case "delete_document":
         return "job-1";
       default:
         return undefined;
@@ -188,5 +190,25 @@ describe("useVault - cancel_job contract", () => {
   it("sends the job id under snake_case key", async () => {
     await vault.cancelJob("job-9");
     expect(invokeArgs("cancel_job")).toStrictEqual({ job_id: "job-9" });
+  });
+});
+
+describe("useVault - delete_document contract", () => {
+  it("sends document_id and resolves the spawned job id", async () => {
+    const id = await vault.deleteDocument({ document_id: "docA" });
+    expect(invokeArgs("delete_document")).toStrictEqual({
+      document_id: "docA",
+    });
+    expect(id).toBe("job-1");
+  });
+});
+
+describe("useVault - rename_document contract", () => {
+  it("sends document_id + new_name and resolves void", async () => {
+    await vault.renameDocument({ document_id: "docA", new_name: "Renamed" });
+    expect(invokeArgs("rename_document")).toStrictEqual({
+      document_id: "docA",
+      new_name: "Renamed",
+    });
   });
 });
