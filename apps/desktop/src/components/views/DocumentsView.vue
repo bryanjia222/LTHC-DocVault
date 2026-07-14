@@ -722,7 +722,6 @@ onBeforeUnmount(() => {
         <div class="panel-header compact">
           <div>
             <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
-            <p>{{ selectedDocument?.id }}</p>
           </div>
           <div class="action-row">
             <button
