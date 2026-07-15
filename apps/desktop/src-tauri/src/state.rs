@@ -105,19 +105,6 @@ pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
     }
 }
 
-/// Initialize the vault for the first time (onboarding) at the current root
-/// (last user-chosen, else platform default) using the `local-copy` backend.
-/// The user can later connect a different directory/backend from Settings. Only
-/// writes when no config exists, so re-running never clobbers an existing vault.
-pub fn init_vault(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let paths = VaultPaths::from_root(current_root(app));
-    ensure_local_copy_config(&paths)?;
-    let storage = VaultStorage::init(paths).map_err(|e| e.to_string())?;
-    set_open_error(state, None);
-    *lock_vault(&state.vault) = Some(DocVault::new(storage));
-    Ok(())
-}
-
 /// Connect (and switch to) the vault at `root_dir` using the chosen `backend`.
 ///
 /// - Empty directory -> initialize a new vault with the chosen backend (restic
@@ -222,26 +209,6 @@ fn write_config(
     let rendered =
         toml::to_string_pretty(&config).map_err(|e| ConnectError::Other(e.to_string()))?;
     fs::write(&paths.config_path, rendered).map_err(|e| ConnectError::Other(e.to_string()))?;
-    Ok(())
-}
-
-/// Write a `local-copy` config before first init. Only writes when no config
-/// exists, so re-running init never clobbers an existing vault.
-fn ensure_local_copy_config(paths: &VaultPaths) -> Result<(), String> {
-    if paths.config_path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = paths.config_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let mut config = VaultConfig::for_paths(
-        paths.data_dir.clone(),
-        paths.repo_dir.clone(),
-        paths.db_path.clone(),
-    );
-    config.storage.backend = "local-copy".to_owned();
-    let rendered = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(&paths.config_path, rendered).map_err(|e| e.to_string())?;
     Ok(())
 }
 

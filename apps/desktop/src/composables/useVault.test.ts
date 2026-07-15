@@ -6,7 +6,7 @@ import { useVault } from "./useVault";
 /*
  * L2 command-contract tests. The frontend's `invoke(cmd, args)` calls must
  * match the backend `#[tauri::command]` signatures in:
- *   - src-tauri/src/commands.rs  (vault_status, init_vault,
+ *   - src-tauri/src/commands.rs  (vault_status,
  *     list_documents_with_versions, get_config, connect_vault)
  *   - src-tauri/src/jobs.rs      (commit_document, export_version,
  *     checkout_version, delete_document, rename_document, list_jobs,

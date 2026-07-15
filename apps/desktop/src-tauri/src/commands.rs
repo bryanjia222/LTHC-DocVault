@@ -27,11 +27,6 @@ pub fn vault_status(app: AppHandle, state: State<AppState>) -> Result<VaultStatu
 }
 
 #[tauri::command]
-pub fn init_vault(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    state::init_vault(&app, state.inner())
-}
-
-#[tauri::command]
 pub fn list_documents_with_versions(
     state: State<AppState>,
 ) -> Result<Vec<DocumentWithVersions>, String> {

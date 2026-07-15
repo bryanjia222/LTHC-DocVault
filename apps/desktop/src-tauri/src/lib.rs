@@ -83,7 +83,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
-            commands::init_vault,
             commands::list_documents_with_versions,
             commands::get_config,
             commands::connect_vault,

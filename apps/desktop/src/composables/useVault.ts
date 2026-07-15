@@ -84,23 +84,6 @@ async function refreshStatus(): Promise<void> {
   }
 }
 
-async function init(): Promise<void> {
-  if (!isTauri()) {
-    initialized.value = true;
-    await loadDocuments();
-    await loadJobs();
-    await loadConfig();
-    await loadRepoSize();
-    return;
-  }
-  await invoke("init_vault");
-  await refreshStatus();
-  await loadDocuments();
-  await loadJobs();
-  await loadConfig();
-  await loadRepoSize();
-}
-
 async function loadDocuments(): Promise<void> {
   if (!isTauri()) {
     documents.value = mockDocuments.map((document) => ({ ...document }));
@@ -400,7 +383,6 @@ export function useVault() {
     repoSize,
     isTauri,
     refreshStatus,
-    init,
     loadDocuments,
     loadJobs,
     loadConfig,
