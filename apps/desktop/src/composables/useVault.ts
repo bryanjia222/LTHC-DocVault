@@ -65,6 +65,8 @@ const rootDir: Ref<string> = ref("");
 const openError: Ref<string> = ref("");
 const loading: Ref<boolean> = ref(false);
 const error: Ref<string> = ref("");
+/** On-disk repo size in bytes (null before first load / when unavailable). */
+const repoSize: Ref<number | null> = ref(null);
 
 async function refreshStatus(): Promise<void> {
   if (!isTauri()) {
@@ -88,6 +90,7 @@ async function init(): Promise<void> {
     await loadDocuments();
     await loadJobs();
     await loadConfig();
+    await loadRepoSize();
     return;
   }
   await invoke("init_vault");
@@ -95,6 +98,7 @@ async function init(): Promise<void> {
   await loadDocuments();
   await loadJobs();
   await loadConfig();
+  await loadRepoSize();
 }
 
 async function loadDocuments(): Promise<void> {
@@ -137,6 +141,23 @@ async function loadConfig(): Promise<void> {
   try {
     const raw = await invoke<RawConfig>("get_config");
     config.value = mapConfig(raw);
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+/**
+ * Load the on-disk repo size (bytes) for the active vault. Refreshed after
+ * commits/deletes so the ArchiveView stat stays current. Mocks a value outside
+ * Tauri so browser dev still renders.
+ */
+async function loadRepoSize(): Promise<void> {
+  if (!isTauri()) {
+    repoSize.value = 45 * 1024 * 1024;
+    return;
+  }
+  try {
+    repoSize.value = await invoke<number>("repo_size");
   } catch (e) {
     error.value = String(e);
   }
@@ -276,7 +297,15 @@ type ConnectParams = {
  */
 async function connect(params: ConnectParams): Promise<ConnectOutcome> {
   const outcome = await invoke<ConnectOutcome>("connect_vault", params);
-  await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
+  // refreshStatus flips `initialized` true so the onboarding screen hands off to
+  // the workspace (and the App.vue watch runs post-connect setup).
+  await Promise.all([
+    refreshStatus(),
+    loadDocuments(),
+    loadConfig(),
+    loadJobs(),
+    loadRepoSize(),
+  ]);
   return outcome;
 }
 
@@ -288,7 +317,13 @@ async function connect(params: ConnectParams): Promise<ConnectOutcome> {
 async function resetVault(): Promise<void> {
   if (!isTauri()) return;
   await invoke("reset_vault");
-  await Promise.all([refreshStatus(), loadDocuments(), loadConfig(), loadJobs()]);
+  await Promise.all([
+    refreshStatus(),
+    loadDocuments(),
+    loadConfig(),
+    loadJobs(),
+    loadRepoSize(),
+  ]);
 }
 
 /**
@@ -299,7 +334,13 @@ async function resetVault(): Promise<void> {
 async function seedDemoDocs(): Promise<void> {
   if (!isTauri()) return;
   await invoke("seed_demo_docs");
-  await Promise.all([refreshStatus(), loadDocuments(), loadConfig(), loadJobs()]);
+  await Promise.all([
+    refreshStatus(),
+    loadDocuments(),
+    loadConfig(),
+    loadJobs(),
+    loadRepoSize(),
+  ]);
 }
 
 /**
@@ -312,6 +353,7 @@ async function seedDemoDocs(): Promise<void> {
  */
 async function subscribeJobs(
   onTerminal?: (job: RawJob) => void,
+  onUpdate?: (job: RawJob) => void,
 ): Promise<UnlistenFn> {
   if (!isTauri()) {
     return () => {};
@@ -325,9 +367,19 @@ async function subscribeJobs(
     } else {
       jobs.value.unshift(job);
     }
-    const refreshKinds: RawJob["kind"][] = ["commit", "checkout", "delete"];
+    // Mirror every update (running + terminal) into the toast layer so a
+    // bottom-right bubble appears the moment a slow job starts.
+    onUpdate?.(raw);
+    // Archive (the async Phase B of a commit) finalizes a version's compress
+    // step; checkout changes which version is current; delete removes a doc.
+    // All three change the document list. Archive adds data and delete reclaims
+    // it, so those also refresh the repo-size stat.
+    const refreshKinds: RawJob["kind"][] = ["archive", "checkout", "delete"];
     if (refreshKinds.includes(raw.kind) && raw.status === "succeeded") {
       void loadDocuments();
+      if (raw.kind === "archive" || raw.kind === "delete") {
+        void loadRepoSize();
+      }
     }
     if (TERMINAL_STATUSES.has(raw.status)) {
       onTerminal?.(raw);
@@ -345,12 +397,14 @@ export function useVault() {
     openError,
     loading,
     error,
+    repoSize,
     isTauri,
     refreshStatus,
     init,
     loadDocuments,
     loadJobs,
     loadConfig,
+    loadRepoSize,
     commit,
     exportVersion,
     checkoutVersion,

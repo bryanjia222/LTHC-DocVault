@@ -111,14 +111,18 @@ export function useVaultActions() {
       return;
     }
     try {
-      // Commit a new version to the selected document from an external file
-      // (the manual-commit escape hatch). Register a pending track pointing at
-      // the library copy - the executor materializes it from the new current
-      // version, and App.vue baselines it once the commit job succeeds.
-      const id = await commit({ path, document_id: doc.id });
+      // Phase A runs synchronously inside commit(): the version is written
+      // (pending) and the library copy materialized from its intake before this
+      // resolves, so reload the list and baseline the working copy immediately
+      // - the user sees "committed" at once. The returned id is the Phase B
+      // archive job (compress), which runs on and surfaces in the task bubble;
+      // its terminal refreshes the document list + repo size via subscribeJobs.
+      await commit({ path, document_id: doc.id });
+      await loadDocuments();
       const libPath = await libraryPath({ document_id: doc.id });
-      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path: libPath });
-      log(t("log.jobStarted", { action: t("actionLogs.commit"), id }));
+      const baseline = await desktop.probeAndBaseline(doc.id, libPath);
+      desktop.setTracked(baseline);
+      log(t("log.commitSucceeded", { target: doc.name }));
     } catch (e) {
       log(
         t("log.actionFailed", {
@@ -311,13 +315,20 @@ export function useVaultActions() {
     }
     if (!isTauri()) return;
     try {
-      const id = await commit({
+      // Phase A is synchronous: the library copy (which is the source here) is
+      // already current, so just reload the list and re-baseline it back to
+      // "unchanged" immediately. The returned id is the Phase B archive job,
+      // which surfaces in the task bubble.
+      await commit({
         path,
         document_id: docId,
         note: note || undefined,
       });
-      desktop.registerPendingTrack(id, { kind: "known", docId, path });
-      log(t("log.jobStarted", { action: t(actionKey), id }));
+      await loadDocuments();
+      const libPath = await libraryPath({ document_id: docId });
+      const baseline = await desktop.probeAndBaseline(docId, libPath);
+      desktop.setTracked(baseline);
+      log(t("log.commitSucceeded", { target: doc?.name ?? docId }));
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
     }

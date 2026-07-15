@@ -23,8 +23,8 @@ export const zhCN = {
     loading: "正在连接仓库…",
     welcome: "欢迎使用 DocVault",
     notInitialized:
-      "尚未初始化文档仓库。初始化将在本地创建仓库目录与数据库（local-copy 后端）。",
-    initialize: "初始化仓库",
+      "请选择一个仓库目录与备份后端以开始使用。后续可在“设置”中切换仓库。",
+    connect: "选择仓库并连接",
     initFailed: "初始化失败：{error}",
     openFailed: "无法打开现有仓库：{error}",
   },
@@ -192,6 +192,14 @@ export const zhCN = {
     export: "导出",
     checkout: "切换版本",
     delete: "删除",
+    archive: "压缩归档",
+  },
+  toast: {
+    running: "进行中…",
+    succeeded: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+    dismiss: "关闭",
   },
   log: {
     title: "活动日志",
@@ -211,6 +219,7 @@ export const zhCN = {
     jobSucceeded: "{action}已完成：{target}",
     jobFailed: "{action}失败：{target}（{error}）",
     jobCancelled: "{action}已取消：{target}",
+    commitSucceeded: "已提交 {target}（后台压缩中）",
     actionFailed: "{action}失败：{error}",
     noSelection: "{action}需要先选择文档与版本",
     noDocument: "无文档",

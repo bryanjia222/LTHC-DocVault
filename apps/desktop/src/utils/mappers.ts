@@ -49,6 +49,8 @@ export interface RawVersion {
   author: string | null;
   note: string | null;
   created_at: number;
+  /** `"archived"` once the compress job finished, `"pending"` while it runs. */
+  archive_status?: string;
 }
 
 export interface RawDocumentWithVersions {
@@ -76,7 +78,7 @@ export interface VaultStatus {
 /** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
 export interface RawJob {
   id: string;
-  kind: "commit" | "export" | "checkout" | "delete";
+  kind: "commit" | "export" | "checkout" | "delete" | "archive";
   status: "running" | "succeeded" | "failed" | "cancelled";
   progress: number | null;
   error: string | null;
@@ -119,9 +121,13 @@ export interface RawFileProbe {
 // --- formatting helpers (UI concerns; kept out of Rust) ---
 
 export function formatBytes(entries: RawManifestEntry[]): string {
-  const bytes = entries.reduce((sum, entry) => sum + entry.size, 0);
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
+  return formatByteSize(entries.reduce((sum, entry) => sum + entry.size, 0));
+}
+
+/** Format a raw byte count as a human-readable size (e.g. `6.3 MB`). */
+export function formatByteSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
     units.length - 1,

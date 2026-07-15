@@ -37,14 +37,27 @@ pub fn commit_document(
 ) -> Result<String, String> {
     let (document_ref, target_label) = resolve_commit_ref(&state, document_id, new_name)?;
     let metadata = CommitMetadata { author, note };
+    let source_path = PathBuf::from(&path);
+    // Phase A (synchronous, fast): durable intake copy + `pending` DB row +
+    // current-pointer flip + library materialize (served from the intake). No
+    // compression happens here, so this resolves quickly and the UI can show
+    // "commit succeeded" the moment it returns. Crash-safe: the intake is
+    // fsynced before the DB row, so a crash here loses no data; a `pending`
+    // version left by a crash is recovered on the next open.
+    let (_document, version) = phase_a_commit(&state.vault, &source_path, document_ref, metadata)?;
+    // Phase B (async Archive job): compress the pending version from its intake
+    // and finalize the DB row. Tracked separately so the UI shows the long
+    // compress step on its own; the job id is returned for the frontend to
+    // surface progress + refresh the repo size when it finishes.
     let vault = state.vault.clone();
+    let version_for_job = version.clone();
     let on_event = make_emitter(app);
     let job_id = state.jobs.spawn(
-        JobKind::Commit,
+        JobKind::Archive,
         target_label,
         on_event,
         move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
-            execute_commit(&vault, &path, document_ref, metadata, cancel)
+            execute_archive(&vault, &version_for_job, cancel)
         },
     );
     Ok(job_id)
@@ -153,11 +166,57 @@ pub fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<bool, St
 
 // --- executors: the real work, extracted so tests exercise the same code ---
 
-fn execute_commit(
+/// Phase A of the async commit, run synchronously in the command (not a job):
+/// durable intake copy + `pending` DB row + current-pointer flip, then
+/// materialize the library copy from the just-committed (pending) version -
+/// `export_version` serves a pending version from its intake, so the working
+/// copy is ready before the archive finishes. No compression happens here, so
+/// this is fast. Extracted so tests exercise the same code as the command.
+fn phase_a_commit(
     vault: &Arc<std::sync::Mutex<Option<docvault_core::DocVault>>>,
     path: impl AsRef<Path>,
     document_ref: DocumentRef,
     metadata: CommitMetadata,
+) -> Result<(docvault_types::Document, docvault_types::Version), String> {
+    let vault = match vault.lock() {
+        Ok(guard) => guard,
+        Err(e) => return Err(e.to_string()),
+    };
+    let Some(vault) = vault.as_ref() else {
+        return Err("vault not initialized".to_owned());
+    };
+    let source_path = path.as_ref();
+    let (document, version) = match vault.begin_commit(source_path, document_ref, metadata) {
+        Ok(result) => result,
+        Err(e) => return Err(e.to_string()),
+    };
+    // Library model: when the committed source was an external file (add /
+    // manual commit), materialize a library copy from the now-current version so
+    // the tool owns a working copy. When the source IS the library copy
+    // (commit-modified), skip - it already equals the just-committed version.
+    let doc_id = document.id.as_str();
+    match crate::library::library_path_for_doc(vault, doc_id) {
+        Ok(lib_path) if source_path != lib_path => {
+            if let Err(e) = vault.export_version(
+                &DocumentRef::IdPrefix(doc_id.to_owned()),
+                "current",
+                &lib_path,
+                &docvault_storage::NEVER_CANCELLED,
+            ) {
+                return Err(format!("committed but failed to materialize library copy: {e}"));
+            }
+        }
+        _ => {} // source is the library copy, or path unknown - nothing to materialize
+    }
+    Ok((document, version))
+}
+
+/// Phase B executor: archive a `pending` version from its durable intake copy,
+/// finalize the DB row, and reclaim the intake. Idempotent, so re-running after
+/// a crash (or the recovery on open) never duplicates work.
+fn execute_archive(
+    vault: &Arc<std::sync::Mutex<Option<docvault_core::DocVault>>>,
+    version: &docvault_types::Version,
     cancel: &AtomicBool,
 ) -> JobOutcome {
     let vault = match vault.lock() {
@@ -167,36 +226,13 @@ fn execute_commit(
     let Some(vault) = vault.as_ref() else {
         return JobOutcome::Failed("vault not initialized".to_owned());
     };
-    let source_path = path.as_ref();
-    let (document, _version) = match vault.commit_document(source_path, document_ref, metadata, cancel) {
-        Ok(result) => result,
+    match vault.archive_pending_version(version, cancel) {
+        Ok(()) => JobOutcome::Succeeded,
         Err(CoreError::Storage(StorageError::Restic(ResticError::Cancelled))) => {
-            return JobOutcome::Cancelled;
+            JobOutcome::Cancelled
         }
-        Err(e) => return JobOutcome::Failed(e.to_string()),
-    };
-    // Library model: when the committed source was an external file (add /
-    // manual commit), materialize a library copy from the now-current version so
-    // the tool owns a working copy. When the source IS the library copy
-    // (commit-modified), skip - it already equals the just-committed version, so
-    // re-exporting would be a wasteful no-op (especially costly on restic).
-    let doc_id = document.id.as_str();
-    match crate::library::library_path_for_doc(vault, doc_id) {
-        Ok(lib_path) if source_path != lib_path => {
-            if let Err(e) = vault.export_version(
-                &DocumentRef::IdPrefix(doc_id.to_owned()),
-                "current",
-                &lib_path,
-                cancel,
-            ) {
-                return JobOutcome::Failed(format!(
-                    "committed but failed to materialize library copy: {e}"
-                ));
-            }
-        }
-        _ => {} // source is the library copy, or path unknown - nothing to materialize
+        Err(e) => JobOutcome::Failed(e.to_string()),
     }
-    JobOutcome::Succeeded
 }
 
 fn execute_export(
@@ -317,9 +353,11 @@ mod tests {
     use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
     use docvault_types::CommitMetadata;
 
-    /// End-to-end proof of the truthfulness contract: a real commit job against
-    /// a real local-copy vault reaches `Succeeded`, the error stays `None`, and
-    /// the new document/version is visible in the vault afterward.
+    /// End-to-end proof of the async-commit contract: Phase A (synchronous)
+    /// writes the `pending` version + materializes the library copy, then the
+    /// Phase B Archive job reaches `Succeeded` and finalizes the version (no
+    /// longer `pending`). The document/version are visible throughout because
+    /// Phase A flips the current pointer before any archiving.
     #[test]
     fn commit_job_succeeds_and_version_appears() {
         let temp = tempfile::tempdir().unwrap();
@@ -333,12 +371,30 @@ mod tests {
         let path = docx.to_string_lossy().to_string();
 
         let registry = JobRegistry::new();
-        let (job_id, terminal) = spawn_commit(
+        let (job_id, terminal, doc_id) = commit_and_spawn_archive(
             &registry,
             Arc::clone(&vault),
             path,
             DocumentRef::NewName("report".to_owned()),
         );
+
+        // Phase A already ran (synchronously) before the job was spawned: the
+        // document + version are visible and the library copy is materialized.
+        {
+            let vault = vault.lock().unwrap();
+            let vault = vault.as_ref().unwrap();
+            let documents = vault.list_documents().unwrap();
+            assert_eq!(documents.len(), 1);
+            assert_eq!(documents[0].name, "report");
+            let versions = vault
+                .list_versions(&DocumentRef::IdPrefix(documents[0].id.as_str().to_owned()))
+                .unwrap();
+            assert_eq!(versions.len(), 1);
+            assert_eq!(versions[0].archive_status, "pending", "version is pending until Phase B");
+            let lib_path = crate::library::library_path_for_doc(vault, documents[0].id.as_str())
+                .expect("library path resolves");
+            assert!(lib_path.exists(), "library copy materialized by Phase A");
+        }
 
         wait_for_terminal(&terminal);
         let record = registry.get(&job_id).expect("job recorded");
@@ -350,25 +406,22 @@ mod tests {
         );
         assert!(record.finished_at.is_some());
 
+        // Phase B finalized the version: no longer pending.
         let vault = vault.lock().unwrap();
         let vault = vault.as_ref().unwrap();
-        let documents = vault.list_documents().unwrap();
-        assert_eq!(documents.len(), 1);
-        assert_eq!(documents[0].name, "report");
         let versions = vault
-            .list_versions(&DocumentRef::IdPrefix(documents[0].id.as_str().to_owned()))
+            .list_versions(&DocumentRef::IdPrefix(doc_id))
             .unwrap();
         assert_eq!(versions.len(), 1);
-        // Library model: committing an external file materializes a library copy
-        // at <root>/library/<id>.<ext>.
-        let lib_path = crate::library::library_path_for_doc(vault, documents[0].id.as_str())
-            .expect("library path resolves");
-        assert!(lib_path.exists(), "library copy materialized after commit");
+        assert_eq!(
+            versions[0].archive_status, "archived",
+            "Phase B flipped the version to archived"
+        );
     }
 
     /// Commit-modified: when the committed source IS the library copy itself,
-    /// the executor skips materialize (source == library path) and just archives
-    /// it as a new version. Verifies the library-model fast path for the normal
+    /// Phase A skips materialize (source == library path) and just writes the
+    /// pending version. Verifies the library-model fast path for the normal
     /// edit-save-commit loop.
     #[test]
     fn commit_modified_commits_library_copy_without_rematerialize() {
@@ -381,34 +434,31 @@ mod tests {
 
         let docx = write_source(temp.path(), "report.docx", b"version one");
         let registry = JobRegistry::new();
-        let (job_id, terminal) = spawn_commit(
+        let (_job_id, terminal, doc_id) = commit_and_spawn_archive(
             &registry,
             Arc::clone(&vault),
             docx.to_string_lossy().to_string(),
             DocumentRef::NewName("report".to_owned()),
         );
         wait_for_terminal(&terminal);
-        assert_eq!(registry.get(&job_id).unwrap().status, JobStatus::Succeeded);
 
-        let (doc_id, lib_path) = {
+        let lib_path = {
             let vault = vault.lock().unwrap();
             let vault = vault.as_ref().unwrap();
-            let id = vault.list_documents().unwrap()[0].id.as_str().to_owned();
-            let path = crate::library::library_path_for_doc(vault, &id).unwrap();
-            (id, path)
+            crate::library::library_path_for_doc(vault, &doc_id).unwrap()
         };
         assert!(lib_path.exists(), "library copy exists after add");
 
-        // commit-modified: the source IS the library copy -> executor skips
-        // materialize and archives it directly as a new version.
-        let (job_id2, terminal2) = spawn_commit(
+        // commit-modified: the source IS the library copy -> Phase A skips
+        // materialize and writes a second pending version.
+        let (_job_id2, terminal2, _) = commit_and_spawn_archive(
             &registry,
             Arc::clone(&vault),
             lib_path.to_string_lossy().to_string(),
             DocumentRef::IdPrefix(doc_id.clone()),
         );
         wait_for_terminal(&terminal2);
-        let record2 = registry.get(&job_id2).expect("second job recorded");
+        let record2 = registry.get(&_job_id2).expect("second job recorded");
         assert_eq!(record2.status, JobStatus::Succeeded, "commit-modified should succeed");
         assert!(record2.error.is_none(), "unexpected error: {:?}", record2.error);
 
@@ -416,10 +466,14 @@ mod tests {
         let vault = vault.as_ref().unwrap();
         let versions = vault.list_versions(&DocumentRef::IdPrefix(doc_id)).unwrap();
         assert_eq!(versions.len(), 2, "commit-modified added a second version");
+        assert!(
+            versions.iter().all(|v| v.archive_status == "archived"),
+            "both versions archived after their Phase B jobs"
+        );
     }
 
-    /// The failure path surfaces the backend's error verbatim and marks the job
-    /// `Failed` (here: an unsupported non-Office file is rejected by the core).
+    /// The failure path surfaces the backend's error verbatim: an unsupported
+    /// non-Office file is rejected by Phase A (no job is ever spawned).
     #[test]
     fn commit_job_fails_on_unsupported_file() {
         let temp = tempfile::tempdir().unwrap();
@@ -434,29 +488,33 @@ mod tests {
         let path = txt.to_string_lossy().to_string();
 
         let registry = JobRegistry::new();
-        let (job_id, terminal) = spawn_commit(
-            &registry,
-            Arc::clone(&vault),
-            path,
+        let result = phase_a_commit(
+            &vault,
+            &PathBuf::from(&path),
             DocumentRef::NewName("notes".to_owned()),
+            CommitMetadata::default(),
         );
-
-        wait_for_terminal(&terminal);
-        let record = registry.get(&job_id).expect("job recorded");
-        assert_eq!(record.status, JobStatus::Failed);
-        assert!(record
-            .error
-            .as_deref()
-            .is_some_and(|e| e.contains("unsupported")));
-        assert!(record.finished_at.is_some());
+        let err = result.expect_err("unsupported file should fail Phase A");
+        assert!(
+            err.contains("unsupported"),
+            "unexpected error: {err}"
+        );
+        // No job was spawned: the registry is empty.
+        assert!(registry.list().is_empty(), "no job spawned on Phase A failure");
     }
 
-    fn spawn_commit(
+    /// Run Phase A synchronously, then spawn the Phase B Archive job. Returns
+    /// the archive job id, a terminal counter, and the committed document id.
+    fn commit_and_spawn_archive(
         registry: &JobRegistry,
         vault: Arc<Mutex<Option<DocVault>>>,
         path: String,
         document_ref: DocumentRef,
-    ) -> (String, Arc<AtomicUsize>) {
+    ) -> (String, Arc<AtomicUsize>, String) {
+        let (document, version) =
+            phase_a_commit(&vault, &PathBuf::from(&path), document_ref, CommitMetadata::default())
+                .expect("Phase A commit succeeds");
+        let doc_id = document.id.as_str().to_owned();
         let terminal = Arc::new(AtomicUsize::new(0));
         let on_event = {
             let terminal = Arc::clone(&terminal);
@@ -466,21 +524,16 @@ mod tests {
                 }
             }) as JobEventCallback
         };
+        let version_for_job = version.clone();
         let job_id = registry.spawn(
-            JobKind::Commit,
+            JobKind::Archive,
             "report",
             on_event,
             move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
-                execute_commit(
-                    &vault,
-                    &path,
-                    document_ref,
-                    CommitMetadata::default(),
-                    cancel,
-                )
+                execute_archive(&vault, &version_for_job, cancel)
             },
         );
-        (job_id, terminal)
+        (job_id, terminal, doc_id)
     }
 
     /// A job whose work observes the cancel flag and reports `Cancelled` must

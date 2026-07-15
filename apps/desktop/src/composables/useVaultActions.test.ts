@@ -207,12 +207,15 @@ describe("useVaultActions - commit", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("registers a pending track so the baseline refreshes after the commit job resolves", async () => {
+  it("baselines the library copy immediately and registers no pending track", async () => {
     asTauri();
     vi.mocked(open).mockResolvedValueOnce("/in/changes.docx");
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "library_path") return "/vault/library/docA.docx";
-      return "job-pending";
+      if (cmd === "probe_file")
+        return { exists: true, size: 10, mtime_ms: 100, sha256: "h" };
+      if (cmd === "list_documents_with_versions") return [];
+      return undefined;
     });
     actions.runAction("actionLogs.commit");
     await vi.waitFor(() => {
@@ -221,13 +224,17 @@ describe("useVaultActions - commit", () => {
         document_id: docA.id,
       });
     });
-    // The pending track points at the library copy (materialized by the
-    // executor), not the user's picked source file.
-    expect(desktop.takePendingTrack("job-pending")).toEqual({
-      kind: "known",
-      docId: docA.id,
-      path: "/vault/library/docA.docx",
+    // Phase A is synchronous: the library copy is probed + baselined right
+    // away (no pending track waiting for a job to resolve later).
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "probe_file",
+        expect.objectContaining({ path: "/vault/library/docA.docx" }),
+      );
     });
+    expect(desktop.takePendingTrack("job-pending")).toBeUndefined();
+    const tracked = desktop.tracked.value.find((t) => t.documentId === docA.id);
+    expect(tracked?.path).toBe("/vault/library/docA.docx");
   });
 });
 
@@ -248,21 +255,36 @@ describe("useVaultActions - commit modified document", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("registers a pending track for the commit-modified job", async () => {
+  it("baselines the library copy immediately and registers no pending track", async () => {
     asTauri();
     desktop.tracked.value = [
       { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
     ];
-    vi.mocked(invoke).mockResolvedValue("job-mod2");
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "library_path") return "/tracked.docx";
+      if (cmd === "probe_file")
+        return { exists: true, size: 10, mtime_ms: 100, sha256: "h" };
+      if (cmd === "list_documents_with_versions") return [];
+      return undefined;
+    });
     await actions.commitModifiedDocument(docA.id);
     await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("commit_document", expect.anything());
+      expect(invoke).toHaveBeenCalledWith(
+        "commit_document",
+        expect.objectContaining({ document_id: docA.id }),
+      );
     });
-    expect(desktop.takePendingTrack("job-mod2")).toEqual({
-      kind: "known",
-      docId: docA.id,
-      path: "/tracked.docx",
+    // Phase A is synchronous: the library copy (the tracked source here) is
+    // re-baselined to "unchanged" right away, no pending track.
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "probe_file",
+        expect.objectContaining({ path: "/tracked.docx" }),
+      );
     });
+    expect(desktop.takePendingTrack("job-mod2")).toBeUndefined();
+    const tracked = desktop.tracked.value.find((t) => t.documentId === docA.id);
+    expect(tracked?.path).toBe("/tracked.docx");
   });
 
   it("does not invoke when no source file is tracked for the document", async () => {

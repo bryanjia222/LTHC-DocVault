@@ -52,6 +52,11 @@ pub enum JobKind {
     Export,
     Checkout,
     Delete,
+    /// Phase B of the async commit: compress (unzip + restic/local-copy) a
+    /// `pending` version from its durable intake copy and finalize the DB row.
+    /// Tracked separately from [`JobKind::Commit`] (which is now the synchronous
+    /// Phase A) so the UI can show the long-running compress step on its own.
+    Archive,
 }
 
 /// Authoritative record for a single job. Serialized verbatim to the UI, which

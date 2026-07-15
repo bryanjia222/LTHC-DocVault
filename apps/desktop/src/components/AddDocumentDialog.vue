@@ -19,7 +19,7 @@ import { deriveNameFromPath, pickOfficeFile } from "../utils/file";
 const { t } = useI18n();
 const { log } = useActivityLog();
 const { addDocumentOpen, closeAddDocument } = useDialogs();
-const { commit, isTauri, documents } = useVault();
+const { commit, isTauri, documents, loadDocuments, libraryPath } = useVault();
 const desktop = useDesktopState();
 
 const path = ref("");
@@ -63,24 +63,31 @@ async function submit() {
   submitting.value = true;
   error.value = "";
   try {
-    // Snapshot the doc ids before the commit so the pending-track resolver can
-    // identify the freshly imported document once the commit job succeeds.
+    // Snapshot the doc ids before the commit so we can identify the freshly
+    // imported document once Phase A resolves.
     const snapshotIds = documents.value.map((d) => d.id);
     const resolvedName = name.value.trim() || deriveNameFromPath(path.value);
-    const id = await commit({
+    // Phase A runs synchronously inside commit(): the new document + its library
+    // copy (materialized from the intake) exist once this resolves, so reload
+    // and baseline the working copy immediately. The returned id is the Phase B
+    // archive job (compress), which surfaces in the task bubble.
+    await commit({
       path: path.value,
       new_name: resolvedName,
       author: author.value.trim() || undefined,
     });
-    // Begin tracking the imported document; App.vue baselines the tool-owned
-    // library copy (derived from the new doc id) on success - no path needed.
-    desktop.registerPendingTrack(id, {
-      kind: "new",
-      name: resolvedName,
-      snapshotIds,
-    });
+    await loadDocuments();
+    const created =
+      documents.value.find(
+        (d) => !snapshotIds.includes(d.id) && d.name === resolvedName,
+      ) ?? documents.value.find((d) => !snapshotIds.includes(d.id));
+    if (created) {
+      const libPath = await libraryPath({ document_id: created.id });
+      const baseline = await desktop.probeAndBaseline(created.id, libPath);
+      desktop.setTracked(baseline);
+    }
     submitted.value = true;
-    log(t("log.jobStarted", { action: t("actionLogs.addDocument"), id }));
+    log(t("log.commitSucceeded", { target: resolvedName }));
     closeAddDocument();
   } catch (e) {
     error.value = String(e);

@@ -13,7 +13,7 @@ use std::{
 };
 
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -23,8 +23,18 @@ pub use error::{DatabaseError, ResticError, StorageError, StorageResult};
 pub use paths::VaultPaths;
 
 /// A cancellation flag that is never set. Used for restic calls that run
-/// outside a job (vault init/open), where there is no job to cancel.
+/// outside a job (vault init/open, startup recovery), where there is no job to
+/// cancel.
 pub static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// A version whose durable intake copy exists but whose compressed archive has
+/// not been finalized yet (the async commit path is still running or was
+/// interrupted by a crash). See [`Version::archive_status`].
+pub const ARCHIVE_STATUS_PENDING: &str = "pending";
+
+/// A version whose archive is complete and is the source of truth for
+/// exports/restores. The default for every pre-async-commit version.
+pub const ARCHIVE_STATUS_ARCHIVED: &str = "archived";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentRef {
@@ -115,6 +125,17 @@ impl VaultStorage {
         if storage.settings.backend == BackupBackend::Restic {
             storage.restic_version = storage.capture_restic_version();
         }
+        // Reclaim staging left behind by a crash/interruption in a previous
+        // session. No operation is in flight at open, so anything here is stale.
+        storage.gc_staging();
+        // Finish any commit whose archive (Phase B) a crash interrupted. The
+        // intake copy is durable, so the data is safe; this just completes the
+        // compress step idempotently. Best-effort: a failure here is logged but
+        // does not block opening the vault - the version stays `pending` and is
+        // retried on the next open.
+        if let Err(error) = storage.recover_pending(&NEVER_CANCELLED) {
+            warn!(error = %error, "startup recovery of pending versions failed; leaving them pending");
+        }
         Ok(storage)
     }
 
@@ -124,6 +145,17 @@ impl VaultStorage {
 
     pub fn backend(&self) -> BackupBackend {
         self.settings.backend
+    }
+
+    /// On-disk size of the backup repository, in bytes.
+    /// - restic: `restic stats --mode raw-data` (post-dedup + compression).
+    /// - local-copy: total size of the archived version files under
+    ///   `versions_dir` (the local-copy "repo" is just those copies).
+    pub fn repo_size(&self) -> StorageResult<u64> {
+        match self.settings.backend {
+            BackupBackend::Restic => self.restic_raw_data_size(&NEVER_CANCELLED),
+            BackupBackend::LocalCopy => Ok(dir_size(&self.paths.versions_dir)),
+        }
     }
 
     pub fn restic_path(&self) -> &Path {
@@ -197,6 +229,146 @@ impl VaultStorage {
             metadata,
             cancel,
         )
+    }
+
+    /// Phase A of the async commit: resolve the document (creating it if new),
+    /// write a durable intake copy of the source (fsynced), then atomically
+    /// insert the version row as `pending` and repoint the document's
+    /// current-version pointer at it - all before any archiving. Returns the
+    /// new document + version so the caller can materialize the library copy
+    /// and spawn the Phase B archive job ([`Self::archive_pending_version`]).
+    ///
+    /// Crash safety: the intake copy is fsynced BEFORE the DB transaction
+    /// commits, so a `pending` row always has its intake on disk (no commit
+    /// data is lost to a crash). The version insert + current-pointer update
+    /// run in one transaction, so the version either exists fully (visible and
+    /// current) or not at all. The archive runs later and is idempotent, so a
+    /// crash at any point is recovered on the next open by
+    /// [`Self::recover_pending`].
+    pub fn begin_commit(
+        &self,
+        document_ref: DocumentRef,
+        source_path: &Path,
+        metadata: CommitMetadata,
+    ) -> StorageResult<(Document, Version)> {
+        let now = unix_timestamp();
+        info!(source = %source_path.display(), "beginning async document commit (phase A)");
+        let document = match document_ref {
+            DocumentRef::NewName(name) => {
+                let document = Document {
+                    id: DocumentId::new(Uuid::new_v4().to_string()),
+                    name,
+                    current_version_id: None,
+                    created_at: now,
+                };
+                self.insert_document(&document)?;
+                document
+            }
+            DocumentRef::Name(name) => match self.find_documents_by_name(&name)?.as_slice() {
+                [] => {
+                    if name.contains('@') {
+                        return Err(StorageError::DocumentNotFound(name));
+                    }
+                    let document = Document {
+                        id: DocumentId::new(Uuid::new_v4().to_string()),
+                        name,
+                        current_version_id: None,
+                        created_at: now,
+                    };
+                    self.insert_document(&document)?;
+                    document
+                }
+                [document] => document.clone(),
+                matches => {
+                    return Err(StorageError::AmbiguousDocumentName {
+                        name,
+                        matches: matches.to_vec(),
+                    });
+                }
+            },
+            other => self.resolve_document_ref(&other)?,
+        };
+
+        let number = self.next_version_number(document.id.as_str())?;
+        let version_id = format!("v{number}");
+        let manifest = docvault_ooxml::package_manifest(source_path)?;
+        let original_filename = source_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| StorageError::InvalidFileName(source_path.to_path_buf()))?
+            .to_owned();
+
+        // 1. Durable intake copy (fsynced) BEFORE the DB commit (WAL invariant:
+        // a `pending` row => its intake bytes are on disk).
+        let intake = self.intake_path(document.id.as_str(), &version_id, &original_filename);
+        self.write_intake(source_path, &intake)?;
+
+        // 2. Atomic transaction: insert the version row as `pending` (with a
+        //    placeholder archive_reference filled in by Phase B) and repoint the
+        //    current-version pointer. Either both land or neither does.
+        let version = Version {
+            id: version_id,
+            document_id: document.id.clone(),
+            number,
+            original_filename,
+            archive_reference: String::new(),
+            backup_backend: self.settings.backend.as_str().to_owned(),
+            snapshot_id: None,
+            manifest,
+            parent_version_id: document.current_version_id.clone(),
+            author: metadata.author,
+            note: metadata.note,
+            created_at: now,
+            archive_status: ARCHIVE_STATUS_PENDING.to_owned(),
+        };
+        let transaction = self.connection.unchecked_transaction()?;
+        sqlite::insert_version_into(&transaction, &version)?;
+        transaction.execute(
+            "UPDATE documents SET current_version_id = ?1 WHERE id = ?2",
+            params![&version.id, document.id.as_str()],
+        )?;
+        transaction.commit()?;
+
+        let mut updated_document = document;
+        updated_document.current_version_id = Some(version.id.clone());
+        info!(
+            document_id = updated_document.id.as_str(),
+            version_id = version.id.as_str(),
+            "document version committed (pending archive)"
+        );
+        Ok((updated_document, version))
+    }
+
+    /// Startup recovery: finish the Phase B archive for every `pending`
+    /// version (each is idempotent, so a crash mid-archive is completed, not
+    /// duplicated), then reclaim orphan intake copies. A pending version whose
+    /// intake copy is missing (violating the WAL invariant) is left pending and
+    /// logged - it cannot be archived without its source, but the rest of the
+    /// vault stays usable. Returns the count of versions recovered (archived
+    /// this run) so the caller can surface it.
+    pub fn recover_pending(&self, cancel: &AtomicBool) -> StorageResult<usize> {
+        let pending = self.pending_versions()?;
+        if pending.is_empty() {
+            // Still sweep orphans (e.g. intake left by a crash after the DB
+            // row was archived but before the intake file was deleted).
+            self.gc_intake();
+            return Ok(0);
+        }
+        let mut recovered = 0;
+        for version in &pending {
+            match self.archive_pending_version(version, cancel) {
+                Ok(()) => recovered += 1,
+                Err(StorageError::IntakeMissing { document_id, version_id }) => {
+                    warn!(document_id, version_id, "pending version has no intake copy; left pending for manual review");
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        self.gc_intake();
+        if recovered > 0 {
+            info!(recovered, "recovered pending versions on open");
+        }
+        Ok(recovered)
     }
 
     pub fn export_version(
@@ -320,7 +492,7 @@ impl VaultStorage {
             "archiving source for document version"
         );
         let manifest = docvault_ooxml::package_manifest(source_path)?;
-        let archive = self.archive_source(&document, &version_id, source_path, cancel)?;
+        let archive = self.archive_source(document.id.as_str(), &version_id, source_path, cancel)?;
         let original_filename = source_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -339,6 +511,7 @@ impl VaultStorage {
             author: metadata.author,
             note: metadata.note,
             created_at: now,
+            archive_status: ARCHIVE_STATUS_ARCHIVED.to_owned(),
         };
         self.insert_version(&version)?;
         self.set_current_version(document.id.as_str(), &version.id)?;
@@ -404,6 +577,28 @@ pub(crate) fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Recursively sum the sizes of all files under `path`. A missing directory
+/// (or one that can't be read) contributes 0 rather than failing, so a repo
+/// size read never errors on a transiently-unreadable subtree.
+fn dir_size(path: &Path) -> u64 {
+    fn walk(path: &Path) -> u64 {
+        let mut total = 0u64;
+        let Ok(entries) = fs::read_dir(path) else {
+            return 0;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                total += walk(&path);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+        total
+    }
+    walk(path)
 }
 
 pub(crate) fn format_document_matches(matches: &[Document]) -> String {
@@ -733,6 +928,22 @@ mod tests {
     }
 
     #[test]
+    fn repo_size_reflects_local_copy_archives() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths).unwrap();
+        let before = storage.repo_size().unwrap();
+        commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+        let after = storage.repo_size().unwrap();
+        assert!(
+            after > before,
+            "repo size should grow after a local-copy commit"
+        );
+    }
+
+    #[test]
     fn rename_updates_name_without_touching_versions() {
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
@@ -766,5 +977,210 @@ mod tests {
 
     fn config_path(path: &Path) -> String {
         path.display().to_string().replace('\\', "/")
+    }
+
+    /// A vault from before async commit has no `archive_status` column. Opening
+    /// it must migrate (re-add the column, defaulting legacy rows to `archived`)
+    /// without losing data, and recovery must find nothing pending.
+    #[test]
+    fn open_migrates_legacy_versions_table_without_archive_status() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"legacy");
+        let document_id = {
+            let storage = VaultStorage::init(paths.clone()).unwrap();
+            let (document, _version) =
+                commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+            // Simulate a legacy vault: drop the column so the versions table
+            // looks pre-async-commit. Existing rows lose it; migrate must
+            // restore them as `archived`.
+            storage
+                .connection
+                .execute("ALTER TABLE versions DROP COLUMN archive_status", [])
+                .unwrap();
+            document.id.as_str().to_owned()
+        };
+
+        let storage = VaultStorage::open(paths.clone()).unwrap();
+        assert!(storage.pending_versions().unwrap().is_empty());
+        let versions = storage
+            .list_versions(&DocumentRef::IdPrefix(document_id))
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(
+            versions[0].archive_status, ARCHIVE_STATUS_ARCHIVED,
+            "legacy version row migrated to archived"
+        );
+        // The migrated version is still exportable from its archive.
+        let restored = storage
+            .export_version(
+                &DocumentRef::IdPrefix(versions[0].document_id.as_str().to_owned()),
+                "current",
+                &paths.root_dir.join("restored"),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(read_document_xml(&restored), b"legacy");
+    }
+
+    /// Phase A writes a `pending` version + a durable intake copy, and exports
+    /// serve from the intake (so a just-committed version is openable before the
+    /// archive finishes). Phase B then finalizes the version to `archived` and
+    /// reclaims the intake; exports now serve from the real archive.
+    #[test]
+    fn begin_commit_serves_from_intake_then_archive_finalizes() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        let (document, version) = storage
+            .begin_commit(
+                DocumentRef::NewName("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+        assert_eq!(version.archive_status, ARCHIVE_STATUS_PENDING);
+        assert!(version.archive_reference.is_empty());
+        let intake = storage.intake_path(
+            document.id.as_str(),
+            &version.id,
+            &version.original_filename,
+        );
+        assert!(intake.exists(), "intake copy written by Phase A");
+
+        // Export serves from the intake while the version is pending.
+        let restored = storage
+            .export_version(
+                &DocumentRef::IdPrefix(document.id.as_str().to_owned()),
+                "current",
+                &paths.root_dir.join("restored-pending"),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(read_document_xml(&restored), b"version one");
+
+        // Phase B: archive from the intake, finalize the row, reclaim the intake.
+        storage
+            .archive_pending_version(&version, &NEVER_CANCELLED)
+            .unwrap();
+        let archived = storage
+            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+            .unwrap();
+        assert_eq!(archived[0].archive_status, ARCHIVE_STATUS_ARCHIVED);
+        assert!(!archived[0].archive_reference.is_empty());
+        assert!(!intake.exists(), "intake reclaimed after archive");
+
+        // Export now serves from the local-copy archive.
+        let restored2 = storage
+            .export_version(
+                &DocumentRef::IdPrefix(document.id.as_str().to_owned()),
+                "current",
+                &paths.root_dir.join("restored-archived"),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(read_document_xml(&restored2), b"version one");
+    }
+
+    /// Crash-recovery contract: a `pending` version left by a crash (Phase A
+    /// done, Phase B never ran) is archived on the next `open`, its intake
+    /// reclaimed, and the version becomes normally exportable. No data is lost
+    /// and no duplicate work is performed.
+    #[test]
+    fn recover_pending_archives_versions_left_by_crash() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let document_id = {
+            let storage = VaultStorage::init(paths.clone()).unwrap();
+            let (document, version) = storage
+                .begin_commit(
+                    DocumentRef::NewName("report".to_owned()),
+                    &source,
+                    CommitMetadata::default(),
+                )
+                .unwrap();
+            assert_eq!(version.archive_status, ARCHIVE_STATUS_PENDING);
+            // Simulate a crash right after Phase A: drop the storage without
+            // ever running Phase B. The intake copy + pending row are on disk.
+            document.id.as_str().to_owned()
+        };
+
+        // Reopen: recovery runs Phase B for the pending version.
+        let storage = VaultStorage::open(paths.clone()).unwrap();
+        let pending = storage.pending_versions().unwrap();
+        assert!(pending.is_empty(), "recovery archived the pending version");
+
+        let versions = storage
+            .list_versions(&DocumentRef::IdPrefix(document_id.clone()))
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].archive_status, ARCHIVE_STATUS_ARCHIVED);
+
+        // gc_intake reclaimed the intake directory.
+        let doc_id = &document_id;
+        let intake_doc_dir = paths.intake_dir.join(doc_id);
+        assert!(
+            !intake_doc_dir.exists(),
+            "intake directory reclaimed by recovery"
+        );
+
+        // The recovered version is exportable from its archive.
+        let restored = storage
+            .export_version(
+                &DocumentRef::IdPrefix(document_id),
+                "current",
+                &paths.root_dir.join("restored"),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(read_document_xml(&restored), b"version one");
+    }
+
+    /// `gc_intake` reclaims orphan intake copies whose version is no longer
+    /// pending (archived), while preserving intake for a still-pending version
+    /// (an archive in flight, or awaiting recovery).
+    #[test]
+    fn gc_intake_reclaims_orphans_but_preserves_pending() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source_a = write_source(&paths.root_dir, "a.docx", b"a");
+        let source_b = write_source(&paths.root_dir, "b.docx", b"b");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        let (doc_a, ver_a) = storage
+            .begin_commit(
+                DocumentRef::NewName("a".to_owned()),
+                &source_a,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+        let (doc_b, ver_b) = storage
+            .begin_commit(
+                DocumentRef::NewName("b".to_owned()),
+                &source_b,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+        // Archive only A; B stays pending.
+        storage
+            .archive_pending_version(&ver_a, &NEVER_CANCELLED)
+            .unwrap();
+
+        let intake_a = storage.intake_path(doc_a.id.as_str(), &ver_a.id, &ver_a.original_filename);
+        let intake_b = storage.intake_path(doc_b.id.as_str(), &ver_b.id, &ver_b.original_filename);
+        assert!(!intake_a.exists(), "A's intake removed by archive_pending_version");
+        assert!(intake_b.exists(), "B's intake still present while pending");
+
+        // gc_intake is a no-op for B (still pending) and would only sweep
+        // orphans; B's intake must survive.
+        storage.gc_intake();
+        assert!(intake_b.exists(), "gc_intake preserves pending version intake");
     }
 }

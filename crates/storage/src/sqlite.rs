@@ -1,5 +1,5 @@
 use docvault_types::{Document, DocumentId, Version};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{DocumentRef, StorageError, StorageResult, VaultStorage};
 
@@ -27,11 +27,35 @@ impl VaultStorage {
                 author TEXT,
                 note TEXT,
                 created_at INTEGER NOT NULL,
+                archive_status TEXT NOT NULL DEFAULT 'archived',
                 PRIMARY KEY (document_id, id),
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             );
             ",
         )?;
+        // Existing vaults created before the async commit path have a versions
+        // table without `archive_status`; backfill it (idempotent). New vaults
+        // get the column from the CREATE TABLE above, so this is a no-op for
+        // them. Every pre-existing version was archived synchronously, so the
+        // default 'archived' is correct for backfilled rows.
+        self.ensure_archive_status_column()?;
+        Ok(())
+    }
+
+    /// Add `archive_status` to a pre-async versions table if it is missing.
+    /// Guarded by `PRAGMA table_info` so it never re-runs on an already-
+    /// migrated vault (and never errors on a fresh one).
+    fn ensure_archive_status_column(&self) -> StorageResult<()> {
+        let mut statement = self.connection.prepare("PRAGMA table_info(versions)")?;
+        let has_column = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|column| column.is_ok_and(|name| name == "archive_status"));
+        if !has_column {
+            self.connection.execute(
+                "ALTER TABLE versions ADD COLUMN archive_status TEXT NOT NULL DEFAULT 'archived'",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -49,27 +73,7 @@ impl VaultStorage {
     }
 
     pub(crate) fn insert_version(&self, version: &Version) -> StorageResult<()> {
-        self.connection.execute(
-            "INSERT INTO versions (
-                id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                version.id,
-                version.document_id.as_str(),
-                version.number,
-                version.original_filename,
-                version.archive_reference,
-                version.backup_backend,
-                version.snapshot_id,
-                serde_json::to_string(&version.manifest)?,
-                version.parent_version_id,
-                version.author,
-                version.note,
-                version.created_at
-            ],
-        )?;
-        Ok(())
+        insert_version_into(&self.connection, version)
     }
 
     pub(crate) fn list_all_documents(&self) -> StorageResult<Vec<Document>> {
@@ -198,7 +202,7 @@ impl VaultStorage {
 
     pub(crate) fn versions_for_document(&self, document_id: &str) -> StorageResult<Vec<Version>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
+            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at, archive_status
              FROM versions WHERE document_id = ?1 ORDER BY number",
         )?;
         let versions = statement
@@ -230,7 +234,7 @@ impl VaultStorage {
 
         self.connection
             .query_row(
-                "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at
+                "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at, archive_status
                  FROM versions WHERE document_id = ?1 AND id = ?2",
                 params![document_id, version_id],
                 version_from_row,
@@ -238,6 +242,88 @@ impl VaultStorage {
             .optional()
             .map_err(StorageError::from)
     }
+
+    /// Every version row still in the `pending` archive state, ordered so the
+    /// oldest is recovered first. Used by startup recovery to finish the
+    /// archive that a crash interrupted (the intake copy is durable, so the
+    /// data is safe - recovery just completes the compress step idempotently).
+    pub(crate) fn pending_versions(&self) -> StorageResult<Vec<Version>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at, archive_status
+             FROM versions WHERE archive_status = 'pending' ORDER BY created_at, document_id, id",
+        )?;
+        let versions = statement
+            .query_map([], version_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(versions)
+    }
+
+    /// Flip a pending version to `archived` and record its real archive
+    /// reference + restic snapshot id (both `None`/placeholder until the
+    /// archive job completes). The async commit path inserts the row with a
+    /// placeholder `archive_reference` and `archive_status = 'pending'`; this
+    /// finalizes it once the archive is durable.
+    pub(crate) fn set_version_archived(
+        &self,
+        document_id: &str,
+        version_id: &str,
+        archive_reference: &str,
+        snapshot_id: Option<&str>,
+    ) -> StorageResult<()> {
+        self.connection.execute(
+            "UPDATE versions SET archive_reference = ?1, snapshot_id = ?2, archive_status = 'archived'
+             WHERE document_id = ?3 AND id = ?4",
+            params![archive_reference, snapshot_id, document_id, version_id],
+        )?;
+        Ok(())
+    }
+
+    /// `true` when the version row exists and is still `pending` (archive not
+    /// finalized). Used by [`VaultStorage::gc_intake`] to decide whether an
+    /// intake copy is still in flight (keep) or an orphan (reclaim). A missing
+    /// row (document/version deleted) is `false`, so orphaned intake is swept.
+    pub(crate) fn is_version_pending(
+        &self,
+        document_id: &str,
+        version_id: &str,
+    ) -> StorageResult<bool> {
+        let status: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT archive_status FROM versions WHERE document_id = ?1 AND id = ?2",
+                params![document_id, version_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(status.is_some_and(|value| value == "pending"))
+    }
+}
+
+/// Insert a version row on a specific connection (the commit transaction
+/// reuses this so the version insert + current-pointer update are atomic).
+pub(crate) fn insert_version_into(conn: &Connection, version: &Version) -> StorageResult<()> {
+    conn.execute(
+        "INSERT INTO versions (
+            id, document_id, number, original_filename, archive_reference, backup_backend, snapshot_id, manifest_json, parent_version_id, author, note, created_at, archive_status
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            version.id,
+            version.document_id.as_str(),
+            version.number,
+            version.original_filename,
+            version.archive_reference,
+            version.backup_backend,
+            version.snapshot_id,
+            serde_json::to_string(&version.manifest)?,
+            version.parent_version_id,
+            version.author,
+            version.note,
+            version.created_at,
+            version.archive_status
+        ],
+    )?;
+    Ok(())
 }
 
 fn version_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
@@ -260,6 +346,7 @@ fn version_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         author: row.get(9)?,
         note: row.get(10)?,
         created_at: row.get(11)?,
+        archive_status: row.get(12)?,
     })
 }
 

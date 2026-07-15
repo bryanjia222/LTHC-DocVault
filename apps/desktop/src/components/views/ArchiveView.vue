@@ -1,11 +1,21 @@
 <script setup lang="ts">
+import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useVault } from "../../composables/useVault";
 import { useDocuments } from "../../composables/useDocuments";
+import { formatByteSize } from "../../utils/mappers";
 
 const { t } = useI18n();
-const { config } = useVault();
+const { config, repoSize, loadRepoSize } = useVault();
 const { totalVersions } = useDocuments();
+
+const repoSizeLabel = computed(() =>
+  repoSize.value == null ? "—" : formatByteSize(repoSize.value),
+);
+
+onMounted(() => {
+  void loadRepoSize();
+});
 </script>
 
 <template>
@@ -52,7 +62,7 @@ const { totalVersions } = useDocuments();
           </div>
           <div class="stat">
             <span class="stat-label">{{ t("archive.repoSize") }}</span>
-            <strong>42 MB</strong>
+            <strong>{{ repoSizeLabel }}</strong>
           </div>
           <div class="stat">
             <span class="stat-label">{{ t("archive.healthCheck") }}</span>

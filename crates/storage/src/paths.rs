@@ -9,6 +9,13 @@ pub struct VaultPaths {
     pub root_dir: PathBuf,
     pub data_dir: PathBuf,
     pub staging_dir: PathBuf,
+    /// Durable intake copies for the async commit path: when a commit begins,
+    /// the source is copied here (fsynced) before the DB row is written, so a
+    /// `pending` version row always has its intake file on disk (the WAL
+    /// contract that guarantees no data loss across a crash). Lives outside
+    /// `staging_dir` so [`VaultStorage::gc_staging`] (which reclaims stale
+    /// backup/restore staging) never touches in-flight intake.
+    pub intake_dir: PathBuf,
     pub versions_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub repo_dir: PathBuf,
@@ -98,6 +105,7 @@ impl VaultPaths {
         let db_path = absolute_path(db_path.into());
         Self {
             staging_dir: data_dir.join("staging"),
+            intake_dir: data_dir.join("intake"),
             versions_dir: data_dir.join("versions"),
             cache_dir: root_dir.join("cache"),
             repo_dir,

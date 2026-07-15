@@ -107,3 +107,14 @@ pub fn open_devtools(app: AppHandle) -> Result<(), String> {
     window.open_devtools();
     Ok(())
 }
+
+/// On-disk size of the active vault's backup repository, in bytes. For restic
+/// this is `restic stats --mode raw-data` (post-dedup + compression); for
+/// local-copy it is the archived version files. The UI refreshes this after
+/// commits/deletes so the ArchiveView stat stays current.
+#[tauri::command]
+pub fn repo_size(state: State<AppState>) -> Result<u64, String> {
+    let vault = state::lock_vault(&state.vault);
+    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    vault.repo_size().map_err(|e| e.to_string())
+}

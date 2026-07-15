@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   formatBytes,
+  formatByteSize,
   formatEpoch,
   deriveType,
   mapVersion,
@@ -104,6 +105,20 @@ describe("formatBytes", () => {
 
   it("sums multiple manifest entries", () => {
     expect(formatBytes([entry(500), entry(524)])).toBe("1.0 KB");
+  });
+});
+
+describe("formatByteSize", () => {
+  it("returns '0 B' for zero or negative", () => {
+    expect(formatByteSize(0)).toBe("0 B");
+    expect(formatByteSize(-1)).toBe("0 B");
+  });
+
+  it("formats a raw byte count (repo size)", () => {
+    expect(formatByteSize(6_291_456)).toBe("6.0 MB");
+    // 45_082_837 B = ~43 MB -> scaled >= 10 drops the decimal.
+    expect(formatByteSize(45_082_837)).toBe("43 MB");
+    expect(formatByteSize(1_073_741_824)).toBe("1.0 GB");
   });
 });
 
@@ -355,6 +370,12 @@ describe("mapJob", () => {
     expect(job.target).toBe("doc.docx");
     expect(job.kind).toBe("export");
     expect(job.status).toBe("failed");
+  });
+
+  it("keeps the archive kind verbatim (async commit Phase B)", () => {
+    const job = mapJob(mkJob({ kind: "archive", status: "running" }));
+    expect(job.kind).toBe("archive");
+    expect(job.status).toBe("running");
   });
 
   it("shows 0% for an indeterminate running job", () => {

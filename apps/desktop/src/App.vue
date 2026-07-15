@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
@@ -12,6 +12,7 @@ import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
 import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
 import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
+import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import JobsView from "./components/views/JobsView.vue";
 import ArchiveView from "./components/views/ArchiveView.vue";
@@ -22,29 +23,31 @@ import { useActivityLog } from "./composables/useActivityLog";
 import { useVault } from "./composables/useVault";
 import type { RawJob } from "./composables/useVault";
 import { useDesktopState } from "./composables/useDesktopState";
+import { useToasts } from "./composables/useToasts";
+import { useDialogs } from "./composables/useDialogs";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
 const { toggle } = useCommandPalette();
 const { log } = useActivityLog();
 const desktop = useDesktopState();
+const { onJobUpdate } = useToasts();
+const { openSwitchBackend } = useDialogs();
 const {
   documents,
   initialized,
-  rootDir,
   openError,
   refreshStatus,
-  init,
   loadDocuments,
   loadConfig,
   loadJobs,
+  loadRepoSize,
   subscribeJobs,
   libraryPath,
   ensureLibraryCopies,
 } = useVault();
 
 const booting = ref(true);
-const initError = ref("");
 let unsubJobs: UnlistenFn | null = null;
 
 function onGlobalKeydown(event: KeyboardEvent) {
@@ -60,10 +63,12 @@ function onGlobalKeydown(event: KeyboardEvent) {
  * request), so the log reflects what actually happened: a job that finished
  * before the cancel registered is logged as succeeded/failed, not cancelled.
  *
- * Also resolves any pending source-file tracking request keyed to this job: a
- * successful commit (new version of an existing doc, or a freshly imported doc)
- * captures a fresh baseline so the file is watched from its just-committed
- * state. Failed/cancelled jobs drop the pending request without baselining.
+ * Also resolves any pending source-file tracking request keyed to this job.
+ * Commits no longer register a track - their Phase A is synchronous, so the
+ * caller reloads + baselines immediately; the Phase B archive job has no track
+ * and just logs here. Checkout still registers a "known" track: a successful
+ * checkout rewrites the library copy, so this re-baselines it back to
+ * "unchanged". Failed/cancelled jobs drop the track without baselining.
  */
 async function onJobTerminal(raw: RawJob): Promise<void> {
   const action = t(`jobs.${raw.kind}`);
@@ -104,32 +109,39 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
   }
 }
 
-async function onInit() {
-  initError.value = "";
-  try {
-    await init();
-    await desktop.loadDesktopState();
-    // Reconcile the library model: materialize any missing working copies and
-    // repoint stale tracked paths, then reload + re-probe so the UI reflects it.
-    await ensureLibraryCopies();
-    await desktop.loadDesktopState();
-    await desktop.refreshModifications();
-    unsubJobs = await subscribeJobs(onJobTerminal);
-  } catch (e) {
-    initError.value = String(e);
+/**
+ * Post-connect setup: load the vault's data slices, reconcile the library model
+ * (materialize missing working copies, repoint stale tracked paths), and
+ * subscribe to job events. Runs once when the vault becomes initialized -
+ * either opened at startup or connected from the onboarding dialog. The
+ * `setupDone` guard keeps it to a single run (and a single job subscription)
+ * across both paths.
+ */
+let setupDone = false;
+async function runPostConnectSetup(): Promise<void> {
+  await Promise.all([loadDocuments(), loadConfig(), loadJobs(), loadRepoSize()]);
+  await desktop.loadDesktopState();
+  await ensureLibraryCopies();
+  await desktop.loadDesktopState();
+  await desktop.refreshModifications();
+  if (!unsubJobs) {
+    unsubJobs = await subscribeJobs(onJobTerminal, onJobUpdate);
   }
 }
 
+watch(
+  initialized,
+  (value) => {
+    if (value && !setupDone) {
+      setupDone = true;
+      void runPostConnectSetup();
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(async () => {
   await refreshStatus();
-  if (initialized.value) {
-    await Promise.all([loadDocuments(), loadConfig(), loadJobs()]);
-    await desktop.loadDesktopState();
-    await ensureLibraryCopies();
-    await desktop.loadDesktopState();
-    await desktop.refreshModifications();
-    unsubJobs = await subscribeJobs(onJobTerminal);
-  }
   booting.value = false;
   log(t("log.loaded"));
   window.addEventListener("keydown", onGlobalKeydown);
@@ -154,16 +166,12 @@ onBeforeUnmount(() => {
         <section v-else-if="!initialized" class="onboarding surface">
           <h2>{{ t("boot.welcome") }}</h2>
           <p>{{ t("boot.notInitialized") }}</p>
-          <p class="root-dir">{{ rootDir }}</p>
           <p v-if="openError" class="init-error">
             {{ t("boot.openFailed", { error: openError }) }}
           </p>
-          <button class="primary" type="button" @click="onInit">
-            {{ t("boot.initialize") }}
+          <button class="primary" type="button" @click="openSwitchBackend">
+            {{ t("boot.connect") }}
           </button>
-          <p v-if="initError" class="init-error">
-            {{ t("boot.initFailed", { error: initError }) }}
-          </p>
         </section>
         <template v-else>
           <DocumentsView v-if="activeSection === 'documents'" />
@@ -181,6 +189,7 @@ onBeforeUnmount(() => {
     <DocumentStatusDialog />
     <RenameDialog />
     <AppContextMenu />
+    <ToastHost />
   </div>
 </template>
 

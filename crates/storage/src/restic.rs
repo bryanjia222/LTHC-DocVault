@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use docvault_types::Document;
 use serde_json::Value;
 use tracing::{debug, error, info};
 
@@ -42,7 +41,7 @@ impl VaultStorage {
 
     pub(crate) fn restic_backup(
         &self,
-        document: &Document,
+        document_id: &str,
         version_id: &str,
         package_dir: &Path,
         cancel: &AtomicBool,
@@ -50,7 +49,7 @@ impl VaultStorage {
         let parent = package_dir
             .parent()
             .ok_or_else(|| StorageError::InvalidFileName(package_dir.to_path_buf()))?;
-        let tag = format!("docvault:{}:{version_id}", document.id.as_str());
+        let tag = format!("docvault:{document_id}:{version_id}");
         let output = self.run_restic_in_dir(
             [
                 "backup",
@@ -67,22 +66,63 @@ impl VaultStorage {
         )?;
         if !output.status.success() {
             let error = restic_failed("backup", output.stderr);
-            error!(
-                document_id = document.id.as_str(),
-                version_id,
-                %error,
-                "restic backup failed"
-            );
+            error!(document_id, version_id, %error, "restic backup failed");
             return Err(error);
         }
         let snapshot_id = snapshot_id_from_backup_json(&output.stdout)?;
         info!(
-            document_id = document.id.as_str(),
+            document_id,
             version_id,
             snapshot_id = snapshot_id.as_str(),
             "restic backup completed"
         );
         Ok(snapshot_id)
+    }
+
+    /// Look up an existing restic snapshot tagged `docvault:<doc>:<version>`,
+    /// returning its id if one exists. This is the idempotency check for the
+    /// async archive: if a prior (crash-interrupted) archive already created
+    /// the snapshot, recovery reuses it instead of backing up a duplicate. An
+    /// empty repo (no snapshots) and restic's "no snapshots" stderr both map to
+    /// `None` rather than an error.
+    pub(crate) fn restic_snapshot_id_for_tag(
+        &self,
+        tag: &str,
+        cancel: &AtomicBool,
+    ) -> StorageResult<Option<String>> {
+        let output = self.run_restic(
+            ["snapshots", "--tag", tag, "--json"],
+            cancel,
+            RESTIC_SHORT_TIMEOUT,
+        )?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("no snapshots") || stderr.contains("No snapshot") {
+                return Ok(None);
+            }
+            return Err(restic_failed("snapshots", output.stderr));
+        }
+        if output.stdout.is_empty() {
+            return Ok(None);
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)?;
+        Ok(value
+            .as_array()
+            .and_then(|snapshots| {
+                snapshots.iter().find_map(|snapshot| {
+                    let tags = snapshot.get("tags").and_then(Value::as_array)?;
+                    let matches = tags.iter().any(|t| t.as_str() == Some(tag));
+                    if matches {
+                        snapshot
+                            .get("short_id")
+                            .and_then(Value::as_str)
+                            .or_else(|| snapshot.get("id").and_then(Value::as_str))
+                            .map(str::to_owned)
+                    } else {
+                        None
+                    }
+                })
+            }))
     }
 
     pub(crate) fn restic_restore(
@@ -139,6 +179,30 @@ impl VaultStorage {
             error!(%error, "restic forget failed");
             Err(error)
         }
+    }
+
+    /// `restic stats --mode raw-data --json` -> total bytes stored in the repo
+    /// after dedup and compression (the real on-disk footprint). Returns 0 for
+    /// an empty repo with no snapshots yet, rather than surfacing restic's "no
+    /// snapshots found" as an error.
+    pub(crate) fn restic_raw_data_size(&self, cancel: &AtomicBool) -> StorageResult<u64> {
+        let output = self.run_restic(
+            ["stats", "--mode", "raw-data", "--json"],
+            cancel,
+            RESTIC_SHORT_TIMEOUT,
+        )?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("no snapshots") || stderr.contains("No snapshot") {
+                return Ok(0);
+            }
+            return Err(restic_failed("stats", output.stderr));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)?;
+        Ok(value
+            .get("total_size")
+            .and_then(Value::as_u64)
+            .unwrap_or(0))
     }
 
     fn run_restic<const N: usize>(
@@ -329,6 +393,107 @@ mod tests {
         assert!(log.contains("package"));
     }
 
+    /// Phase A writes a `pending` version + intake without touching restic; the
+    /// Phase B archive then tag-checks (finds nothing via the mock's empty
+    /// `snapshots` output), backs the intake up, records the snapshot id, and
+    /// reclaims the intake. This is the path recovery re-runs idempotently.
+    #[test]
+    fn archive_pending_version_archives_via_restic_and_records_snapshot() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        // Phase A: pending version + durable intake, no restic call yet.
+        let (document, version) = storage
+            .begin_commit(
+                DocumentRef::NewName("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+        assert_eq!(version.archive_status, crate::ARCHIVE_STATUS_PENDING);
+        assert!(version.snapshot_id.is_none());
+        let log_before = fs::read_to_string(&log_path).unwrap();
+        assert!(
+            !log_before.contains("backup"),
+            "Phase A must not archive (no backup call)"
+        );
+
+        // Phase B: archive from intake via restic.
+        storage
+            .archive_pending_version(&version, &crate::NEVER_CANCELLED)
+            .unwrap();
+        let versions = storage
+            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+            .unwrap();
+        assert_eq!(versions[0].archive_status, crate::ARCHIVE_STATUS_ARCHIVED);
+        assert_eq!(versions[0].snapshot_id.as_deref(), Some("snap123"));
+
+        let log = fs::read_to_string(log_path).unwrap();
+        assert!(
+            log.contains("snapshots"),
+            "Phase B tag-checks for an existing snapshot before backing up"
+        );
+        assert!(log.contains("backup"), "Phase B backs up the intake");
+        assert!(log.contains("--tag"));
+        assert!(log.contains("docvault:"));
+
+        // Intake reclaimed after the archive is finalized.
+        let intake =
+            storage.intake_path(document.id.as_str(), &version.id, &version.original_filename);
+        assert!(!intake.exists(), "intake reclaimed after restic archive");
+    }
+
+    /// Crash-during-archive idempotency: if restic already has a snapshot for
+    /// the version's tag (a crash after backup but before the DB row flipped to
+    /// `archived`), recovery re-runs the archive and the tag-check REUSES that
+    /// snapshot instead of backing up again - no duplicate snapshot, no extra
+    /// data. This is the key guarantee that a crash at any point is safe.
+    #[test]
+    fn archive_pending_version_reuses_existing_snapshot_without_backup() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path =
+            write_mock_restic(temp_dir.path(), &log_path, MockRestic::ExistingSnapshot);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        let (document, version) = storage
+            .begin_commit(
+                DocumentRef::NewName("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+            )
+            .unwrap();
+
+        storage
+            .archive_pending_version(&version, &crate::NEVER_CANCELLED)
+            .unwrap();
+        let versions = storage
+            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+            .unwrap();
+        assert_eq!(versions[0].archive_status, crate::ARCHIVE_STATUS_ARCHIVED);
+        // The existing snapshot was reused (not the "snap123" a fresh backup
+        // would record), proving the tag-check short-circuited the backup.
+        assert_eq!(versions[0].snapshot_id.as_deref(), Some("reuse123"));
+
+        let log = fs::read_to_string(log_path).unwrap();
+        assert!(
+            log.contains("snapshots"),
+            "tag-check ran a snapshots query"
+        );
+        assert!(
+            !log.contains("backup"),
+            "no backup ran - the existing snapshot was reused"
+        );
+    }
+
     #[test]
     fn restic_backup_failure_is_propagated() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -353,6 +518,60 @@ mod tests {
             StorageError::Restic(ResticError::Failed { command, stderr })
                 if command == "backup" && stderr.contains("mock backup failed")
         ));
+    }
+
+    #[test]
+    fn restic_commit_reclaims_staging_package() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let source = write_ooxml_package(temp_dir.path(), "report.docx");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        let (document, _version) = storage
+            .add_document_version(
+                DocumentRef::Name("report".to_owned()),
+                &source,
+                CommitMetadata::default(),
+                &crate::NEVER_CANCELLED,
+            )
+            .unwrap();
+
+        // The unzipped package must not linger in staging after a successful
+        // backup (it used to leak ~one full copy per committed version).
+        let version_staging = paths
+            .staging_dir
+            .join("backup")
+            .join(document.id.as_str())
+            .join("v1");
+        assert!(
+            !version_staging.exists(),
+            "staging/backup/<doc>/<version> should be reclaimed after commit"
+        );
+    }
+
+    #[test]
+    fn gc_staging_reclaims_leaked_backup_and_restore_dirs() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        let log_path = temp_dir.path().join("restic.log");
+        let restic_path = write_mock_restic(temp_dir.path(), &log_path, MockRestic::Success);
+        write_restic_config(&paths, &restic_path);
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+
+        // Simulate a crash that left orphan staging behind.
+        let leaked_backup = paths.staging_dir.join("backup").join("dead-doc").join("v1");
+        fs::create_dir_all(leaked_backup.join("package").join("word")).unwrap();
+        fs::write(leaked_backup.join("package").join("word").join("document.xml"), b"x").unwrap();
+        let leaked_restore = paths.staging_dir.join("restore").join("dead-doc").join("v2");
+        fs::create_dir_all(leaked_restore).unwrap();
+
+        storage.gc_staging();
+
+        assert!(!paths.staging_dir.join("backup").exists());
+        assert!(!paths.staging_dir.join("restore").exists());
     }
 
     #[test]
@@ -469,6 +688,11 @@ mod tests {
         /// stays `None`); other subcommands behave like `Success` so init/open
         /// still complete.
         Hang,
+        /// `snapshots --tag <tag>` reports an existing snapshot carrying that
+        /// exact tag, so the archive's idempotent tag-check reuses it instead of
+        /// backing up again. Models a crash after the backup but before the DB
+        /// row was flipped to `archived` - recovery must not stack a duplicate.
+        ExistingSnapshot,
     }
 
     fn temp_paths(root: &Path) -> VaultPaths {
@@ -532,6 +756,20 @@ mod tests {
                 log_path.display()
             );
         }
+        if matches!(behavior, MockRestic::ExistingSnapshot) {
+            // `%5` is the tag passed to `snapshots --tag <tag> --json` (argv:
+            // restic -r <repo> snapshots --tag <tag> --json). Echo it back inside
+            // a snapshot's tags so the tag-check matches and reuses "reuse123".
+            return format!(
+                "@echo off\n\
+                 echo %*>>\"{}\"\n\
+                 if \"%3\"==\"version\" echo restic 0.19.1\n\
+                 if \"%3\"==\"snapshots\" echo [{{\"short_id\":\"reuse123\",\"tags\":[\"%5\"]}}]\n\
+                 if \"%3\"==\"backup\" echo {{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}\n\
+                 exit /b 0\n",
+                log_path.display()
+            );
+        }
         let failure = if matches!(behavior, MockRestic::BackupFails) {
             "if \"%3\"==\"backup\" (\n  echo mock backup failed 1>&2\n  exit /b 9\n)\n"
         } else {
@@ -557,6 +795,19 @@ mod tests {
                  printf '%s\\n' \"$*\" >> '{}'\n\
                  if [ \"$3\" = \"backup\" ]; then while :; do sleep 1; done; fi\n\
                  if [ \"$3\" = \"version\" ]; then printf '%s\\n' 'restic 0.19.1'; fi\n\
+                 exit 0\n",
+                log_path.display()
+            );
+        }
+        if matches!(behavior, MockRestic::ExistingSnapshot) {
+            // `$5` is the tag passed to `snapshots --tag <tag> --json`. Echo it
+            // back inside a snapshot's tags so the tag-check matches + reuses.
+            return format!(
+                "#!/bin/sh\n\
+                 printf '%s\\n' \"$*\" >> '{}'\n\
+                 if [ \"$3\" = \"version\" ]; then printf '%s\\n' 'restic 0.19.1'; fi\n\
+                 if [ \"$3\" = \"snapshots\" ]; then printf '%s\\n' '[{{\"short_id\":\"reuse123\",\"tags\":[\"'$5'\"]}}]'; fi\n\
+                 if [ \"$3\" = \"backup\" ]; then printf '%s\\n' '{{\"message_type\":\"summary\",\"snapshot_id\":\"snap123\"}}'; fi\n\
                  exit 0\n",
                 log_path.display()
             );

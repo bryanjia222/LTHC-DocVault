@@ -24,8 +24,8 @@ export const enUS = {
     loading: "Connecting to vault…",
     welcome: "Welcome to DocVault",
     notInitialized:
-      "The document vault is not initialized yet. Initializing creates the local vault directory and database (local-copy backend).",
-    initialize: "Initialize vault",
+      "Choose a vault directory and a backup backend to get started. You can switch vaults later from Settings.",
+    connect: "Choose vault & connect",
     initFailed: "Initialization failed: {error}",
     openFailed: "Could not open the existing vault: {error}",
   },
@@ -193,6 +193,14 @@ export const enUS = {
     export: "Export",
     checkout: "Checkout",
     delete: "Delete",
+    archive: "Archive",
+  },
+  toast: {
+    running: "Running…",
+    succeeded: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    dismiss: "Dismiss",
   },
   log: {
     title: "Activity Log",
@@ -213,6 +221,7 @@ export const enUS = {
     jobSucceeded: "{action} succeeded: {target}",
     jobFailed: "{action} failed: {target} ({error})",
     jobCancelled: "{action} cancelled: {target}",
+    commitSucceeded: "Committed {target} (compressing in background)",
     actionFailed: "{action} failed: {error}",
     noSelection: "{action} requires a document and version selected first",
     noDocument: "No document",

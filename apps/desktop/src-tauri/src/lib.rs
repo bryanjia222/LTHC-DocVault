@@ -88,6 +88,7 @@ pub fn run() {
             commands::get_config,
             commands::connect_vault,
             commands::open_devtools,
+            commands::repo_size,
             jobs::commit_document,
             jobs::export_version,
             jobs::checkout_version,

@@ -60,6 +60,58 @@ impl DocVault {
         Ok(result)
     }
 
+    /// Phase A of the async commit: validate the source is a supported Office
+    /// document, write a durable intake copy, and atomically insert the version
+    /// row as `pending` + repoint the current-version pointer. Returns the new
+    /// document + version so the caller can materialize the library copy and
+    /// spawn the Phase B archive ([`Self::archive_pending_version`]). No archive
+    /// work happens here, so this is fast and synchronous.
+    pub fn begin_commit(
+        &self,
+        source_path: impl AsRef<Path>,
+        document_ref: DocumentRef,
+        metadata: CommitMetadata,
+    ) -> CoreResult<(Document, Version)> {
+        let source_path = source_path.as_ref();
+        info!(path = %source_path.display(), "starting document commit (phase A)");
+        if !docvault_ooxml::is_supported_ooxml(source_path) {
+            error!(path = %source_path.display(), "unsupported Office document");
+            return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
+        }
+        let result = self
+            .storage
+            .begin_commit(document_ref, source_path, metadata)?;
+        info!(
+            document_id = result.0.id.as_str(),
+            version_id = result.1.id.as_str(),
+            "completed document commit phase A (pending archive)"
+        );
+        Ok(result)
+    }
+
+    /// Phase B of the async commit: archive a `pending` version from its durable
+    /// intake copy, finalize the DB row (`archive_reference` + `snapshot_id`,
+    /// status -> `archived`), and reclaim the intake. Idempotent, so it is safe
+    /// to re-run after a crash (recovery on open does exactly this).
+    pub fn archive_pending_version(
+        &self,
+        version: &Version,
+        cancel: &AtomicBool,
+    ) -> CoreResult<()> {
+        info!(
+            document_id = version.document_id.as_str(),
+            version_id = version.id.as_str(),
+            "starting document commit phase B (archive)"
+        );
+        self.storage.archive_pending_version(version, cancel)?;
+        info!(
+            document_id = version.document_id.as_str(),
+            version_id = version.id.as_str(),
+            "completed document commit phase B (archive)"
+        );
+        Ok(())
+    }
+
     pub fn list_documents(&self) -> StorageResult<Vec<Document>> {
         self.storage.list_documents()
     }
@@ -129,6 +181,12 @@ impl DocVault {
 
     pub fn backend(&self) -> docvault_storage::BackupBackend {
         self.storage.backend()
+    }
+
+    /// On-disk size of the backup repository, in bytes (restic raw-data size or
+    /// the local-copy archive footprint).
+    pub fn repo_size(&self) -> StorageResult<u64> {
+        self.storage.repo_size()
     }
 
     pub fn restic_path(&self) -> &Path {

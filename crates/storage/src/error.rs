@@ -60,6 +60,18 @@ pub enum StorageError {
     InvalidFileName(PathBuf),
     #[error("invalid backup backend: {0}")]
     InvalidBackend(String),
+    /// A `pending` version row exists but its durable intake copy is gone, so
+    /// the archive cannot be (re)completed. This violates the WAL invariant
+    /// (intake fsynced before the DB row) and should be unreachable unless the
+    /// intake dir was deleted out-of-band. Recovery leaves the row pending and
+    /// surfaces this so the user knows a version is stranded.
+    #[error(
+        "intake copy missing for pending version {version_id} of document {document_id}; the archive cannot be completed"
+    )]
+    IntakeMissing {
+        document_id: String,
+        version_id: String,
+    },
     #[error(transparent)]
     Restic(#[from] ResticError),
 }

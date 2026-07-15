@@ -67,6 +67,10 @@ async function submit() {
         ? t("connect.initialized", { backend: t(`backend.${outcome.backend}`) })
         : t("connect.opened", { backend: t(`backend.${outcome.backend}`) });
     password.value = "";
+    // A successful connect/initialize is the signal itself - close the dialog
+    // so the user lands back in the workspace with the new vault active.
+    // (Errors keep the dialog open so the message stays visible.)
+    close();
   } catch (e: unknown) {
     const err = e as { kind?: string; message?: string };
     if (err?.kind && err.kind !== "other") {

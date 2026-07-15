@@ -38,6 +38,14 @@ pub struct Version {
     pub author: Option<String>,
     pub note: Option<String>,
     pub created_at: i64,
+    /// Lifecycle of the version's archive: `"archived"` (the archive is
+    /// complete and is the source of truth) or `"pending"` (the durable intake
+    /// copy exists but the compressed archive is still being written by the
+    /// async commit path). Old serialized versions predate this field and
+    /// default to `"archived"`. The async commit path inserts a row as
+    /// `"pending"` and flips it to `"archived"` once the archive job finishes.
+    #[serde(default = "default_archive_status")]
+    pub archive_status: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +137,13 @@ fn default_storage_backend() -> String {
 
 fn default_restic_password() -> String {
     "docvault-local-development-password".to_owned()
+}
+
+/// Serde default for [`Version::archive_status`]: a version deserialized from
+/// an older payload (before the async commit path) is treated as already
+/// archived, since every pre-async version was archived synchronously.
+fn default_archive_status() -> String {
+    "archived".to_owned()
 }
 
 fn default_log_level() -> String {
