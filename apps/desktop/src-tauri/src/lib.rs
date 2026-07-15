@@ -7,6 +7,8 @@ mod local_state;
 mod prefs;
 mod state;
 
+use std::path::{Path, PathBuf};
+
 use state::AppState;
 use tauri::Manager;
 
@@ -30,12 +32,52 @@ fn clear_docvault_env() {
     }
 }
 
+/// Resolve the bundled restic binary: the packaged Tauri resource in a built
+/// app, falling back to the `third_party` asset at its repo-relative location in
+/// a dev build. Returns `None` when neither is present (the storage layer then
+/// falls back to the system PATH). The storage layer reads `DOCVAULT_RESTIC_PATH`
+/// ahead of `config.toml`, so setting this env var at startup makes every vault
+/// connection use the bundled binary regardless of where the vault lives -
+/// fixing dev with a non-repo vault and packaged installs with no system restic.
+fn bundled_restic_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::path::BaseDirectory;
+    if let Ok(path) = app.path().resolve("resources/restic.exe", BaseDirectory::Resource) {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    dev_restic_asset()
+}
+
+/// In a dev build the `third_party` restic asset sits at a fixed path relative
+/// to this crate's manifest dir. `None` off-Windows (no asset shipped) or when
+/// the asset is absent. Pure so the lookup is unit-testable.
+fn dev_restic_asset() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../third_party/restic/0.19.1/x86_64-pc-windows-msvc/restic.exe");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
 pub fn run() {
     clear_docvault_env();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
+            // Point the storage layer at the bundled restic binary before any
+            // vault is opened. Cleared above by `clear_docvault_env`, so this is
+            // the only source. `None` -> storage falls back to its own
+            // auto-discovery (exe dir / third_party beside the vault / PATH).
+            if let Some(path) = bundled_restic_path(app.handle()) {
+                std::env::set_var("DOCVAULT_RESTIC_PATH", &path);
+            }
             state::open_if_initialized(app.handle(), app.state::<AppState>().inner());
             Ok(())
         })
@@ -66,4 +108,27 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocVault desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn dev_restic_asset_points_at_repo_third_party() {
+        let path = dev_restic_asset()
+            .expect("third_party restic asset should exist in this repo on Windows");
+        assert!(
+            path.ends_with("third_party/restic/0.19.1/x86_64-pc-windows-msvc/restic.exe"),
+            "unexpected path: {path:?}"
+        );
+        assert!(path.exists(), "asset should exist: {path:?}");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn dev_restic_asset_absent_off_windows() {
+        assert!(dev_restic_asset().is_none());
+    }
 }

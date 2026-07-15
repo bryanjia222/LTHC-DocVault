@@ -3,3 +3,5 @@
 # Do not edit.
 /target/
 /gen/schemas
+# Staged by build.rs from third_party/restic for the resource bundler.
+/resources/
