@@ -292,31 +292,26 @@ async function connect(params: ConnectParams): Promise<ConnectOutcome> {
   return outcome;
 }
 
-/**
- * Reset the desktop to a fresh-install state: an isolated test vault is emptied
- * (no documents/tags/tracked sources). Dev/test only - never touches a
- * manually-connected vault. No-op outside Tauri (browser dev has no backend).
- */
-async function resetVault(): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("reset_vault");
-  await Promise.all([
-    refreshStatus(),
-    loadDocuments(),
-    loadConfig(),
-    loadJobs(),
-    loadRepoSize(),
-  ]);
-}
+export type ResetStage = "fresh" | "initial" | "seeded";
+export type ResetBackend = "local-copy" | "restic";
 
 /**
- * Reset, then import the three sample docs with tags + source baselines so the
- * tag/filter/modification-tracking flows are all exercised. Dev/test only.
- * No-op outside Tauri.
+ * Reset the isolated test vault to a dev stage: "fresh" wipes it and returns to
+ * onboarding (no vault); "initial" re-initializes an empty vault with `backend`;
+ * "seeded" also imports the sample docs. Dev/test only - never touches a
+ * manually-connected vault. No-op outside Tauri (browser dev has no backend).
  */
-async function seedDemoDocs(): Promise<void> {
+async function resetToStage(
+  stage: ResetStage,
+  backend: ResetBackend,
+  resticPassword?: string,
+): Promise<void> {
   if (!isTauri()) return;
-  await invoke("seed_demo_docs");
+  await invoke("reset_to_stage", {
+    stage,
+    backend,
+    resticPassword: resticPassword ?? null,
+  });
   await Promise.all([
     refreshStatus(),
     loadDocuments(),
@@ -398,8 +393,7 @@ export function useVault() {
     ensureLibraryCopies,
     cancelJob,
     connect,
-    resetVault,
-    seedDemoDocs,
+    resetToStage,
     subscribeJobs,
   };
 }

@@ -50,3 +50,21 @@ pub fn save_root(app: &AppHandle, root: &Path) -> std::io::Result<()> {
     fs::write(&path, text)?;
     Ok(())
 }
+
+/// Clear the saved vault root so the next launch starts at onboarding (no vault
+/// selected). Used by the dev "fresh wipe" reset stage.
+pub fn clear_root(app: &AppHandle) -> std::io::Result<()> {
+    let path = prefs_path(app).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "app config directory unavailable",
+        )
+    })?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let prefs = Prefs { vault_root: None };
+    let text = serde_json::to_string_pretty(&prefs)?;
+    fs::write(&path, text)?;
+    Ok(())
+}

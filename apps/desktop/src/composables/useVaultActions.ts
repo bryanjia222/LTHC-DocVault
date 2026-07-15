@@ -5,7 +5,7 @@ import { useDialogs } from "./useDialogs";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
 import { useDesktopState } from "./useDesktopState";
-import { useVault } from "./useVault";
+import { useVault, type ResetStage, type ResetBackend } from "./useVault";
 import { useTheme } from "../theme";
 import { extOf, pickOfficeFile } from "../utils/file";
 
@@ -31,8 +31,7 @@ export function useVaultActions() {
     deleteDocument: sendDelete,
     renameDocument: sendRename,
     loadDocuments,
-    resetVault,
-    seedDemoDocs,
+    resetToStage,
     isTauri,
     libraryPath,
     openLibraryCopy,
@@ -372,41 +371,49 @@ export function useVaultActions() {
   }
 
   /**
-   * Reset the desktop to a known state for testing: "empty" wipes the isolated
-   * test vault; "seeded" also imports three sample docs with tags + source
-   * baselines. Dev/test only. Confirms first (destructive) and reloads desktop
-   * state so tags/tracked refresh immediately. No-op outside Tauri.
+   * Reset the isolated test vault to a dev stage. "fresh" wipes it and returns
+   * to onboarding; "initial" re-initializes an empty vault with `backend`;
+   * "seeded" also imports the sample docs. Dev/test only. Confirms first
+   * (destructive) and reloads desktop state so tags/tracked refresh immediately.
+   * No-op outside Tauri.
    */
-  function resetVaultAction(mode: "empty" | "seeded"): void {
-    const actionKey =
-      mode === "seeded" ? "actionLogs.seedDemo" : "actionLogs.resetVault";
-    const confirmKey =
-      mode === "seeded" ? "dev.confirmSeeded" : "dev.confirmEmpty";
+  function resetToStageAction(
+    stage: ResetStage,
+    backend: ResetBackend,
+    resticPassword?: string,
+  ): void {
+    const stageLabel = t("dev.stageLabel", { n: stageNumber(stage) });
+    const actionKey = t("actionLogs.resetToStage", { stage: stageLabel });
     log(
       t("log.actionRequested", {
-        action: t(actionKey),
+        action: actionKey,
         name: t("log.noDocument"),
         version: t("log.latest"),
       }),
     );
-    if (!window.confirm(t(confirmKey))) {
-      log(t("log.actionCancelled", { action: t(actionKey) }));
+    if (!window.confirm(t(`dev.stages.${stage}.confirm`))) {
+      log(t("log.actionCancelled", { action: actionKey }));
       return;
     }
-    void runReset(mode, actionKey);
+    void runStageReset(stage, backend, resticPassword, actionKey);
   }
 
-  async function runReset(
-    mode: "empty" | "seeded",
+  function stageNumber(stage: ResetStage): number {
+    return stage === "fresh" ? 1 : stage === "initial" ? 2 : 3;
+  }
+
+  async function runStageReset(
+    stage: ResetStage,
+    backend: ResetBackend,
+    resticPassword: string | undefined,
     actionKey: string,
   ): Promise<void> {
     try {
-      if (mode === "seeded") await seedDemoDocs();
-      else await resetVault();
+      await resetToStage(stage, backend, resticPassword);
       await desktop.loadDesktopState();
-      log(mode === "seeded" ? t("log.seeded", { count: 3 }) : t("dev.resetDone"));
+      log(t("dev.resetDone", { stage: t("dev.stageLabel", { n: stageNumber(stage) }) }));
     } catch (e) {
-      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+      log(t("log.actionFailed", { action: actionKey, error: String(e) }));
     }
   }
 
@@ -431,7 +438,7 @@ export function useVaultActions() {
     toggleCurrentTheme,
     commitModifiedDocument,
     openDocument,
-    resetVaultAction,
+    resetToStageAction,
     refreshAll,
     deleteDocument,
     renameDocument,

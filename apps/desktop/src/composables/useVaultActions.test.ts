@@ -372,33 +372,41 @@ describe("useVaultActions - open document", () => {
   });
 });
 
-describe("useVaultActions - reset / seed (dev)", () => {
+describe("useVaultActions - stage reset (dev)", () => {
   let confirmSpy: ReturnType<typeof vi.spyOn>;
   afterEach(() => {
     confirmSpy?.mockRestore();
   });
 
-  it("invokes reset_vault after confirming in empty mode", async () => {
+  it("invokes reset_to_stage with the chosen stage + backend after confirming", async () => {
     asTauri();
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    actions.resetVaultAction("empty");
+    actions.resetToStageAction("initial", "local-copy");
 
     await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("reset_vault");
+      expect(invoke).toHaveBeenCalledWith("reset_to_stage", {
+        stage: "initial",
+        backend: "local-copy",
+        resticPassword: null,
+      });
     });
   });
 
-  it("invokes seed_demo_docs after confirming in seeded mode", async () => {
+  it("passes the restic password through for restic stages", async () => {
     asTauri();
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    actions.resetVaultAction("seeded");
+    actions.resetToStageAction("seeded", "restic", "hunter2");
 
     await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("seed_demo_docs");
+      expect(invoke).toHaveBeenCalledWith("reset_to_stage", {
+        stage: "seeded",
+        backend: "restic",
+        resticPassword: "hunter2",
+      });
     });
   });
 
@@ -407,8 +415,8 @@ describe("useVaultActions - reset / seed (dev)", () => {
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    actions.resetVaultAction("empty");
-    actions.resetVaultAction("seeded");
+    actions.resetToStageAction("fresh", "local-copy");
+    actions.resetToStageAction("seeded", "restic", "p");
     await flush();
 
     expect(invoke).not.toHaveBeenCalled();
@@ -418,8 +426,8 @@ describe("useVaultActions - reset / seed (dev)", () => {
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    actions.resetVaultAction("empty");
-    actions.resetVaultAction("seeded");
+    actions.resetToStageAction("fresh", "local-copy");
+    actions.resetToStageAction("seeded", "restic", "p");
     await flush();
 
     expect(invoke).not.toHaveBeenCalled();

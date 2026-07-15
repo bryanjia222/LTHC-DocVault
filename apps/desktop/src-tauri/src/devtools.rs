@@ -1,17 +1,19 @@
 //! Developer/test reset helpers: wipe the desktop back to a known state for
 //! manual testing and (future) end-to-end runs.
 //!
-//! Two Tauri commands:
-//! - [`reset_vault`]: switch to an isolated test vault and empty it -> the
-//!   "fresh install" state (no documents, no tags, no tracked sources).
-//! - [`seed_demo_docs`]: reset, then synchronously import three sample Office
-//!   docs (one per type) and write tags + source-file baselines, so the
-//!   tag/filter/modification-tracking flows are all exercised.
+//! One Tauri command, [`reset_to_stage`], drives a three-stage slider in the
+//! dev Settings card:
+//! - `fresh`: drop + purge the test vault and clear the saved root pref so the
+//!   app returns to onboarding (first step = select repo + backend).
+//! - `initial`: re-initialize an empty vault with the chosen backend.
+//! - `seeded`: `initial`, then synchronously import three sample Office docs
+//!   and write tags + source-file baselines.
 //!
-//! Both target an isolated `docvault-test-vault` under the app config dir, so a
-//! reset never touches a vault the user connected manually. The heavy lifting
-//! (purge / seed / slice write) is in pure helpers so it is unit-testable without
-//! an `AppHandle`; the commands are thin wrappers that resolve paths via the app.
+//! All stages target an isolated `docvault-test-vault` under the app config
+//! dir, so a reset never touches a vault the user connected manually. The
+//! heavy lifting (purge / seed / slice write) is in pure helpers so it is
+//! unit-testable without an `AppHandle`; the command is a thin wrapper that
+//! resolves paths via the app.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,7 +31,7 @@ use crate::local_state::{canonical_key, load_file_at, save_file_at, state_path};
 use crate::prefs;
 use crate::state::{self, AppState};
 
-/// The three sample docs imported by [`seed_demo_docs`]: (filename, doc name).
+/// The three sample docs imported by the `seeded` reset stage: (filename, doc name).
 const SEED_ENTRIES: &[(&str, &str)] = &[
     ("report_v1.docx", "Report"),
     ("slides_v1.pptx", "Slides"),
@@ -150,44 +152,62 @@ fn app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
 }
 
-/// Core reset: drop the open vault (releases the DB file on Windows), purge the
-/// test vault root, initialize a fresh local-copy vault there, persist it as the
-/// active root, and clear its desktop-state slice. Shared by both commands.
-fn reset_to_test_vault(app: &AppHandle, state: &AppState, root: &Path) -> Result<(), String> {
+/// Core stage reset. Drops the open vault (releases the DB file on Windows),
+/// purges the test vault root, then applies the selected `stage`:
+/// - `fresh`: clear the saved root pref (no vault) so the UI returns to
+///   onboarding; clear the desktop-state slice.
+/// - `initial`: initialize an empty vault with `backend` (+ restic password),
+///   persist it as the active root, clear the slice.
+/// - `seeded`: `initial`, then synchronously import the sample docs and write
+///   their tags + tracked baselines.
+fn reset_to_stage_core(
+    app: &AppHandle,
+    state: &AppState,
+    root: &Path,
+    stage: &str,
+    backend: &str,
+    restic_password: Option<String>,
+) -> Result<(), String> {
     // Drop the open vault before purging so its sqlite file is not locked.
     *state::lock_vault(&state.vault) = None;
     purge_vault_root(root)?;
-    state::connect_vault_core(
-        state,
-        &root.display().to_string(),
-        "local-copy",
-        None,
-    )
-    .map_err(connect_err_to_string)?;
-    prefs::save_root(app, root).map_err(|e| e.to_string())?;
-    if let Some(state_file) = state_path(app) {
-        clear_slice_at(&state_file, &canonical_key(root))?;
+    state::set_open_error(state, None);
+
+    let state_file = state_path(app);
+    match stage {
+        "fresh" => {
+            // No vault: clear the saved root pref so the next status read is
+            // uninitialized and the app shows onboarding (repo + backend pick).
+            prefs::clear_root(app).map_err(|e| e.to_string())?;
+            if let Some(state_file) = state_file {
+                clear_slice_at(&state_file, &canonical_key(root))?;
+            }
+            Ok(())
+        }
+        "initial" | "seeded" => {
+            state::connect_vault_core(
+                state,
+                &root.display().to_string(),
+                backend,
+                restic_password,
+            )
+            .map_err(connect_err_to_string)?;
+            prefs::save_root(app, root).map_err(|e| e.to_string())?;
+            if let Some(state_file) = state_file {
+                clear_slice_at(&state_file, &canonical_key(root))?;
+            }
+            if stage == "seeded" {
+                seed_sample_docs(state, app, root)?;
+            }
+            Ok(())
+        }
+        other => Err(format!("unknown reset stage: {other}")),
     }
-    Ok(())
 }
 
-/// Reset the desktop to a fresh-install state: an empty isolated test vault with
-/// no documents, tags, or tracked sources. Never touches a manually-connected
-/// vault. The frontend reloads documents/config/state after this resolves.
-#[tauri::command(rename_all = "snake_case")]
-pub fn reset_vault(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    let root = app_config_dir(&app)?.join("docvault-test-vault");
-    reset_to_test_vault(&app, state.inner(), &root)
-}
-
-/// Reset, then import the three sample docs and write tags + source baselines so
-/// the tag/filter/modification-tracking flows are all exercised. Synchronous
-/// (does not go through the job runner) so the result is immediately observable.
-#[tauri::command(rename_all = "snake_case")]
-pub fn seed_demo_docs(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    let root = app_config_dir(&app)?.join("docvault-test-vault");
-    reset_to_test_vault(&app, state.inner(), &root)?;
-
+/// Seed the three sample docs into the currently-open test vault and write
+/// their tags + tracked library baselines. The vault must already be open.
+fn seed_sample_docs(state: &AppState, app: &AppHandle, root: &Path) -> Result<(), String> {
     let example_docs = example_docs_dir();
     if !example_docs.is_dir() {
         return Err(format!(
@@ -203,14 +223,29 @@ pub fn seed_demo_docs(app: AppHandle, state: State<AppState>) -> Result<(), Stri
             .ok_or("vault not initialized after reset")?;
         seed_three_docs(vault, &example_docs, &cancel)?
     };
-    if let Some(state_file) = state_path(&app) {
+    if let Some(state_file) = state_path(app) {
         let vault = state::lock_vault(&state.vault);
         let vault = vault
             .as_ref()
             .ok_or("vault not initialized after reset")?;
-        write_seed_slice(vault, &state_file, &canonical_key(&root), &docs)?;
+        write_seed_slice(vault, &state_file, &canonical_key(root), &docs)?;
     }
     Ok(())
+}
+
+/// Reset the isolated test vault to a dev stage. Dev/test only - never touches
+/// a manually-connected vault. The frontend reloads status/docs/config/state
+/// after this resolves.
+#[tauri::command(rename_all = "snake_case")]
+pub fn reset_to_stage(
+    app: AppHandle,
+    state: State<AppState>,
+    stage: String,
+    backend: String,
+    restic_password: Option<String>,
+) -> Result<(), String> {
+    let root = app_config_dir(&app)?.join("docvault-test-vault");
+    reset_to_stage_core(&app, state.inner(), &root, &stage, &backend, restic_password)
 }
 
 #[cfg(test)]

@@ -76,7 +76,7 @@ pub fn open_error(state: &AppState) -> Option<String> {
         .clone()
 }
 
-fn set_open_error(state: &AppState, message: Option<String>) {
+pub(crate) fn set_open_error(state: &AppState, message: Option<String>) {
     *state
         .last_open_error
         .lock()

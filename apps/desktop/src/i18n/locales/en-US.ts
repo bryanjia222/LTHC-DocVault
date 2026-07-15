@@ -97,8 +97,7 @@ export const enUS = {
     jobCenter: "Open job center",
     navigate: "Switch view: {section}",
     toggleTheme: "Switch to {theme} theme",
-    resetVault: "Reset to fresh install",
-    seedDemo: "Reset & import sample docs",
+    resetToStage: "Reset to {stage}",
   },
   metrics: {
     label: "Vault metrics",
@@ -229,7 +228,6 @@ export const enUS = {
     opened: "Opened document: {name}",
     openFailed: "Failed to open document: {name} ({error})",
     renamed: "Renamed document: {name} -> {newName}",
-    seeded: "Reset and imported {count} sample docs",
     latest: "latest",
     cleared: "Activity log cleared",
     commandRun: "Run command: {command}",
@@ -328,10 +326,30 @@ export const enUS = {
   dev: {
     title: "Test & reset",
     hint: "Dev-only. Resets an isolated test vault; never touches your manually-connected real vault.",
-    resetEmpty: "Reset to fresh install",
-    resetSeeded: "Reset & import sample docs",
-    confirmEmpty: "Reset to an empty vault? Test vault data will be erased.",
-    confirmSeeded: "Reset and import sample docs? Test vault data will be replaced.",
-    resetDone: "Reset to fresh install",
+    sliderHint: "Drag to a stage, then confirm to reset the test vault to that state.",
+    stageLabel: "Stage {n}",
+    confirmStage: "Reset to {stage}",
+    resetDone: "Reset to {stage}",
+    backend: "Backend",
+    password: "Restic password",
+    freshNoBackend:
+      "No backend here - you'll pick repo + backend on the onboarding screen after reset.",
+    stages: {
+      fresh: {
+        name: "Fresh wipe",
+        hint: "Clears all vault data and returns to onboarding, where you re-select the repo and backend.",
+        confirm: "Wipe the test vault and return to onboarding?",
+      },
+      initial: {
+        name: "Initial state",
+        hint: "Initializes an empty vault (no documents) with the chosen backend.",
+        confirm: "Reset to an empty vault with the chosen backend?",
+      },
+      seeded: {
+        name: "Sample docs",
+        hint: "Initializes the vault and imports 3 sample docs (with tags + tracked baselines).",
+        confirm: "Reset and import sample docs with the chosen backend?",
+      },
+    },
   },
 };

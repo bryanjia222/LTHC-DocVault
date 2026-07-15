@@ -96,8 +96,7 @@ export const zhCN = {
     jobCenter: "打开任务中心",
     navigate: "切换视图：{section}",
     toggleTheme: "切换为{theme}主题",
-    resetVault: "重置为全新安装",
-    seedDemo: "重置并导入示例文档",
+    resetToStage: "重置到 {stage}",
   },
   metrics: {
     label: "仓库指标",
@@ -227,7 +226,6 @@ export const zhCN = {
     opened: "已打开文档：{name}",
     openFailed: "打开文档失败：{name}（{error}）",
     renamed: "已重命名文档：{name} → {newName}",
-    seeded: "已重置并导入示例文档：{count} 个",
     latest: "latest",
     cleared: "活动日志已清空",
     commandRun: "执行命令：{command}",
@@ -323,10 +321,29 @@ export const zhCN = {
   dev: {
     title: "测试与重置",
     hint: "仅开发构建可见。重置到隔离的测试仓库，不影响你手动连接的真实仓库。",
-    resetEmpty: "重置为全新安装",
-    resetSeeded: "重置并导入示例文档",
-    confirmEmpty: "确认重置到空仓库？当前测试仓库的数据将被清除。",
-    confirmSeeded: "确认重置并导入示例文档？当前测试仓库的数据将被替换。",
-    resetDone: "已重置为全新安装",
+    sliderHint: "拖动选择一个阶段，点击确认以重置到该状态。",
+    stageLabel: "阶段 {n}",
+    confirmStage: "重置到 {stage}",
+    resetDone: "已重置到 {stage}",
+    backend: "后端",
+    password: "Restic 密码",
+    freshNoBackend: "此阶段不配置后端--重置后在引导界面选择仓库与后端。",
+    stages: {
+      fresh: {
+        name: "全新重置",
+        hint: "清除所有仓库数据并回到引导界面，重新选择仓库与后端。",
+        confirm: "确认清除测试仓库并回到引导界面？",
+      },
+      initial: {
+        name: "初始状态",
+        hint: "使用所选后端初始化一个空仓库（无文档）。",
+        confirm: "确认使用所选后端重置到空仓库？",
+      },
+      seeded: {
+        name: "已导入示例文档",
+        hint: "初始化仓库并导入 3 个示例文档（含标签与跟踪基线）。",
+        confirm: "确认使用所选后端重置并导入示例文档？",
+      },
+    },
   },
 };

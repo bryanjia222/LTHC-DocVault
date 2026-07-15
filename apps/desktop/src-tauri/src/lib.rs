@@ -103,8 +103,7 @@ pub fn run() {
             library::open_library_copy,
             library::remove_library_copy,
             library::ensure_library_copies,
-            devtools::reset_vault,
-            devtools::seed_demo_docs,
+            devtools::reset_to_stage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocVault desktop");
