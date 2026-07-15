@@ -39,6 +39,16 @@ function onContextMenu(event: MouseEvent) {
   void nextTick(clamp);
 }
 
+// Capture phase: a right-click outside this menu closes it so it does not
+// linger alongside a doc/version menu opened by the same click. Those menus
+// stop propagation, so the bubble-phase `onContextMenu` above never runs to
+// reposition or close this one - without this, two menus can coexist.
+function onContextMenuCapture(event: MouseEvent) {
+  if (visible.value && !menuRef.value?.contains(event.target as Node)) {
+    visible.value = false;
+  }
+}
+
 function close() {
   visible.value = false;
 }
@@ -62,6 +72,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  window.addEventListener("contextmenu", onContextMenuCapture, true);
   window.addEventListener("contextmenu", onContextMenu);
   window.addEventListener("click", close);
   window.addEventListener("keydown", onKeydown);
@@ -69,6 +80,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("contextmenu", onContextMenuCapture, true);
   window.removeEventListener("contextmenu", onContextMenu);
   window.removeEventListener("click", close);
   window.removeEventListener("keydown", onKeydown);
