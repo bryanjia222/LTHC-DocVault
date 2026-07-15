@@ -210,12 +210,16 @@ async function libraryPath(params: {
 }
 
 /**
- * Open the document's library copy in the OS default editor. Materializes the
- * copy from the current version first if it is missing (the automated
- * replacement for relink). Synchronous - resolves once the editor is launched.
+ * Open a version of the document in the OS default editor. The current version
+ * (or when `version` is omitted/"current") opens the editable library copy,
+ * rebuilt from the archive if missing. A specific non-current version is
+ * exported to a read-only temp file for view-only review. `version` is a version
+ * id (the frontend `label`); omit it for the current version. Synchronous -
+ * resolves once the editor is launched.
  */
 async function openLibraryCopy(params: {
   document_id: string;
+  version?: string;
 }): Promise<void> {
   await invoke<void>("open_library_copy", params);
 }

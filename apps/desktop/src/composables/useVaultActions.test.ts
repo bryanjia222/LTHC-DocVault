@@ -300,15 +300,39 @@ describe("useVaultActions - commit modified document", () => {
 });
 
 describe("useVaultActions - open document", () => {
-  it("opens the library copy in the OS default editor", async () => {
+  it("opens the current version's library copy in the OS default editor", async () => {
     asTauri();
     vi.mocked(invoke).mockResolvedValue(undefined);
     await actions.openDocument(docA.id);
     expect(invoke).toHaveBeenCalledWith("open_library_copy", {
       document_id: docA.id,
+      version: "a1",
     });
     // Open derives the library path server-side; no file dialog is involved.
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it("opens the selected (non-current) version instead of always the current one", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const docB: Document = {
+      ...docA,
+      id: "docB",
+      versions: [
+        { id: "b1", label: "b1", author: "Alice", note: "", size: "", createdAt: "", status: "archived" },
+        { id: "b2", label: "b2", author: "Alice", note: "", size: "", createdAt: "", status: "current" },
+      ],
+    };
+    documents.value = [docB];
+    docs.selectedDocumentId.value = docB.id;
+    docs.selectedVersionId.value = "b1"; // the archived version
+    await actions.openDocument(docB.id);
+    // The selected version's label is forwarded so the backend opens that
+    // version (read-only temp file), not the current one.
+    expect(invoke).toHaveBeenCalledWith("open_library_copy", {
+      document_id: docB.id,
+      version: "b1",
+    });
   });
 
   it("does not invoke when no document is selected", async () => {

@@ -233,6 +233,14 @@ describe("useVault - library model contracts", () => {
     });
   });
 
+  it("openLibraryCopy forwards the optional version (selected version id)", async () => {
+    await vault.openLibraryCopy({ document_id: "docA", version: "v2" });
+    expect(invokeArgs("open_library_copy")).toStrictEqual({
+      document_id: "docA",
+      version: "v2",
+    });
+  });
+
   it("removeLibraryCopy sends document_id and resolves void", async () => {
     await vault.removeLibraryCopy({ document_id: "docA" });
     expect(invokeArgs("remove_library_copy")).toStrictEqual({

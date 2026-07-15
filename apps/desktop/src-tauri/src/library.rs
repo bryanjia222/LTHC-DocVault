@@ -153,6 +153,90 @@ pub(crate) fn remove_library_copy_at(library_dir: &Path, doc_id: &str) -> Result
     Ok(())
 }
 
+/// Open the library copy (the current-version mirror) in the editor. Materializes
+/// it first if missing. This is the editable working copy - edits flow back via
+/// commit-modified.
+fn open_current_copy(vault: &DocVault, doc_id: &str) -> Result<(), String> {
+    let path = library_path_for_doc(vault, doc_id)?;
+    if !path.exists() {
+        materialize_at(vault, doc_id, &path, &NEVER_CANCELLED)?;
+    }
+    open::that(&path)
+        .map(|_| ())
+        .map_err(|e| format!("failed to open editor: {e}"))
+}
+
+/// The extension (lowercased) of a specific version's `original_filename`.
+fn ext_for_version(vault: &DocVault, doc_id: &str, version_id: &str) -> Result<String, String> {
+    let versions = vault
+        .list_versions(&DocumentRef::IdPrefix(doc_id.to_owned()))
+        .map_err(|e| e.to_string())?;
+    let version = versions
+        .iter()
+        .find(|v| v.id == version_id)
+        .ok_or_else(|| format!("version {version_id} not found for document {doc_id}"))?;
+    Path::new(&version.original_filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| format!("no extension in original filename: {}", version.original_filename))
+}
+
+/// Clear the read-only attribute from `path` so it can be overwritten/deleted.
+/// The desktop is Windows-only; `set_readonly(false)` clears the
+/// FILE_ATTRIBUTE_READONLY bit (the clippy Unix world-writable concern does not
+/// apply here).
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly(path: &Path) -> Result<(), String> {
+    let mut perms = fs::metadata(path)
+        .map_err(|e| e.to_string())?
+        .permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(path, perms).map_err(|e| e.to_string())
+}
+
+/// Export a non-current version to a read-only temp file and return its path,
+/// without touching the library copy or the current-version pointer. The temp
+/// file is marked read-only so the editor flags any save attempt (view-only
+/// review of an older version). The temp path is reused across opens; a prior
+/// read-only copy is cleared first so the export can overwrite it. Pure of the
+/// `open::that` side effect, so it is unit-testable.
+fn materialize_readonly_temp(
+    vault: &DocVault,
+    doc_id: &str,
+    version_id: &str,
+) -> Result<PathBuf, String> {
+    let ext = ext_for_version(vault, doc_id, version_id)?;
+    let temp_path = std::env::temp_dir().join(format!("docvault-{doc_id}-{version_id}.{ext}"));
+    if temp_path.exists() {
+        clear_readonly(&temp_path)?;
+        fs::remove_file(&temp_path).map_err(|e| e.to_string())?;
+    }
+    vault
+        .export_version(
+            &DocumentRef::IdPrefix(doc_id.to_owned()),
+            version_id,
+            &temp_path,
+            &NEVER_CANCELLED,
+        )
+        .map_err(|e| e.to_string())?;
+    let mut perms = fs::metadata(&temp_path)
+        .map_err(|e| e.to_string())?
+        .permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(&temp_path, perms).map_err(|e| e.to_string())?;
+    Ok(temp_path)
+}
+
+/// Open a non-current version read-only in a temp file, without touching the
+/// library copy or the current-version pointer.
+fn open_version_readonly(vault: &DocVault, doc_id: &str, version_id: &str) -> Result<(), String> {
+    let temp_path = materialize_readonly_temp(vault, doc_id, version_id)?;
+    open::that(&temp_path)
+        .map(|_| ())
+        .map_err(|e| format!("failed to open editor: {e}"))
+}
+
 // --- AppHandle-bound commands ---
 
 /// The deterministic library path for a document, as a display string. The
@@ -166,20 +250,31 @@ pub fn library_path(document_id: String, state: State<AppState>) -> Result<Strin
     Ok(path.display().to_string())
 }
 
-/// Open the document's library copy in the OS default editor (Word/WPS). If the
-/// copy is missing it is rebuilt from the archive first (the automated relink).
-/// Synchronous; for the local-copy backend the rebuild is fast.
+/// Open a version of the document in the OS default editor. The current version
+/// (or when `version` is None/"current") opens the library copy - the editable
+/// working copy, rebuilt from the archive if missing, whose edits flow back via
+/// commit-modified. A specific non-current version is exported to a read-only
+/// temp file for view-only review, leaving the library copy and the
+/// current-version pointer untouched. `version` is a version id (the frontend's
+/// `label`); omit it (or pass "current") for the current version.
 #[tauri::command(rename_all = "snake_case")]
-pub fn open_library_copy(document_id: String, state: State<AppState>) -> Result<(), String> {
+pub fn open_library_copy(
+    document_id: String,
+    version: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
-    let path = library_path_for_doc(vault, &document_id)?;
-    if !path.exists() {
-        materialize_at(vault, &document_id, &path, &NEVER_CANCELLED)?;
+    let doc_ref = DocumentRef::IdPrefix(document_id.clone());
+    let current = vault
+        .current_version(&doc_ref)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no current version for document {document_id}"))?;
+    match version.as_deref() {
+        None | Some("current") => open_current_copy(vault, &document_id),
+        Some(v) if v == current.id => open_current_copy(vault, &document_id),
+        Some(v) => open_version_readonly(vault, &document_id, v),
     }
-    open::that(&path)
-        .map(|_| ())
-        .map_err(|e| format!("failed to open editor: {e}"))
 }
 
 /// Remove a document's library copy (any extension). Called on delete so the
@@ -258,6 +353,27 @@ mod tests {
             )
             .unwrap();
         doc.id.as_str().to_owned()
+    }
+
+    /// Commit another version to an existing document (by id); return the new
+    /// version id. The new version becomes current; the prior one is archived.
+    fn commit_version(vault: &DocVault, root: &Path, doc_id: &str, name: &str, contents: &[u8]) -> String {
+        let package_dir = root.join("pkg").join(name);
+        fs::create_dir_all(package_dir.join("word")).unwrap();
+        fs::write(package_dir.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(package_dir.join("word").join("document.xml"), contents).unwrap();
+        let source = root.join("sources").join(format!("{name}.docx"));
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        docvault_ooxml::pack_package(package_dir, &source).unwrap();
+        let (_doc, ver) = vault
+            .commit_document(
+                &source,
+                DocumentRef::IdPrefix(doc_id.to_owned()),
+                CommitMetadata::default(),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        ver.id.as_str().to_owned()
     }
 
     /// `library_path_for_doc` returns `<root>/library/<id>.docx` for a committed
@@ -396,5 +512,71 @@ mod tests {
     fn remove_library_copy_missing_dir_is_ok() {
         let temp = tempfile::tempdir().unwrap();
         remove_library_copy_at(&temp.path().join("nope"), "docA").unwrap();
+    }
+
+    /// `ext_for_version` derives the extension from a specific (non-current)
+    /// version's `original_filename`, not just the current one.
+    #[test]
+    fn ext_for_version_uses_requested_version_filename() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = vault_at(temp.path());
+        let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
+        let v1_id = vault
+            .current_version(&DocumentRef::IdPrefix(doc_id.clone()))
+            .unwrap()
+            .unwrap()
+            .id
+            .as_str()
+            .to_owned();
+        let _v2_id = commit_version(&vault, temp.path(), &doc_id, "report_v2", b"v2");
+
+        // v1 is now archived (non-current); its extension is still .docx.
+        assert_eq!(ext_for_version(&vault, &doc_id, &v1_id).unwrap(), "docx");
+    }
+
+    /// `materialize_readonly_temp` exports the requested (non-current) version to
+    /// a read-only temp file whose contents differ from the current version -
+    /// proving the archived version, not the current one, was materialized.
+    #[test]
+    fn materialize_readonly_temp_exports_requested_version_readonly() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = vault_at(temp.path());
+        let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
+        let v1_id = vault
+            .current_version(&DocumentRef::IdPrefix(doc_id.clone()))
+            .unwrap()
+            .unwrap()
+            .id
+            .as_str()
+            .to_owned();
+        let v2_id = commit_version(&vault, temp.path(), &doc_id, "report_v2", b"v2");
+        // v2 is now current; v1 is archived.
+
+        let temp_v1 = materialize_readonly_temp(&vault, &doc_id, &v1_id).unwrap();
+        assert!(temp_v1.exists(), "temp file created");
+        assert_eq!(
+            temp_v1.extension().and_then(|e| e.to_str()),
+            Some("docx"),
+            "temp file carries the version's extension"
+        );
+        assert!(
+            fs::metadata(&temp_v1).unwrap().permissions().readonly(),
+            "temp file is read-only"
+        );
+
+        // Distinct from a current-version (v2) export -> the archived version
+        // was exported, not the current one.
+        let temp_v2 = materialize_readonly_temp(&vault, &doc_id, &v2_id).unwrap();
+        assert_ne!(
+            fs::read(&temp_v1).unwrap(),
+            fs::read(&temp_v2).unwrap(),
+            "v1 and v2 temp files differ"
+        );
+
+        // Clear read-only so the tempdir cleanup can delete them.
+        for path in [&temp_v1, &temp_v2] {
+            let _ = clear_readonly(path);
+            let _ = fs::remove_file(path);
+        }
     }
 }

@@ -336,11 +336,15 @@ export function useVaultActions() {
     const actionKey = "actionLogs.open" as const;
     const id = docId ?? selectedDocument.value?.id;
     const doc = documents.value.find((d) => d.id === id);
+    // Open the version the user selected - matching what export targets, rather
+    // than always the current version. Omit when none is selected, in which case
+    // the backend opens the current version's library copy.
+    const version = selectedVersion.value?.label;
     log(
       t("log.actionRequested", {
         action: t(actionKey),
         name: doc?.name ?? t("log.noDocument"),
-        version: t("log.latest"),
+        version: version ?? t("log.latest"),
       }),
     );
     if (!id) {
@@ -349,7 +353,7 @@ export function useVaultActions() {
     }
     if (!isTauri()) return;
     try {
-      await openLibraryCopy({ document_id: id });
+      await openLibraryCopy({ document_id: id, version });
       log(t("log.opened", { name: doc?.name ?? t("log.noDocument") }));
     } catch (e) {
       log(t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error: String(e) }));
