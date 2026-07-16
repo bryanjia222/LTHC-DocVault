@@ -33,6 +33,15 @@ pub(crate) fn library_dir(vault: &DocVault) -> PathBuf {
     vault.paths().root_dir.join("library")
 }
 
+/// The extension (lowercased) of a filename, or an error when it has none.
+fn ext_from_filename(filename: &str) -> Result<String, String> {
+    Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| format!("no extension in original filename: {filename}"))
+}
+
 /// The extension of a document's current version (lowercased), derived from the
 /// version's `original_filename`. Errors when the document has no current
 /// version or the filename carries no extension.
@@ -41,22 +50,66 @@ fn ext_for_doc(vault: &DocVault, doc_id: &str) -> Result<String, String> {
         .current_version(&DocumentRef::IdPrefix(doc_id.to_owned()))
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no current version for document {doc_id}"))?;
-    Path::new(&version.original_filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .ok_or_else(|| format!(
-            "no extension in original filename: {}",
-            version.original_filename
-        ))
+    ext_from_filename(&version.original_filename)
+}
+
+/// Sanitize a document name for use as a filename component: replace path-
+/// illegal chars (cross-platform: Windows forbids `/ \ < > : " | ? *` and
+/// control chars) with `_`, trim leading/trailing dots and spaces (Windows
+/// rejects trailing ones), cap length so `-<uuid>.<ext>` fits comfortably, and
+/// fall back to `document` when empty. Keeps the name readable while
+/// guaranteeing a legal filename on Windows, Linux, and macOS.
+fn sanitize_name(name: &str) -> String {
+    let mut s: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
+            c if (c as u32) < 0x20 => '_',
+            c => c,
+        })
+        .collect();
+    s = s.trim_matches(|c: char| c == '.' || c == ' ').to_string();
+    if s.is_empty() {
+        return "document".to_owned();
+    }
+    const CAP: usize = 60;
+    if s.chars().count() > CAP {
+        s = s.chars().take(CAP).collect();
+    }
+    s
+}
+
+/// The first UUID group of `id` (up to the first `-`), or the whole id when it
+/// is not a hyphenated uuid. A short, still-unique display suffix for temp files.
+fn short_id(id: &str) -> &str {
+    id.split('-').next().unwrap_or(id)
+}
+
+/// The library-copy filename for a document: `<docName>-<docId>.<ext>`. The
+/// sanitized doc name makes it readable in the editor; the docId (a uuid) keeps
+/// it stable across commits/renames and collision-free.
+fn library_filename(doc_name: &str, doc_id: &str, ext: &str) -> String {
+    format!("{}-{}.{}", sanitize_name(doc_name), doc_id, ext)
+}
+
+/// Look up a document's display name by id (O(n) over the document list).
+fn doc_name_for(vault: &DocVault, doc_id: &str) -> Result<String, String> {
+    vault
+        .list_documents()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|d| d.id.as_str() == doc_id)
+        .map(|d| d.name)
+        .ok_or_else(|| format!("document {doc_id} not found"))
 }
 
 /// The deterministic library path for a document:
-/// `<vault_root>/library/<docId>.<ext>`. Stable across renames (docId-based)
-/// and collision-free.
+/// `<vault_root>/library/<docName>-<docId>.<ext>`. Stable across commits and
+/// renames (docId-based) and collision-free.
 pub(crate) fn library_path_for_doc(vault: &DocVault, doc_id: &str) -> Result<PathBuf, String> {
     let ext = ext_for_doc(vault, doc_id)?;
-    Ok(library_dir(vault).join(format!("{doc_id}.{ext}")))
+    let doc_name = doc_name_for(vault, doc_id)?;
+    Ok(library_dir(vault).join(library_filename(&doc_name, doc_id, &ext)))
 }
 
 /// Materialize a document's current version to `path` by exporting the
@@ -91,10 +144,24 @@ pub(crate) fn ensure_library_copies_for(
     let docs = vault.list_documents().map_err(|e| e.to_string())?;
     for doc in &docs {
         let doc_id = doc.id.as_str();
-        let lib_path = match library_path_for_doc(vault, doc_id) {
-            Ok(p) => p,
+        // Build the path from the already-available doc name + ext rather than
+        // `library_path_for_doc` (which re-scans the document list per doc).
+        let ext = match ext_for_doc(vault, doc_id) {
+            Ok(e) => e,
             Err(_) => continue, // no current version / no ext - skip
         };
+        let lib_path = library_dir(vault).join(library_filename(&doc.name, doc_id, &ext));
+        // Migrate a legacy `<docId>.<ext>` copy to the new `<docName>-<docId>.<ext>`
+        // name: rename when the new copy is missing, remove it when a new-named
+        // copy is already present. Avoids a re-export and orphan files on upgrade.
+        let legacy = library_dir(vault).join(format!("{doc_id}.{ext}"));
+        if legacy != lib_path && legacy.exists() {
+            if lib_path.exists() {
+                let _ = fs::remove_file(&legacy);
+            } else {
+                let _ = fs::rename(&legacy, &lib_path);
+            }
+        }
         let needs_baseline = !lib_path.exists();
         if needs_baseline {
             if let Err(error) = vault.export_version(
@@ -134,18 +201,22 @@ pub(crate) fn ensure_library_copies_for(
     Ok(())
 }
 
-/// Delete `<library>/<docId>.*` (any extension). Best-effort: a missing library
-/// dir or file is not an error. Pure so it is testable without an `AppHandle`.
+/// Delete a document's library copy - both the legacy `<docId>.<ext>` and the
+/// current `<docName>-<docId>.<ext>` names (matched by docId). Best-effort: a
+/// missing library dir or file is not an error. Pure so it is testable without
+/// an `AppHandle`.
 pub(crate) fn remove_library_copy_at(library_dir: &Path, doc_id: &str) -> Result<(), String> {
-    let prefix = format!("{doc_id}.");
+    let suffix = format!("-{doc_id}");
     if let Ok(entries) = fs::read_dir(library_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .file_name()
+            // Match both the legacy `<docId>.<ext>` name (stem == doc_id) and the
+            // current `<docName>-<docId>.<ext>` name (stem ends with `-<docId>`).
+            let belongs = path
+                .file_stem()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(&prefix))
-            {
+                .is_some_and(|stem| stem == doc_id || stem.ends_with(&suffix));
+            if belongs {
                 let _ = fs::remove_file(&path);
             }
         }
@@ -166,20 +237,24 @@ fn open_current_copy(vault: &DocVault, doc_id: &str) -> Result<(), String> {
         .map_err(|e| format!("failed to open editor: {e}"))
 }
 
+/// Look up a specific version by id within a document.
+fn version_for(
+    vault: &DocVault,
+    doc_id: &str,
+    version_id: &str,
+) -> Result<docvault_types::Version, String> {
+    vault
+        .list_versions(&DocumentRef::IdPrefix(doc_id.to_owned()))
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|v| v.id == version_id)
+        .ok_or_else(|| format!("version {version_id} not found for document {doc_id}"))
+}
+
 /// The extension (lowercased) of a specific version's `original_filename`.
 fn ext_for_version(vault: &DocVault, doc_id: &str, version_id: &str) -> Result<String, String> {
-    let versions = vault
-        .list_versions(&DocumentRef::IdPrefix(doc_id.to_owned()))
-        .map_err(|e| e.to_string())?;
-    let version = versions
-        .iter()
-        .find(|v| v.id == version_id)
-        .ok_or_else(|| format!("version {version_id} not found for document {doc_id}"))?;
-    Path::new(&version.original_filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .ok_or_else(|| format!("no extension in original filename: {}", version.original_filename))
+    let version = version_for(vault, doc_id, version_id)?;
+    ext_from_filename(&version.original_filename)
 }
 
 /// Clear the read-only attribute from `path` so it can be overwritten/deleted.
@@ -206,8 +281,18 @@ fn materialize_readonly_temp(
     doc_id: &str,
     version_id: &str,
 ) -> Result<PathBuf, String> {
-    let ext = ext_for_version(vault, doc_id, version_id)?;
-    let temp_path = std::env::temp_dir().join(format!("docvault-{doc_id}-{version_id}.{ext}"));
+    let version = version_for(vault, doc_id, version_id)?;
+    let ext = ext_from_filename(&version.original_filename)?;
+    let doc_name = doc_name_for(vault, doc_id)?;
+    // `<docName>-v<n>-<shortId>.<ext>`: readable, shows which version, unique.
+    let filename = format!(
+        "{}-v{}-{}.{}",
+        sanitize_name(&doc_name),
+        version.number,
+        short_id(version_id),
+        ext
+    );
+    let temp_path = std::env::temp_dir().join(filename);
     if temp_path.exists() {
         clear_readonly(&temp_path)?;
         fs::remove_file(&temp_path).map_err(|e| e.to_string())?;
@@ -385,7 +470,7 @@ mod tests {
         let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
 
         let path = library_path_for_doc(&vault, &doc_id).unwrap();
-        assert_eq!(path, temp.path().join("library").join(format!("{doc_id}.docx")));
+        assert_eq!(path, temp.path().join("library").join(format!("report-{doc_id}.docx")));
     }
 
     /// `materialize_at` writes a real .docx library copy from the current version.
@@ -415,7 +500,7 @@ mod tests {
 
         assert_eq!(slice.tracked.len(), 1);
         assert_eq!(slice.tracked[0].document_id, doc_id);
-        let expected = temp.path().join("library").join(format!("{doc_id}.docx"));
+        let expected = temp.path().join("library").join(format!("report-{doc_id}.docx"));
         assert_eq!(slice.tracked[0].path, expected.display().to_string());
         assert!(expected.exists(), "library copy materialized");
         assert!(slice.tracked[0].size > 0, "baseline size probed");
@@ -454,7 +539,7 @@ mod tests {
 
         let mut slice = DesktopStateSlice::default();
         ensure_library_copies_for(&vault, &mut slice).unwrap();
-        let lib_path = temp.path().join("library").join(format!("{doc_id}.docx"));
+        let lib_path = temp.path().join("library").join(format!("report-{doc_id}.docx"));
         fs::remove_file(&lib_path).unwrap();
         // Stale baseline (claims a size for a now-missing file).
         slice.tracked[0].size = 12345;
@@ -485,25 +570,30 @@ mod tests {
         };
         ensure_library_copies_for(&vault, &mut slice).unwrap();
 
-        let expected = temp.path().join("library").join(format!("{doc_id}.docx"));
+        let expected = temp.path().join("library").join(format!("report-{doc_id}.docx"));
         assert_eq!(slice.tracked[0].path, expected.display().to_string());
         assert!(slice.tracked[0].size > 1, "baseline refreshed after repoint");
     }
 
-    /// `remove_library_copy_at` deletes `<lib>/<id>.*` and leaves siblings.
+    /// `remove_library_copy_at` deletes both legacy `<id>.<ext>` and current
+    /// `<name>-<id>.<ext>` copies, and leaves siblings.
     #[test]
     fn remove_library_copy_globs_by_docid() {
         let temp = tempfile::tempdir().unwrap();
         let lib = temp.path().join("library");
         fs::create_dir_all(&lib).unwrap();
         fs::write(lib.join("docA.docx"), b"a").unwrap();
-        fs::write(lib.join("docA.bak"), b"bak").unwrap(); // also matched (prefix)
+        fs::write(lib.join("docA.bak"), b"bak").unwrap(); // legacy stem match
+        fs::write(lib.join("Report-docA.docx"), b"na").unwrap(); // new `<name>-<id>` match
+        fs::write(lib.join("Report-docB.docx"), b"nb").unwrap(); // sibling (new-named), kept
         fs::write(lib.join("docB.docx"), b"b").unwrap(); // sibling, kept
 
         remove_library_copy_at(&lib, "docA").unwrap();
 
         assert!(!lib.join("docA.docx").exists());
-        assert!(!lib.join("docA.bak").exists(), "prefix match also removed");
+        assert!(!lib.join("docA.bak").exists(), "legacy stem match removed");
+        assert!(!lib.join("Report-docA.docx").exists(), "new-named match removed");
+        assert!(lib.join("Report-docB.docx").exists(), "sibling (new-named) kept");
         assert!(lib.join("docB.docx").exists(), "sibling kept");
     }
 
@@ -564,9 +654,25 @@ mod tests {
             "temp file is read-only"
         );
 
+        // Filename is `<docName>-v<n>-<shortId>.<ext>`: readable + version-tagged.
+        let v1 = version_for(&vault, &doc_id, &v1_id).unwrap();
+        let short_v1 = v1_id.split('-').next().unwrap();
+        assert_eq!(
+            temp_v1.file_name().unwrap().to_string_lossy(),
+            format!("report-v{}-{short_v1}.docx", v1.number),
+            "v1 temp filename format"
+        );
+
         // Distinct from a current-version (v2) export -> the archived version
         // was exported, not the current one.
         let temp_v2 = materialize_readonly_temp(&vault, &doc_id, &v2_id).unwrap();
+        let v2 = version_for(&vault, &doc_id, &v2_id).unwrap();
+        let short_v2 = v2_id.split('-').next().unwrap();
+        assert_eq!(
+            temp_v2.file_name().unwrap().to_string_lossy(),
+            format!("report-v{}-{short_v2}.docx", v2.number),
+            "v2 temp filename format"
+        );
         assert_ne!(
             fs::read(&temp_v1).unwrap(),
             fs::read(&temp_v2).unwrap(),
@@ -578,5 +684,36 @@ mod tests {
             let _ = clear_readonly(path);
             let _ = fs::remove_file(path);
         }
+    }
+
+    /// `sanitize_name` replaces path-illegal chars (cross-platform), trims
+    /// dots/spaces, caps length, and falls back to `document` for empty input.
+    #[test]
+    fn sanitize_name_makes_filename_legal() {
+        assert_eq!(sanitize_name("report"), "report");
+        assert_eq!(
+            sanitize_name("a/b\\c:d*e?f<g>h|i\"j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
+        assert_eq!(sanitize_name("trailing."), "trailing");
+        assert_eq!(sanitize_name("  spaced  "), "spaced");
+        assert_eq!(sanitize_name(""), "document");
+        assert_eq!(sanitize_name("   "), "document");
+        let long = "x".repeat(100);
+        assert_eq!(sanitize_name(&long).len(), 60, "name capped to 60 chars");
+    }
+
+    /// `library_filename` is `<docName>-<docId>.<ext>` with the name sanitized.
+    #[test]
+    fn library_filename_format() {
+        assert_eq!(library_filename("report", "abc123", "docx"), "report-abc123.docx");
+        assert_eq!(library_filename("a/b", "abc123", "xlsx"), "a_b-abc123.xlsx");
+    }
+
+    /// `short_id` takes the first UUID group, or the whole id when not hyphenated.
+    #[test]
+    fn short_id_takes_first_uuid_group() {
+        assert_eq!(short_id("550e8400-e29b-41d4-a716-446655440000"), "550e8400");
+        assert_eq!(short_id("simpleid"), "simpleid");
     }
 }

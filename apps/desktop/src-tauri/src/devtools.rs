@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(slice.tracked.len(), 1);
         assert_eq!(slice.tracked[0].document_id, doc_id);
         // The tracked path is the library copy, not the example-doc source.
-        let expected = root.join("library").join(format!("{doc_id}.docx"));
+        let expected = root.join("library").join(format!("Report-{doc_id}.docx"));
         assert_eq!(slice.tracked[0].path, expected.display().to_string());
         assert!(expected.exists(), "library copy materialized");
         assert!(slice.tracked[0].size > 0, "baseline size probed");
