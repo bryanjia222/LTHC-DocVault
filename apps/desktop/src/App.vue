@@ -37,6 +37,7 @@ const {
   documents,
   initialized,
   openError,
+  recommendedRoot,
   refreshStatus,
   loadDocuments,
   loadConfig,
@@ -166,6 +167,9 @@ onBeforeUnmount(() => {
         <section v-else-if="!initialized" class="onboarding surface">
           <h2>{{ t("boot.welcome") }}</h2>
           <p>{{ t("boot.notInitialized") }}</p>
+          <p v-if="recommendedRoot" class="root-dir">
+            {{ t("boot.recommendedLabel") }}: {{ recommendedRoot }}
+          </p>
           <p v-if="openError" class="init-error">
             {{ t("boot.openFailed", { error: openError }) }}
           </p>

@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Manager, State};
 
-use docvault_storage::DocumentRef;
+use docvault_storage::{DocumentRef, VaultPaths};
 use docvault_types::VaultConfig;
 
 use crate::dto::{ConfigDto, ConnectError, ConnectOutcome, DocumentWithVersions, VaultStatusDto};
@@ -22,6 +22,7 @@ pub fn vault_status(app: AppHandle, state: State<AppState>) -> Result<VaultStatu
     Ok(VaultStatusDto {
         initialized,
         root_dir,
+        recommended_root: VaultPaths::default_root().display().to_string(),
         open_error: state::open_error(state.inner()),
     })
 }

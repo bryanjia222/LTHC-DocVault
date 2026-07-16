@@ -72,6 +72,7 @@ export interface RawConfig {
 export interface VaultStatus {
   initialized: boolean;
   root_dir: string;
+  recommended_root: string;
   open_error?: string;
 }
 

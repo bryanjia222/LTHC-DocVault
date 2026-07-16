@@ -43,7 +43,7 @@ beforeEach(() => {
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
     switch (cmd) {
       case "vault_status":
-        return { initialized: true, root_dir: "/r", open_error: "" };
+        return { initialized: true, root_dir: "/r", recommended_root: "/rec", open_error: "" };
       case "list_documents_with_versions":
         return [];
       case "list_jobs":
@@ -84,6 +84,12 @@ describe("useVault - read commands (no args)", () => {
   it("vault_status is invoked with no args", async () => {
     await vault.refreshStatus();
     expect(invoke).toHaveBeenCalledWith("vault_status");
+  });
+
+  it("refreshStatus maps root_dir and recommended_root", async () => {
+    await vault.refreshStatus();
+    expect(vault.rootDir.value).toBe("/r");
+    expect(vault.recommendedRoot.value).toBe("/rec");
   });
 
   it("list_documents_with_versions is invoked with no args", async () => {

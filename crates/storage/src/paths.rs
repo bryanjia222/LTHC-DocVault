@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-use directories::ProjectDirs;
+use directories::UserDirs;
 
 use crate::config::read_config_file;
 
@@ -24,8 +24,12 @@ pub struct VaultPaths {
 }
 
 impl VaultPaths {
-    /// The default vault root used when no explicit root is configured. The
-    /// desktop app falls back to this when the user has not yet chosen a vault.
+    /// The default vault root used when no explicit root is configured: a
+    /// `.DocVault` directory under the user's home (`~/.DocVault` on macOS/Linux,
+    /// `C:\Users\<user>\.DocVault` on Windows). Cross-platform, user-owned, and
+    /// conventionally hidden (leading dot), so it is also the recommended location
+    /// pre-filled in the first-run connect dialog. The desktop app falls back to
+    /// this when the user has not yet chosen a vault.
     pub fn default_root() -> PathBuf {
         default_root_dir()
     }
@@ -128,8 +132,8 @@ pub(crate) fn absolute_path(path: PathBuf) -> PathBuf {
 }
 
 fn default_root_dir() -> PathBuf {
-    ProjectDirs::from("com", "LTHC", "DocVault")
-        .map(|dirs| dirs.config_dir().to_path_buf())
+    UserDirs::new()
+        .map(|dirs| dirs.home_dir().join(".DocVault"))
         .unwrap_or_else(|| PathBuf::from(".docvault"))
 }
 

@@ -83,12 +83,19 @@ pub(crate) fn set_open_error(state: &AppState, message: Option<String>) {
         .unwrap_or_else(|e| e.into_inner()) = message;
 }
 
-/// Open the vault on startup if it has already been initialized (config.toml
-/// exists at the current root). A missing config means first run; the UI will
-/// prompt to init. A failure to open an existing vault is captured in
-/// `last_open_error` (surfaced via `vault_status`) instead of being swallowed.
+/// Open the vault on startup if the user has previously connected one. Requires
+/// a saved root pref (written by every `connect_vault`): with no pref the app
+/// stays at onboarding rather than auto-opening whatever vault might happen to
+/// live at the default root. This keeps the dev "fresh" reset (which clears the
+/// pref) persistent across restarts, and avoids reopening a stale vault left at
+/// the default root by an older install. A pref pointing at a missing/unreadable
+/// config is treated as first run; a failure to open an existing vault is
+/// captured in `last_open_error` (surfaced via `vault_status`) instead of being
+/// swallowed.
 pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
-    let root = current_root(app);
+    let Some(root) = prefs::load_root(app) else {
+        return;
+    };
     let paths = VaultPaths::from_root(&root);
     if !paths.config_path.exists() {
         return;

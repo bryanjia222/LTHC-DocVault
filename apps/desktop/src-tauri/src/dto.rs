@@ -29,6 +29,10 @@ pub struct ConfigDto {
 pub struct VaultStatusDto {
     pub initialized: bool,
     pub root_dir: String,
+    /// Suggested vault location for a new vault: a cross-platform `.DocVault`
+    /// directory under the user's home. Pre-filled in the connect dialog so a
+    /// first-run user can create a vault there with one click, or browse elsewhere.
+    pub recommended_root: String,
     /// Error from the last failed attempt to open an already-initialized vault.
     /// Absent when the vault is open or no open has been attempted.
     #[serde(skip_serializing_if = "Option::is_none")]

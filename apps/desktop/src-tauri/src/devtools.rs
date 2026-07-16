@@ -4,7 +4,7 @@
 //! One Tauri command, [`reset_to_stage`], drives a three-stage slider in the
 //! dev Settings card:
 //! - `fresh`: drop + purge the test vault and clear the saved root pref so the
-//!   app returns to onboarding (first step = select repo + backend).
+//!   app returns to onboarding (first step = create or select a repo + backend).
 //! - `initial`: re-initialize an empty vault with the chosen backend.
 //! - `seeded`: `initial`, then synchronously import three sample Office docs
 //!   and write tags + source-file baselines.
@@ -41,11 +41,14 @@ const SEED_ENTRIES: &[(&str, &str)] = &[
 // --- pure helpers (no AppHandle; unit-testable) ---
 
 /// Where the sample Office docs live. `CARGO_MANIFEST_DIR` is the `src-tauri`
-/// dir at compile time, so the repo-root `example_docs` is one level up. Only
-/// meaningful in dev (or a build run on the compile host); commands check
-/// presence and return a clear error when the dir is absent.
+/// dir at compile time, so the repo-root `example_docs` is three levels up
+/// (`src-tauri` -> `apps/desktop` -> `apps` -> repo root). Only meaningful in
+/// dev (or a build run on the compile host); commands check presence and return
+/// a clear error when the dir is absent.
 fn example_docs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
         .join("..")
         .join("example_docs")
 }
@@ -265,6 +268,18 @@ mod tests {
         }
     }
 
+    /// A `local-copy` `config.toml` for `paths`. Used by tests that need a
+    /// working vault without the external restic binary (`VaultConfig::for_paths`
+    /// defaults to restic).
+    fn local_copy_config(paths: &VaultPaths) -> String {
+        format!(
+            "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
+            paths.data_dir.display().to_string().replace('\\', "/"),
+            paths.repo_dir.display().to_string().replace('\\', "/"),
+            paths.db_path.display().to_string().replace('\\', "/"),
+        )
+    }
+
     #[test]
     fn purge_removes_all_entries() {
         let temp = tempfile::tempdir().unwrap();
@@ -293,6 +308,23 @@ mod tests {
         assert!(root.exists());
     }
 
+    /// `example_docs_dir()` must resolve to the repo-root `example_docs` (two
+    /// levels up from `src-tauri`), and every seed file must be present. Guards
+    /// against regressing the path back to one level up (`apps/desktop`), which
+    /// silently skipped seeding via `example_docs_available` and broke stage 3.
+    #[test]
+    fn example_docs_dir_resolves_to_repo_root_with_seed_files() {
+        let dir = example_docs_dir();
+        assert!(
+            dir.is_dir(),
+            "example_docs not found at {} (expected repo-root example_docs)",
+            dir.display()
+        );
+        for (file, _) in SEED_ENTRIES {
+            assert!(dir.join(file).exists(), "missing seed file: {file}");
+        }
+    }
+
     #[test]
     fn seed_three_docs_imports_one_per_type() {
         let Some(example_docs) = example_docs_available() else {
@@ -301,6 +333,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
         let paths = VaultPaths::from_root(&root);
+        // Write a local-copy config so the vault does not default to restic
+        // (`VaultConfig::for_paths` defaults to restic), which would need the
+        // external binary and is unavailable in unit tests.
+        fs::create_dir_all(&paths.root_dir).unwrap();
+        fs::write(&paths.config_path, local_copy_config(&paths)).unwrap();
         let storage = VaultStorage::init(paths).unwrap();
         let vault = DocVault::new(storage);
         let cancel = AtomicBool::new(false);
@@ -321,13 +358,7 @@ mod tests {
         let root = temp.path().join("vault");
         let paths = VaultPaths::from_root(&root);
         fs::create_dir_all(&paths.root_dir).unwrap();
-        let cfg = format!(
-            "[storage]\nbackend = \"local-copy\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\n\n[database]\npath = \"{}\"\n",
-            paths.data_dir.display().to_string().replace('\\', "/"),
-            paths.repo_dir.display().to_string().replace('\\', "/"),
-            paths.db_path.display().to_string().replace('\\', "/"),
-        );
-        fs::write(&paths.config_path, cfg).unwrap();
+        fs::write(&paths.config_path, local_copy_config(&paths)).unwrap();
         let vault = DocVault::new(VaultStorage::init(paths).unwrap());
         let cancel = AtomicBool::new(false);
 

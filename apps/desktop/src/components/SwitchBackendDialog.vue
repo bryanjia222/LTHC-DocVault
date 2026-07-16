@@ -8,15 +8,19 @@ import { useVault } from "../composables/useVault";
 import { useDesktopState } from "../composables/useDesktopState";
 
 /*
- * Switch-backend dialog. Moves the connect form out of the Settings page into a
- * modal triggered by a button. Same fields + connect() contract as before; the
- * backend select pre-fills to the current backend so switching is a small edit,
- * not a from-scratch choice. Errors map to localized messages via ConnectError.
+ * Switch-backend / connect dialog. Drives the same `connect()` contract whether
+ * reached from first-run onboarding or the Settings "Switch…" button: an empty
+ * (or absent) directory creates a new vault there; a recognized vault directory
+ * opens it. The directory field is pre-filled with the recommended location
+ * (`~/.DocVault`) so a first-run user can create a vault with one click, or
+ * browse to pick an existing one. The backend select pre-fills to the current
+ * backend so switching is a small edit, not a from-scratch choice. Errors map to
+ * localized messages via ConnectError.
  */
 
 const { t } = useI18n();
 const { switchBackendOpen, closeSwitchBackend } = useDialogs();
-const { config, connect, isTauri } = useVault();
+const { config, connect, isTauri, recommendedRoot } = useVault();
 const desktop = useDesktopState();
 
 const dir = ref("");
@@ -28,7 +32,9 @@ const switching = ref(false);
 
 watch(switchBackendOpen, (open) => {
   if (!open) return;
-  dir.value = "";
+  // Pre-fill the recommended location: submitting as-is creates a new vault
+  // there (empty dir); browsing lets the user pick an existing vault to open.
+  dir.value = recommendedRoot.value;
   backend.value = config.value.backend === "restic" ? "restic" : "local-copy";
   password.value = "";
   status.value = "";
@@ -91,6 +97,8 @@ function close() {
 <template>
   <BaseModal :open="switchBackendOpen" :title="t('connect.title')" @close="close">
     <form id="switch-backend-form" class="dialog-form" @submit.prevent="submit">
+      <p class="dialog-hint">{{ t("connect.hint") }}</p>
+
       <label class="field">
         <span>{{ t("connect.dirLabel") }}</span>
         <div class="file-row">
@@ -149,6 +157,13 @@ function close() {
 .dialog-form {
   display: grid;
   gap: 14px;
+}
+
+.dialog-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .field {
