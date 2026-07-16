@@ -389,7 +389,7 @@ describe("useVaultActions - stage reset (dev)", () => {
       expect(invoke).toHaveBeenCalledWith("reset_to_stage", {
         stage: "initial",
         backend: "local-copy",
-        resticPassword: null,
+        restic_password: null,
       });
     });
   });
@@ -405,7 +405,7 @@ describe("useVaultActions - stage reset (dev)", () => {
       expect(invoke).toHaveBeenCalledWith("reset_to_stage", {
         stage: "seeded",
         backend: "restic",
-        resticPassword: "hunter2",
+        restic_password: "hunter2",
       });
     });
   });

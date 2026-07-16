@@ -22,10 +22,8 @@ export const zhCN = {
   boot: {
     loading: "正在连接仓库…",
     welcome: "欢迎使用 DocVault",
-    notInitialized:
-      "创建新仓库或打开已有仓库。已预填推荐位置——可保留或另选。后续可在“设置”中切换仓库。",
+    notInitialized: "创建新仓库或打开已有仓库，默认位置：{root}",
     connect: "创建或选择仓库",
-    recommendedLabel: "推荐位置",
     initFailed: "初始化失败：{error}",
     openFailed: "无法打开现有仓库：{error}",
   },
@@ -329,6 +327,7 @@ export const zhCN = {
     resetDone: "已重置到 {stage}",
     backend: "后端",
     password: "Restic 密码",
+    passwordOptional: "可选，留空则使用开发默认密码。",
     freshNoBackend: "此阶段不配置后端--重置后在引导界面选择仓库与后端。",
     stages: {
       fresh: {

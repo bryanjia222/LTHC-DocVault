@@ -23,10 +23,8 @@ export const enUS = {
   boot: {
     loading: "Connecting to vault…",
     welcome: "Welcome to DocVault",
-    notInitialized:
-      "Create a new vault or open an existing one. A recommended location is pre-filled — keep it or browse for another. You can switch vaults later from Settings.",
+    notInitialized: "Create a new vault or open an existing one. Default location: {root}",
     connect: "Create or select vault",
-    recommendedLabel: "Recommended location",
     initFailed: "Initialization failed: {error}",
     openFailed: "Could not open the existing vault: {error}",
   },
@@ -334,6 +332,7 @@ export const enUS = {
     resetDone: "Reset to {stage}",
     backend: "Backend",
     password: "Restic password",
+    passwordOptional: "Optional; a dev password is used if blank.",
     freshNoBackend:
       "No backend here - you'll pick repo + backend on the onboarding screen after reset.",
     stages: {

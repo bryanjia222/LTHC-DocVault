@@ -32,12 +32,8 @@ const thumbPos = computed(
   () => (selectedIndex.value / (STAGES.length - 1)) * 100,
 );
 const needsBackend = computed(() => stage.value !== "fresh");
-const needsPassword = computed(
-  () => needsBackend.value && backend.value === "restic",
-);
-const canConfirm = computed(
-  () => !needsPassword.value || password.value.length > 0,
-);
+// The restic password is optional: the backend falls back to a dev default
+// when blank, so confirm is always enabled (a stage is always selected).
 
 function selectIndex(i: number) {
   selectedIndex.value = i;
@@ -78,7 +74,6 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function onConfirm() {
-  if (!canConfirm.value) return;
   resetToStageAction(stage.value, backend.value, password.value || undefined);
 }
 </script>
@@ -152,6 +147,7 @@ function onConfirm() {
           class="text-input"
           :placeholder="t('dev.password')"
         />
+        <span class="opt-hint">{{ t("dev.passwordOptional") }}</span>
       </label>
     </div>
     <p v-else class="fresh-note">{{ t("dev.freshNoBackend") }}</p>
@@ -160,7 +156,6 @@ function onConfirm() {
       <button
         class="primary"
         type="button"
-        :disabled="!canConfirm"
         @click="onConfirm"
       >
         {{ t("dev.confirmStage", { stage: stageLabel }) }}
@@ -181,6 +176,11 @@ function onConfirm() {
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.opt-hint {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .stage-track {

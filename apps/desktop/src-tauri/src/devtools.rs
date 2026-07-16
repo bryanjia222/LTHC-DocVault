@@ -38,6 +38,13 @@ const SEED_ENTRIES: &[(&str, &str)] = &[
     ("table_v1.xlsx", "Table"),
 ];
 
+/// Default restic password for the dev test vault when the dev slider omits one.
+/// Restic requires a password, but the dev flow makes it optional; this matches
+/// the `docvault_types::VaultConfig::for_paths` dev default so a no-password
+/// reset is consistent with a no-config default vault. Production `connect_vault`
+/// never uses this - it requires an explicit password.
+const DEV_RESTIC_PASSWORD: &str = "docvault-local-development-password";
+
 // --- pure helpers (no AppHandle; unit-testable) ---
 
 /// Where the sample Office docs live. `CARGO_MANIFEST_DIR` is the `src-tauri`
@@ -188,11 +195,24 @@ fn reset_to_stage_core(
             Ok(())
         }
         "initial" | "seeded" => {
+            // For the dev test vault a restic password is optional: fall back to
+            // the dev default when blank so a reset need not prompt for one.
+            let effective_password = if backend == "restic" {
+                Some(
+                    restic_password
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or(DEV_RESTIC_PASSWORD)
+                        .to_owned(),
+                )
+            } else {
+                restic_password
+            };
             state::connect_vault_core(
                 state,
                 &root.display().to_string(),
                 backend,
-                restic_password,
+                effective_password,
             )
             .map_err(connect_err_to_string)?;
             prefs::save_root(app, root).map_err(|e| e.to_string())?;

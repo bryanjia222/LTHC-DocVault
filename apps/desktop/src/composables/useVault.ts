@@ -309,10 +309,13 @@ async function resetToStage(
   resticPassword?: string,
 ): Promise<void> {
   if (!isTauri()) return;
+  // `reset_to_stage` is `#[tauri::command(rename_all = "snake_case")]`, so the
+  // restic password key must be snake_case - a camelCase key here is silently
+  // dropped and the backend sees no password.
   await invoke("reset_to_stage", {
     stage,
     backend,
-    resticPassword: resticPassword ?? null,
+    restic_password: resticPassword ?? null,
   });
   await Promise.all([
     refreshStatus(),

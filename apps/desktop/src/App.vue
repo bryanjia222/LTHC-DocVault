@@ -166,10 +166,7 @@ onBeforeUnmount(() => {
         <div v-if="booting" class="boot-state">{{ t("boot.loading") }}</div>
         <section v-else-if="!initialized" class="onboarding surface">
           <h2>{{ t("boot.welcome") }}</h2>
-          <p>{{ t("boot.notInitialized") }}</p>
-          <p v-if="recommendedRoot" class="root-dir">
-            {{ t("boot.recommendedLabel") }}: {{ recommendedRoot }}
-          </p>
+          <p>{{ t("boot.notInitialized", { root: recommendedRoot }) }}</p>
           <p v-if="openError" class="init-error">
             {{ t("boot.openFailed", { error: openError }) }}
           </p>
@@ -247,13 +244,7 @@ onBeforeUnmount(() => {
 .onboarding p {
   color: var(--text-secondary);
   line-height: 1.6;
-}
-
-.root-dir {
-  font-family: var(--mono-font);
-  font-size: 12px;
-  word-break: break-all;
-  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .onboarding .primary {
