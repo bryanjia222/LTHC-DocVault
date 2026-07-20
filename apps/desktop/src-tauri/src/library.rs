@@ -251,12 +251,6 @@ fn version_for(
         .ok_or_else(|| format!("version {version_id} not found for document {doc_id}"))
 }
 
-/// The extension (lowercased) of a specific version's `original_filename`.
-fn ext_for_version(vault: &DocVault, doc_id: &str, version_id: &str) -> Result<String, String> {
-    let version = version_for(vault, doc_id, version_id)?;
-    ext_from_filename(&version.original_filename)
-}
-
 /// Clear the read-only attribute from `path` so it can be overwritten/deleted.
 /// On Windows this clears FILE_ATTRIBUTE_READONLY (required before a read-only
 /// file can be deleted or overwritten). On Unix a read-only file is already
@@ -604,26 +598,6 @@ mod tests {
     fn remove_library_copy_missing_dir_is_ok() {
         let temp = tempfile::tempdir().unwrap();
         remove_library_copy_at(&temp.path().join("nope"), "docA").unwrap();
-    }
-
-    /// `ext_for_version` derives the extension from a specific (non-current)
-    /// version's `original_filename`, not just the current one.
-    #[test]
-    fn ext_for_version_uses_requested_version_filename() {
-        let temp = tempfile::tempdir().unwrap();
-        let vault = vault_at(temp.path());
-        let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
-        let v1_id = vault
-            .current_version(&DocumentRef::IdPrefix(doc_id.clone()))
-            .unwrap()
-            .unwrap()
-            .id
-            .as_str()
-            .to_owned();
-        let _v2_id = commit_version(&vault, temp.path(), &doc_id, "report_v2", b"v2");
-
-        // v1 is now archived (non-current); its extension is still .docx.
-        assert_eq!(ext_for_version(&vault, &doc_id, &v1_id).unwrap(), "docx");
     }
 
     /// `materialize_readonly_temp` exports the requested (non-current) version to
