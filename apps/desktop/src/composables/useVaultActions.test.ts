@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { message, open, save } from "@tauri-apps/plugin-dialog";
 
 import { useVaultActions } from "./useVaultActions";
 import { useVault } from "./useVault";
@@ -369,6 +369,19 @@ describe("useVaultActions - open document", () => {
     await actions.openDocument(docA.id);
     await flush();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("shows an error prompt when opening fails (e.g. no default app)", async () => {
+    asTauri();
+    vi.mocked(invoke).mockRejectedValue("failed to open editor: no association");
+    vi.mocked(message).mockClear();
+    await actions.openDocument(docA.id);
+    await flush();
+    expect(message).toHaveBeenCalledTimes(1);
+    expect(message).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: "error" }),
+    );
   });
 });
 

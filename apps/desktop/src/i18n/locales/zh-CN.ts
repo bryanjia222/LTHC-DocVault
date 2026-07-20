@@ -224,6 +224,8 @@ export const zhCN = {
     noTrackedFile: "{action}需要先追踪源文件",
     opened: "已打开文档：{name}",
     openFailed: "打开文档失败：{name}（{error}）",
+    openFailedTitle: "无法打开文档",
+    openNoDefaultApp: "DocVault 无法用系统默认程序打开「{name}」。通常是因为系统未为该文件类型（.docx/.xlsx/.pptx）关联默认程序，或关联的程序启动失败。请在系统设置中为该扩展名关联一个 Office 程序（如 Word/WPS/LibreOffice）后重试。详细错误：{error}",
     renamed: "已重命名文档：{name} → {newName}",
     latest: "latest",
     cleared: "活动日志已清空",

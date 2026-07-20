@@ -1,4 +1,4 @@
-import { save } from "@tauri-apps/plugin-dialog";
+import { message, save } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import { useActivityLog } from "./useActivityLog";
 import { useDialogs } from "./useDialogs";
@@ -366,7 +366,14 @@ export function useVaultActions() {
       await openLibraryCopy({ document_id: id, version });
       log(t("log.opened", { name: doc?.name ?? t("log.noDocument") }));
     } catch (e) {
-      log(t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error: String(e) }));
+      const error = String(e);
+      log(t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error }));
+      // No default app (or it failed to launch) - surface a visible, actionable
+      // prompt; the activity log alone is easy to miss.
+      await message(
+        t("log.openNoDefaultApp", { name: doc?.name ?? t("log.noDocument"), error }),
+        { title: t("log.openFailedTitle"), kind: "error" },
+      );
     }
   }
 

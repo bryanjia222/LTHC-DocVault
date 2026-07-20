@@ -226,6 +226,8 @@ export const enUS = {
     noTrackedFile: "{action} requires a tracked source file first",
     opened: "Opened document: {name}",
     openFailed: "Failed to open document: {name} ({error})",
+    openFailedTitle: "Could not open document",
+    openNoDefaultApp: "DocVault could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
     renamed: "Renamed document: {name} -> {newName}",
     latest: "latest",
     cleared: "Activity log cleared",

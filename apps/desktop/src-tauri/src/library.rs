@@ -258,9 +258,11 @@ fn ext_for_version(vault: &DocVault, doc_id: &str, version_id: &str) -> Result<S
 }
 
 /// Clear the read-only attribute from `path` so it can be overwritten/deleted.
-/// The desktop is Windows-only; `set_readonly(false)` clears the
-/// FILE_ATTRIBUTE_READONLY bit (the clippy Unix world-writable concern does not
-/// apply here).
+/// On Windows this clears FILE_ATTRIBUTE_READONLY (required before a read-only
+/// file can be deleted or overwritten). On Unix a read-only file is already
+/// deletable by its owner, so this is a harmless no-op that restores the
+/// user-write bit. `set_readonly(false)` is coarse on Unix (it does not restore
+/// the original mode), hence the clippy allow.
 #[allow(clippy::permissions_set_readonly_false)]
 fn clear_readonly(path: &Path) -> Result<(), String> {
     let mut perms = fs::metadata(path)
