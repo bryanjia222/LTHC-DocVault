@@ -49,6 +49,21 @@ pub struct ConnectOutcome {
     pub root_dir: String,
 }
 
+/// Result of probing a directory before connecting. `status` is `"empty"` (a
+/// new vault can be initialized here with a user-chosen backend), `"existing"`
+/// (a recognized DocVault vault whose backend is already fixed by its
+/// `config.toml`), or `"unrecognized"` (non-empty and not a vault). `backend`
+/// carries the existing vault's backend string, present only when `status ==
+/// "existing"`. The connect dialog uses this to lock the backend selector for an
+/// existing vault rather than letting the user pick a backend that
+/// `connect_vault_core` would silently ignore.
+#[derive(Debug, Serialize)]
+pub struct VaultProbe {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+}
+
 /// Structured error for `connect_vault`, serialized to the UI so it can map
 /// each case to a localized message.
 #[derive(Debug, Serialize)]

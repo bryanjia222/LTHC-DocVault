@@ -95,6 +95,16 @@ fn dev_restic_asset() -> Option<PathBuf> {
 pub fn run() {
     clear_docvault_env();
     tauri::Builder::default()
+        // Registered first so a second launch focuses the existing main window
+        // instead of starting a duplicate instance. Must precede all other
+        // plugins (the plugin's own docs require it be the first plugin).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
@@ -113,6 +123,7 @@ pub fn run() {
             commands::list_documents_with_versions,
             commands::get_config,
             commands::connect_vault,
+            commands::probe_vault,
             commands::open_devtools,
             commands::repo_size,
             jobs::commit_document,

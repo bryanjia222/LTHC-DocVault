@@ -9,7 +9,7 @@ use docvault_types::VaultConfig;
 use tauri::AppHandle;
 use tracing::warn;
 
-use crate::dto::{ConnectError, ConnectOutcome};
+use crate::dto::{ConnectError, ConnectOutcome, VaultProbe};
 use crate::prefs;
 
 /// Shared application state. The vault is `None` until the user initializes it
@@ -171,6 +171,46 @@ pub fn connect_vault_core(
     })
 }
 
+/// Probe a directory without connecting, classifying it for the connect dialog.
+///
+/// - `empty`: missing or has no entries - safe to initialize here with a
+///   user-chosen backend.
+/// - `existing`: a recognized DocVault vault (a parseable `config.toml`). Its
+///   backend is already fixed, so the dialog should display it read-only instead
+///   of offering a choice `connect_vault_core` would silently ignore.
+/// - `unrecognized`: non-empty and not a recognizable vault.
+///
+/// Reading the config here is best-effort; a read/parse failure falls through
+/// to the `empty`/`unrecognized` branch (matching `connect_vault_core`).
+pub fn probe_vault(root_dir: &str) -> VaultProbe {
+    let root = PathBuf::from(root_dir);
+    let paths = VaultPaths::from_root(&root);
+    if is_recognized_vault(&paths) {
+        return VaultProbe {
+            status: "existing".to_owned(),
+            backend: existing_backend(&paths),
+        };
+    }
+    let empty = is_empty_dir(&root).unwrap_or(false);
+    VaultProbe {
+        status: if empty {
+            "empty"
+        } else {
+            "unrecognized"
+        }
+        .to_owned(),
+        backend: None,
+    }
+}
+
+/// The backend recorded in an existing vault's `config.toml`, or `None` if the
+/// file can't be read or parsed (the caller treats that as unrecognized).
+fn existing_backend(paths: &VaultPaths) -> Option<String> {
+    let text = fs::read_to_string(&paths.config_path).ok()?;
+    let config: VaultConfig = toml::from_str(&text).ok()?;
+    Some(config.storage.backend)
+}
+
 /// `true` when `root` does not exist or has no entries.
 fn is_empty_dir(root: &Path) -> Result<bool, ConnectError> {
     if !root.exists() {
@@ -279,6 +319,47 @@ mod tests {
             .expect_err("unrecognized dir should be rejected");
         assert!(matches!(err, ConnectError::Unrecognized));
         assert!(state.vault.lock().unwrap().is_none());
+    }
+
+    /// `probe_vault` classifies a missing/empty directory as `empty` (a new
+    /// vault can be initialized there with a chosen backend).
+    #[test]
+    fn probe_empty_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let probe = probe_vault(root.to_str().unwrap());
+        assert_eq!(probe.status, "empty");
+        assert!(probe.backend.is_none());
+    }
+
+    /// `probe_vault` classifies a recognized vault as `existing` and reports its
+    /// configured backend - the value the dialog should display read-only.
+    #[test]
+    fn probe_existing_vault_reports_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let paths = VaultPaths::from_root(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&paths.config_path, local_copy_config(&paths)).unwrap();
+        VaultStorage::init(paths).unwrap();
+
+        let probe = probe_vault(root.to_str().unwrap());
+        assert_eq!(probe.status, "existing");
+        assert_eq!(probe.backend.as_deref(), Some("local-copy"));
+    }
+
+    /// `probe_vault` classifies a non-empty non-vault directory as
+    /// `unrecognized` (matches the `connect_vault_core` rejection).
+    #[test]
+    fn probe_unrecognized_nonempty() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("junk");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("random.txt"), "not a vault").unwrap();
+
+        let probe = probe_vault(root.to_str().unwrap());
+        assert_eq!(probe.status, "unrecognized");
+        assert!(probe.backend.is_none());
     }
 
     /// The restic backend requires a password; this validation happens before

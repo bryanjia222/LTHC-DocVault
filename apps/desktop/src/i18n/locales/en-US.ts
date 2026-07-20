@@ -253,6 +253,8 @@ export const enUS = {
     browse: "Browse…",
     backend: "Backend",
     password: "Restic password",
+    backendLocked:
+      "This directory is already an initialized vault, so its backend is fixed. Choose an empty directory to use a different backend.",
     submit: "Connect / Initialize",
     title: "Create or open vault",
     hint: "Pick an empty directory to create a new vault, or an existing vault directory to open it. A recommended location is pre-filled.",

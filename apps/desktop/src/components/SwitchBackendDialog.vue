@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, computed } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import BaseModal from "./BaseModal.vue";
 import { useDialogs } from "../composables/useDialogs";
-import { useVault } from "../composables/useVault";
+import { useVault, type VaultProbe } from "../composables/useVault";
 import { useDesktopState } from "../composables/useDesktopState";
 
 /*
@@ -13,14 +13,20 @@ import { useDesktopState } from "../composables/useDesktopState";
  * (or absent) directory creates a new vault there; a recognized vault directory
  * opens it. The directory field is pre-filled with the recommended location
  * (`~/.DocVault`) so a first-run user can create a vault with one click, or
- * browse to pick an existing one. The backend select pre-fills to the current
- * backend so switching is a small edit, not a from-scratch choice. Errors map to
- * localized messages via ConnectError.
+ * browse to pick an existing one.
+ *
+ * The backend is only selectable for a directory that is not yet a vault: an
+ * existing vault's backend is fixed by its config.toml, and connect_vault_core
+ * opens it with that backend regardless of what is picked here. So once a
+ * directory is probed as an existing vault, the selector is locked to the
+ * vault's real backend with a hover tooltip explaining why - to use a different
+ * backend the user must point at an empty directory. Errors map to localized
+ * messages via ConnectError.
  */
 
 const { t } = useI18n();
 const { switchBackendOpen, closeSwitchBackend } = useDialogs();
-const { config, connect, isTauri, recommendedRoot } = useVault();
+const { config, connect, isTauri, recommendedRoot, probeVault } = useVault();
 const desktop = useDesktopState();
 
 const dir = ref("");
@@ -29,6 +35,10 @@ const password = ref("");
 const status = ref("");
 const error = ref("");
 const switching = ref(false);
+/** Probe of the current `dir`: empty / existing / unrecognized. */
+const probe = ref<VaultProbe>({ status: "empty" });
+/** An existing vault's backend is fixed - lock the selector and show it. */
+const backendLocked = computed(() => probe.value.status === "existing");
 
 watch(switchBackendOpen, (open) => {
   if (!open) return;
@@ -40,6 +50,29 @@ watch(switchBackendOpen, (open) => {
   status.value = "";
   error.value = "";
   switching.value = false;
+  // `probe` refreshes via the `dir` watcher below; reset to a neutral state
+  // until that async probe resolves so a stale lock from a previous open does
+  // not flash.
+  probe.value = { status: "empty" };
+});
+
+// Re-probe whenever the directory changes (pre-fill, browse, or manual edit) so
+// the selector locks/unlocks to match what connect_vault_core will actually do.
+// For an existing vault, drive the selector to the vault's real backend so the
+// locked control displays the truth rather than the stale pre-fill.
+watch(dir, async (d) => {
+  if (!d) {
+    probe.value = { status: "empty" };
+    return;
+  }
+  try {
+    probe.value = await probeVault(d);
+  } catch {
+    probe.value = { status: "empty" };
+  }
+  if (probe.value.status === "existing" && probe.value.backend) {
+    backend.value = probe.value.backend === "restic" ? "restic" : "local-copy";
+  }
 });
 
 async function pickDir() {
@@ -63,7 +96,9 @@ async function submit() {
       root_dir: dir.value,
       backend: backend.value,
       restic_password:
-        backend.value === "restic" ? password.value : undefined,
+        backend.value === "restic" && !backendLocked.value
+          ? password.value
+          : undefined,
     });
     // Desktop state (tags + tracked sources) is scoped per vault root, so
     // reload the slice for the now-active vault.
@@ -117,13 +152,20 @@ function close() {
 
       <label class="field">
         <span>{{ t("connect.backend") }}</span>
-        <select v-model="backend" class="text-input">
+        <select
+          v-model="backend"
+          class="text-input"
+          :disabled="backendLocked"
+          :title="backendLocked ? t('connect.backendLocked') : ''"
+        >
           <option value="local-copy">{{ t("backend.local-copy") }}</option>
           <option value="restic">{{ t("backend.restic") }}</option>
         </select>
       </label>
 
-      <label v-if="backend === 'restic'" class="field">
+      <p v-if="backendLocked" class="dialog-hint">{{ t("connect.backendLocked") }}</p>
+
+      <label v-if="backend === 'restic' && !backendLocked" class="field">
         <span>{{ t("connect.password") }}</span>
         <input
           v-model="password"

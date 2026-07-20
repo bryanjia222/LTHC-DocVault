@@ -3,7 +3,9 @@ use tauri::{AppHandle, Manager, State};
 use docvault_storage::{DocumentRef, VaultPaths};
 use docvault_types::VaultConfig;
 
-use crate::dto::{ConfigDto, ConnectError, ConnectOutcome, DocumentWithVersions, VaultStatusDto};
+use crate::dto::{
+    ConfigDto, ConnectError, ConnectOutcome, DocumentWithVersions, VaultProbe, VaultStatusDto,
+};
 use crate::prefs;
 use crate::state::{self, AppState};
 
@@ -91,6 +93,15 @@ pub fn connect_vault(
     prefs::save_root(&app, std::path::Path::new(&outcome.root_dir))
         .map_err(|e| ConnectError::Other(e.to_string()))?;
     Ok(outcome)
+}
+
+/// Probe a directory to classify it as empty/existing/unrecognized before
+/// connecting, so the connect dialog can lock the backend selector for an
+/// existing vault (whose backend is fixed by its config). See
+/// [`state::probe_vault`].
+#[tauri::command(rename_all = "snake_case")]
+pub fn probe_vault(root_dir: String) -> Result<VaultProbe, String> {
+    Ok(state::probe_vault(&root_dir))
 }
 
 /// Open the webview devtools (developer mode -> right-click -> inspect). Requires

@@ -275,6 +275,24 @@ type ConnectParams = {
   restic_password?: string;
 };
 
+export type VaultProbe = {
+  status: "empty" | "existing" | "unrecognized";
+  backend?: string;
+};
+
+/**
+ * Probe a directory before connecting: classify it as `empty` (a new vault can
+ * be initialized here with a chosen backend), `existing` (a recognized vault
+ * whose backend is already fixed), or `unrecognized`. Returns `empty` outside
+ * Tauri (browser dev has no backend to probe). The connect dialog uses this to
+ * lock the backend selector for an existing vault rather than offering a choice
+ * the backend would silently ignore.
+ */
+async function probeVault(rootDir: string): Promise<VaultProbe> {
+  if (!isTauri()) return { status: "empty" };
+  return invoke<VaultProbe>("probe_vault", { root_dir: rootDir });
+}
+
 /**
  * Connect (and switch to) the vault at `root_dir` with the chosen `backend`,
  * then refresh documents/config/jobs so the UI reflects the now-active vault.
@@ -399,6 +417,7 @@ export function useVault() {
     ensureLibraryCopies,
     cancelJob,
     connect,
+    probeVault,
     resetToStage,
     subscribeJobs,
   };

@@ -251,6 +251,7 @@ export const zhCN = {
     browse: "浏览…",
     backend: "后端类型",
     password: "Restic 密码",
+    backendLocked: "该目录已是已初始化的仓库，后端不可更改。如需使用其他后端，请选择一个空目录。",
     submit: "连接 / 初始化",
     title: "创建或打开仓库",
     hint: "选择空目录以新建仓库，或选择已有仓库目录以打开。已预填推荐位置。",
