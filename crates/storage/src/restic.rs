@@ -253,6 +253,21 @@ impl VaultStorage {
         if let Some(current_dir) = current_dir {
             command.current_dir(current_dir);
         }
+        // On Windows a console-subsystem child (restic.exe) spawned from a GUI
+        // app that has no console gets a freshly allocated console window,
+        // which flashes - and steals focus - on every restic call (the startup
+        // repo/version probe, `stats` on the Archive tab, backup/commit...).
+        // `CREATE_NO_WINDOW` suppresses that window; the piped stdout/stderr
+        // above still work. A `tauri dev` build inherits the terminal's console
+        // so restic shares it (no flash) - which is why this only surfaces in
+        // the packaged, double-clicked app. Defined locally to avoid pulling
+        // windows-sys for one constant.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
         let mut child = command.spawn()?;
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
