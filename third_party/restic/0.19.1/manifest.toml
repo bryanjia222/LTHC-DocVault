@@ -4,3 +4,19 @@ version = "0.19.1"
 file = "x86_64-pc-windows-msvc/restic.exe"
 sha256 = "b0dd1fd21eea5d8fe1325f55f7118213c21f36de8a261e04c0624a5ab9fd7830"
 
+[targets.x86_64-apple-darwin]
+file = "x86_64-apple-darwin/restic"
+sha256 = "b2b553b402b9971b0c3f673d880397a421526f55a08f21fe5b82b5dd9e049a08"
+
+[targets.aarch64-apple-darwin]
+file = "aarch64-apple-darwin/restic"
+sha256 = "06582569ff2f10e1935a6f12187c76db02f0bae99e6e54098f2cdc374766d768"
+
+[targets.x86_64-unknown-linux-gnu]
+file = "x86_64-unknown-linux-gnu/restic"
+sha256 = "20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639"
+
+[targets.aarch64-unknown-linux-gnu]
+file = "aarch64-unknown-linux-gnu/restic"
+sha256 = "2fb45ac6f9071b6f20eb883953a188f9e7c7cb6bbe43c67a2e47ada4e85ee7f0"
+

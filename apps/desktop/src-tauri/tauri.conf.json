@@ -27,7 +27,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "resources/restic.exe"
+      "resources/restic*"
     ],
     "icon": [
       "icons/32x32.png",

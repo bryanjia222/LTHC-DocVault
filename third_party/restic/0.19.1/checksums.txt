@@ -1,2 +1,5 @@
 b0dd1fd21eea5d8fe1325f55f7118213c21f36de8a261e04c0624a5ab9fd7830  x86_64-pc-windows-msvc/restic.exe
-
+b2b553b402b9971b0c3f673d880397a421526f55a08f21fe5b82b5dd9e049a08  x86_64-apple-darwin/restic
+06582569ff2f10e1935a6f12187c76db02f0bae99e6e54098f2cdc374766d768  aarch64-apple-darwin/restic
+20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639  x86_64-unknown-linux-gnu/restic
+2fb45ac6f9071b6f20eb883953a188f9e7c7cb6bbe43c67a2e47ada4e85ee7f0  aarch64-unknown-linux-gnu/restic

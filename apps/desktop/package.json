@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/fetch-restic.mjs --host --best-effort",
     "build": "vue-tsc --noEmit && vite build",
+    "prebuild": "node scripts/fetch-restic.mjs --host --best-effort",
     "preview": "vite preview",
     "tauri": "tauri",
+    "restic:fetch": "node scripts/fetch-restic.mjs",
     "format": "prettier --write .",
     "lint": "eslint . --ext .ts,.vue",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "node scripts/fetch-restic.mjs --host --best-effort"
   },
   "dependencies": {
     "@lucide/vue": "^1.24.0",
@@ -27,9 +31,11 @@
     "@vitejs/plugin-vue": "^6.0.7",
     "eslint": "^9.0.0",
     "eslint-plugin-vue": "^9.27.0",
+    "extract-zip": "^2.0.1",
     "jsdom": "^29.1.1",
     "prettier": "^3.3.0",
     "typescript": "^5.5.0",
+    "unbzip2-stream": "^1.4.3",
     "vite": "^8.1.4",
     "vitest": "^4.1.10",
     "vue-eslint-parser": "^9.4.0",

@@ -9,3 +9,8 @@ example_docs/
 .docvault-metadata-check/
 .docvault-ref-check/
 .docvault-track-check/
+# Cached restic release archives (populated by `npm run restic:fetch`).
+/third_party/restic/**/.cache/
+# Vendored restic binaries (fetched automatically by the build, never committed).
+/third_party/restic/**/restic
+/third_party/restic/**/restic.exe

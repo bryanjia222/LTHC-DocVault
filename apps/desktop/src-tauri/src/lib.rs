@@ -41,7 +41,8 @@ fn clear_docvault_env() {
 /// fixing dev with a non-repo vault and packaged installs with no system restic.
 fn bundled_restic_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::path::BaseDirectory;
-    if let Ok(path) = app.path().resolve("resources/restic.exe", BaseDirectory::Resource) {
+    let resource = format!("resources/{}", restic_binary_name());
+    if let Ok(path) = app.path().resolve(&resource, BaseDirectory::Resource) {
         if path.exists() {
             return Some(path);
         }
@@ -49,20 +50,46 @@ fn bundled_restic_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     dev_restic_asset()
 }
 
-/// In a dev build the `third_party` restic asset sits at a fixed path relative
-/// to this crate's manifest dir. `None` off-Windows (no asset shipped) or when
-/// the asset is absent. Pure so the lookup is unit-testable.
-fn dev_restic_asset() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../third_party/restic/0.19.1/x86_64-pc-windows-msvc/restic.exe");
-        if path.exists() {
-            return Some(path);
-        }
+/// The platform-appropriate restic executable filename (`restic.exe` on Windows,
+/// `restic` elsewhere). Mirrors the name `build.rs` stages and the Tauri
+/// resource glob (`resources/restic*`) matches.
+fn restic_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "restic.exe"
+    } else {
+        "restic"
     }
-    #[allow(unreachable_code)]
-    None
+}
+
+/// Map the running host to the target triple we vendor restic for. `None` for
+/// hosts we don't ship a binary for (the storage layer then falls back to PATH).
+fn host_target_triple() -> Option<&'static str> {
+    use std::env::consts::{ARCH, OS};
+    match (OS, ARCH) {
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        _ => None,
+    }
+}
+
+/// In a dev build the `third_party` restic asset for the host platform sits at a
+/// fixed path relative to this crate's manifest dir. `None` when the host isn't
+/// vendored or the asset hasn't been fetched (`npm run restic:fetch`). Pure so
+/// the lookup is unit-testable.
+fn dev_restic_asset() -> Option<PathBuf> {
+    let triple = host_target_triple()?;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../third_party/restic/0.19.1")
+        .join(triple)
+        .join(restic_binary_name());
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 pub fn run() {
@@ -113,21 +140,47 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn dev_restic_asset_points_at_repo_third_party() {
-        let path = dev_restic_asset()
-            .expect("third_party restic asset should exist in this repo on Windows");
-        assert!(
-            path.ends_with("third_party/restic/0.19.1/x86_64-pc-windows-msvc/restic.exe"),
-            "unexpected path: {path:?}"
+    fn restic_binary_name_matches_platform() {
+        assert_eq!(
+            restic_binary_name(),
+            if cfg!(windows) { "restic.exe" } else { "restic" }
         );
-        assert!(path.exists(), "asset should exist: {path:?}");
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
-    fn dev_restic_asset_absent_off_windows() {
-        assert!(dev_restic_asset().is_none());
+    fn host_target_triple_resolves_on_supported_hosts() {
+        use std::env::consts::{ARCH, OS};
+        // Every (OS, ARCH) we expect to build on must map to a triple, and no
+        // other combination may claim one.
+        let triple = host_target_triple();
+        let supported = matches!(
+            (OS, ARCH),
+            ("windows", "x86_64")
+                | ("macos", "x86_64")
+                | ("macos", "aarch64")
+                | ("linux", "x86_64")
+                | ("linux", "aarch64")
+        );
+        assert_eq!(
+            triple.is_some(),
+            supported,
+            "host ({OS}, {ARCH}) -> {triple:?}, expected Some == {supported}"
+        );
+    }
+
+    #[test]
+    fn dev_restic_asset_path_shape_when_present() {
+        // Only asserts when the host's asset has actually been fetched, so this
+        // passes on a fresh checkout without restic and asserts the path shape
+        // once `npm run restic:fetch` has populated it.
+        if let Some(path) = dev_restic_asset() {
+            let triple = host_target_triple()
+                .expect("host_target_triple must be Some when dev_restic_asset is Some");
+            let expected =
+                format!("third_party/restic/0.19.1/{triple}/{}", restic_binary_name());
+            assert!(path.ends_with(&expected), "unexpected path: {path:?}");
+            assert!(path.exists(), "asset should exist: {path:?}");
+        }
     }
 }
