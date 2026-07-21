@@ -188,10 +188,7 @@ pub fn get_desktop_state(
 ) -> Result<DesktopStateSlice, String> {
     let file = load_file(&app)?;
     let root = current_vault_root(&state);
-    Ok(slice_for_root(
-        &file,
-        root.as_deref().unwrap_or(""),
-    ))
+    Ok(slice_for_root(&file, root.as_deref().unwrap_or("")))
 }
 
 /// Replace the current vault's slice (tags + tracked) and persist. Refuses when
@@ -203,10 +200,10 @@ pub fn set_desktop_state(
     tags: BTreeMap<String, Vec<String>>,
     tracked: Vec<TrackedFile>,
 ) -> Result<(), String> {
-    let root = current_vault_root(&state)
-        .ok_or_else(|| "vault not initialized".to_owned())?;
+    let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
     let mut file = load_file(&app)?;
-    file.vaults.insert(root, DesktopStateSlice { tags, tracked });
+    file.vaults
+        .insert(root, DesktopStateSlice { tags, tracked });
     save_file(&app, &file)
 }
 
@@ -254,7 +251,10 @@ mod tests {
             DesktopStateSlice {
                 tags: {
                     let mut m = BTreeMap::new();
-                    m.insert("docA".to_owned(), vec!["legal".to_owned(), "draft".to_owned()]);
+                    m.insert(
+                        "docA".to_owned(),
+                        vec!["legal".to_owned(), "draft".to_owned()],
+                    );
                     m
                 },
                 tracked: vec![TrackedFile {
@@ -376,9 +376,6 @@ mod tests {
         let b = temp.path().join("b.docx");
         fs::write(&a, b"version one").unwrap();
         fs::write(&b, b"version two").unwrap();
-        assert_ne!(
-            probe_at(&a, 1024).sha256,
-            probe_at(&b, 1024).sha256
-        );
+        assert_ne!(probe_at(&a, 1024).sha256, probe_at(&b, 1024).sha256);
     }
 }

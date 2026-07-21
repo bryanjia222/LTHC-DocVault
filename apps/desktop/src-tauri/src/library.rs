@@ -122,7 +122,12 @@ fn materialize_at(
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     vault
-        .export_version(&DocumentRef::IdPrefix(doc_id.to_owned()), "current", path, cancel)
+        .export_version(
+            &DocumentRef::IdPrefix(doc_id.to_owned()),
+            "current",
+            path,
+            cancel,
+        )
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -259,9 +264,7 @@ fn version_for(
 /// the original mode), hence the clippy allow.
 #[allow(clippy::permissions_set_readonly_false)]
 fn clear_readonly(path: &Path) -> Result<(), String> {
-    let mut perms = fs::metadata(path)
-        .map_err(|e| e.to_string())?
-        .permissions();
+    let mut perms = fs::metadata(path).map_err(|e| e.to_string())?.permissions();
     perms.set_readonly(false);
     fs::set_permissions(path, perms).map_err(|e| e.to_string())
 }
@@ -438,7 +441,13 @@ mod tests {
 
     /// Commit another version to an existing document (by id); return the new
     /// version id. The new version becomes current; the prior one is archived.
-    fn commit_version(vault: &DocVault, root: &Path, doc_id: &str, name: &str, contents: &[u8]) -> String {
+    fn commit_version(
+        vault: &DocVault,
+        root: &Path,
+        doc_id: &str,
+        name: &str,
+        contents: &[u8],
+    ) -> String {
         let package_dir = root.join("pkg").join(name);
         fs::create_dir_all(package_dir.join("word")).unwrap();
         fs::write(package_dir.join("[Content_Types].xml"), b"types").unwrap();
@@ -466,7 +475,12 @@ mod tests {
         let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
 
         let path = library_path_for_doc(&vault, &doc_id).unwrap();
-        assert_eq!(path, temp.path().join("library").join(format!("report-{doc_id}.docx")));
+        assert_eq!(
+            path,
+            temp.path()
+                .join("library")
+                .join(format!("report-{doc_id}.docx"))
+        );
     }
 
     /// `materialize_at` writes a real .docx library copy from the current version.
@@ -479,8 +493,14 @@ mod tests {
         let lib_path = library_path_for_doc(&vault, &doc_id).unwrap();
         assert!(!lib_path.exists());
         materialize_at(&vault, &doc_id, &lib_path, &NEVER_CANCELLED).unwrap();
-        assert!(lib_path.exists(), "library copy should exist after materialize");
-        assert!(lib_path.metadata().unwrap().len() > 0, "library copy non-empty");
+        assert!(
+            lib_path.exists(),
+            "library copy should exist after materialize"
+        );
+        assert!(
+            lib_path.metadata().unwrap().len() > 0,
+            "library copy non-empty"
+        );
     }
 
     /// `ensure_library_copies_for` on a fresh slice materializes the copy and
@@ -496,7 +516,10 @@ mod tests {
 
         assert_eq!(slice.tracked.len(), 1);
         assert_eq!(slice.tracked[0].document_id, doc_id);
-        let expected = temp.path().join("library").join(format!("report-{doc_id}.docx"));
+        let expected = temp
+            .path()
+            .join("library")
+            .join(format!("report-{doc_id}.docx"));
         assert_eq!(slice.tracked[0].path, expected.display().to_string());
         assert!(expected.exists(), "library copy materialized");
         assert!(slice.tracked[0].size > 0, "baseline size probed");
@@ -535,7 +558,10 @@ mod tests {
 
         let mut slice = DesktopStateSlice::default();
         ensure_library_copies_for(&vault, &mut slice).unwrap();
-        let lib_path = temp.path().join("library").join(format!("report-{doc_id}.docx"));
+        let lib_path = temp
+            .path()
+            .join("library")
+            .join(format!("report-{doc_id}.docx"));
         fs::remove_file(&lib_path).unwrap();
         // Stale baseline (claims a size for a now-missing file).
         slice.tracked[0].size = 12345;
@@ -543,7 +569,10 @@ mod tests {
         ensure_library_copies_for(&vault, &mut slice).unwrap();
 
         assert!(lib_path.exists(), "copy rebuilt");
-        assert_ne!(slice.tracked[0].size, 12345, "baseline refreshed after rebuild");
+        assert_ne!(
+            slice.tracked[0].size, 12345,
+            "baseline refreshed after rebuild"
+        );
     }
 
     /// `ensure` repoints a stale tracked path (pre-library model) to the library
@@ -566,9 +595,15 @@ mod tests {
         };
         ensure_library_copies_for(&vault, &mut slice).unwrap();
 
-        let expected = temp.path().join("library").join(format!("report-{doc_id}.docx"));
+        let expected = temp
+            .path()
+            .join("library")
+            .join(format!("report-{doc_id}.docx"));
         assert_eq!(slice.tracked[0].path, expected.display().to_string());
-        assert!(slice.tracked[0].size > 1, "baseline refreshed after repoint");
+        assert!(
+            slice.tracked[0].size > 1,
+            "baseline refreshed after repoint"
+        );
     }
 
     /// `remove_library_copy_at` deletes both legacy `<id>.<ext>` and current
@@ -588,8 +623,14 @@ mod tests {
 
         assert!(!lib.join("docA.docx").exists());
         assert!(!lib.join("docA.bak").exists(), "legacy stem match removed");
-        assert!(!lib.join("Report-docA.docx").exists(), "new-named match removed");
-        assert!(lib.join("Report-docB.docx").exists(), "sibling (new-named) kept");
+        assert!(
+            !lib.join("Report-docA.docx").exists(),
+            "new-named match removed"
+        );
+        assert!(
+            lib.join("Report-docB.docx").exists(),
+            "sibling (new-named) kept"
+        );
         assert!(lib.join("docB.docx").exists(), "sibling kept");
     }
 
@@ -682,7 +723,10 @@ mod tests {
     /// `library_filename` is `<docName>-<docId>.<ext>` with the name sanitized.
     #[test]
     fn library_filename_format() {
-        assert_eq!(library_filename("report", "abc123", "docx"), "report-abc123.docx");
+        assert_eq!(
+            library_filename("report", "abc123", "docx"),
+            "report-abc123.docx"
+        );
         assert_eq!(library_filename("a/b", "abc123", "xlsx"), "a_b-abc123.xlsx");
     }
 

@@ -101,7 +101,12 @@ fn seed_three_docs(
             note: None,
         };
         let (document, _version) = vault
-            .commit_document(&path, DocumentRef::NewName((*name).to_owned()), metadata, cancel)
+            .commit_document(
+                &path,
+                DocumentRef::NewName((*name).to_owned()),
+                metadata,
+                cancel,
+            )
             .map_err(|e| e.to_string())?;
         out.push(document);
     }
@@ -241,16 +246,12 @@ fn seed_sample_docs(state: &AppState, app: &AppHandle, root: &Path) -> Result<()
     let cancel = AtomicBool::new(false);
     let docs = {
         let vault = state::lock_vault(&state.vault);
-        let vault = vault
-            .as_ref()
-            .ok_or("vault not initialized after reset")?;
+        let vault = vault.as_ref().ok_or("vault not initialized after reset")?;
         seed_three_docs(vault, &example_docs, &cancel)?
     };
     if let Some(state_file) = state_path(app) {
         let vault = state::lock_vault(&state.vault);
-        let vault = vault
-            .as_ref()
-            .ok_or("vault not initialized after reset")?;
+        let vault = vault.as_ref().ok_or("vault not initialized after reset")?;
         write_seed_slice(vault, &state_file, &canonical_key(root), &docs)?;
     }
     Ok(())
@@ -268,7 +269,14 @@ pub fn reset_to_stage(
     restic_password: Option<String>,
 ) -> Result<(), String> {
     let root = app_config_dir(&app)?.join("docvault-test-vault");
-    reset_to_stage_core(&app, state.inner(), &root, &stage, &backend, restic_password)
+    reset_to_stage_core(
+        &app,
+        state.inner(),
+        &root,
+        &stage,
+        &backend,
+        restic_password,
+    )
 }
 
 #[cfg(test)]
@@ -400,7 +408,13 @@ mod tests {
         let doc_id = doc.id.as_str().to_owned();
         let state_file = temp.path().join("desktop-state.json");
 
-        write_seed_slice(&vault, &state_file, "/test-root", std::slice::from_ref(&doc)).unwrap();
+        write_seed_slice(
+            &vault,
+            &state_file,
+            "/test-root",
+            std::slice::from_ref(&doc),
+        )
+        .unwrap();
 
         let file = load_file_at(&state_file).unwrap();
         let slice = file.vaults.get("/test-root").expect("slice written");

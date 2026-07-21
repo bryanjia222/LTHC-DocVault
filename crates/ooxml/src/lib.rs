@@ -331,7 +331,10 @@ mod tests {
         pack_package(&source, &docx).unwrap();
         let ooxml_manifest = manifest_for(&docx).unwrap();
         assert!(
-            ooxml_manifest.entries.iter().any(|e| e.path == "word/document.xml"),
+            ooxml_manifest
+                .entries
+                .iter()
+                .any(|e| e.path == "word/document.xml"),
             "OOXML manifest lists package parts"
         );
 

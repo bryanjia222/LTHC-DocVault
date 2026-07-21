@@ -47,8 +47,7 @@ fn stage_bundled_restic() {
         .map(|m| m.len() != src_len)
         .unwrap_or(true);
     if needs_copy {
-        std::fs::create_dir_all(dst.parent().unwrap())
-            .expect("create src-tauri/resources/ dir");
+        std::fs::create_dir_all(dst.parent().unwrap()).expect("create src-tauri/resources/ dir");
         std::fs::copy(&src, &dst).expect("stage restic binary into src-tauri/resources/");
     }
     #[cfg(unix)]

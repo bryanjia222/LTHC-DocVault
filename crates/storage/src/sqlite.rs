@@ -179,11 +179,7 @@ impl VaultStorage {
     /// Update a document's display name. Versions (and their `original_filename`)
     /// are historical and untouched; archives are keyed by document id, so their
     /// references are unaffected by a rename.
-    pub(crate) fn set_document_name(
-        &self,
-        document_id: &str,
-        new_name: &str,
-    ) -> StorageResult<()> {
+    pub(crate) fn set_document_name(&self, document_id: &str, new_name: &str) -> StorageResult<()> {
         self.connection.execute(
             "UPDATE documents SET name = ?1 WHERE id = ?2",
             params![new_name, document_id],

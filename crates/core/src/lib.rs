@@ -160,11 +160,7 @@ impl DocVault {
 
     /// Rename a document's display name. Does not touch the source file or any
     /// version's `original_filename`.
-    pub fn rename_document(
-        &self,
-        document_ref: &DocumentRef,
-        new_name: &str,
-    ) -> StorageResult<()> {
+    pub fn rename_document(&self, document_ref: &DocumentRef, new_name: &str) -> StorageResult<()> {
         self.storage.rename_document(document_ref, new_name)
     }
 
@@ -252,10 +248,7 @@ mod tests {
                 &docvault_storage::NEVER_CANCELLED,
             )
             .expect("export should succeed");
-        assert_eq!(
-            std::fs::read(&restored).unwrap(),
-            b"plain text, not Office"
-        );
+        assert_eq!(std::fs::read(&restored).unwrap(), b"plain text, not Office");
         assert_eq!(document.current_version_id, Some(version.id));
     }
 }
