@@ -19,7 +19,8 @@ export const enUS = {
     renameProject: "Rename",
     deleteProject: "Delete",
     confirmDeleteProject:
-      "Delete project \"{name}\"? Its documents are not deleted - they return to \"All documents\".",
+      "Delete project \"{name}\"? Its documents are not deleted - they stay in the vault and any other projects they belong to.",
+    projectDropHint: "Drop a document here to add it; drag projects to reorder",
     projectNameTaken: "A project with this name already exists",
     projectNameEmpty: "Project name cannot be empty",
     noProjects: "No projects yet - click + to add one",
@@ -122,7 +123,7 @@ export const enUS = {
     title: "Documents",
     subtitle: "Select a document to view its version history and details.",
     visible: "{count} visible",
-    searchPlaceholder: "Search name, owner, id",
+    searchPlaceholder: "Search documents…",
     empty: "No documents match your search. Try adjusting the filters.",
     emptyNoDocs: "No documents yet. Add your first document.",
     columns: {
@@ -134,6 +135,21 @@ export const enUS = {
       updated: "Updated",
     },
   },
+  search: {
+    scopeLabel: "Search scope",
+    scope: {
+      all: "All",
+      tags: "Tags",
+      filename: "Filename",
+      owner: "Owner",
+      id: "ID",
+    },
+  },
+  projects: {
+    label: "Projects",
+    title: "Project membership",
+    empty: "Not in any project - drag it onto a sidebar project to add it.",
+  },
   filters: {
     title: "Filters",
     type: "Type",
@@ -143,6 +159,12 @@ export const enUS = {
     clear: "Clear filters",
     active: "{count} active",
     noTags: "No tags yet",
+    category: {
+      document: "Document",
+      presentation: "Slides",
+      spreadsheet: "Spreadsheet",
+      other: "Other",
+    },
   },
   tags: {
     title: "Tags",

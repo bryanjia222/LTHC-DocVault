@@ -7,10 +7,11 @@ import type { Document } from "../data/mock";
 
 /*
  * useDocuments layers enrichment (desktop-local tags / modification / tracked
- * path) + multi-dimension filtering over useVault's `documents` ref. It is a
- * module-level singleton with no i18n/DOM deps. Detailed filter cases live in
- * utils/filter.test.ts; here we cover enrichment, the filter wiring, selection,
- * and totals.
+ * path / project memberships) + search-scope + type-category filtering + per-
+ * view sorting over useVault's `documents` ref. It is a module-level singleton
+ * with no i18n/DOM deps. Detailed filter/sort cases live in utils/filter.test.ts
+ * and utils/sort.test.ts; here we cover enrichment, the filter/sort wiring,
+ * selection, and totals.
  */
 
 const docA: Document = {
@@ -81,6 +82,7 @@ beforeEach(() => {
   desktop.probes.value = {};
   desktop.projects.value = [];
   desktop.assignments.value = {};
+  desktop.sortPrefs.value = {};
 });
 
 describe("useDocuments - enrichment", () => {
@@ -117,10 +119,12 @@ describe("useDocuments - enrichment", () => {
     expect(docs.documents.value.find((d) => d.id === "docB")?.trackedPath).toBeNull();
   });
 
-  it("exposes the project assignment (null when unassigned)", () => {
-    desktop.assignments.value = { docA: "p1" };
-    expect(docs.documents.value.find((d) => d.id === "docA")?.project).toBe("p1");
-    expect(docs.documents.value.find((d) => d.id === "docB")?.project).toBeNull();
+  it("exposes the project memberships (empty when unassigned)", () => {
+    desktop.assignments.value = { docA: ["p1"] };
+    expect(docs.documents.value.find((d) => d.id === "docA")?.projects).toEqual([
+      "p1",
+    ]);
+    expect(docs.documents.value.find((d) => d.id === "docB")?.projects).toEqual([]);
   });
 });
 
@@ -132,38 +136,45 @@ describe("useDocuments - filteredDocuments wiring", () => {
     ]);
   });
 
-  it("narrows by the search query", () => {
+  it("narrows by the search query (default scope searches every field)", () => {
     docs.searchQuery.value = "beta";
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
-  it("narrows by the type filter", () => {
-    docs.toggleType("xlsx");
+  it("narrows by the type-category filter", () => {
+    // docA is docx -> "document"; docB is xlsx -> "spreadsheet".
+    docs.toggleType("spreadsheet");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
-  it("narrows by the tag filter (OR within facet)", () => {
+  it("search scope 'owner' restricts the query to the owner field", () => {
+    docs.searchScope.value = "owner";
+    docs.searchQuery.value = "alice";
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+  });
+
+  it("search scope 'id' restricts the query to the document id", () => {
+    docs.searchScope.value = "id";
+    docs.searchQuery.value = "docb";
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
+  });
+
+  it("search scope 'filename' matches the name or original filename", () => {
+    docs.searchScope.value = "filename";
+    docs.searchQuery.value = "alpha";
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+  });
+
+  it("search scope 'tags' restricts the query to tags", () => {
     desktop.tags.value = { docA: ["legal"], docB: ["finance"] };
-    docs.toggleTag("finance");
-    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
-  });
-
-  it("narrows by modified-only", () => {
-    desktop.tracked.value = [
-      { documentId: "docB", path: "/b.xlsx", size: 1, mtimeMs: 1, sha256: "a" },
-    ];
-    desktop.probes.value = {
-      docB: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
-    };
-    docs.modifiedOnly.value = true;
+    docs.searchScope.value = "tags";
+    docs.searchQuery.value = "finance";
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
   it("clearFilters resets every dimension and the active count", () => {
     docs.searchQuery.value = "x";
-    docs.toggleType("docx");
-    docs.toggleTag("whatever");
-    docs.modifiedOnly.value = true;
+    docs.toggleType("document");
     expect(docs.activeFilterCount.value).toBeGreaterThan(0);
     docs.clearFilters();
     expect(docs.activeFilterCount.value).toBe(0);
@@ -176,7 +187,7 @@ describe("useDocuments - filteredDocuments wiring", () => {
 
 describe("useDocuments - project scope", () => {
   it("selectAll (null scope) shows every document", () => {
-    desktop.assignments.value = { docA: "p1", docB: "p2" };
+    desktop.assignments.value = { docA: ["p1"], docB: ["p2"] };
     docs.selectAll();
     expect(docs.activeProjectId.value).toBeNull();
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
@@ -186,21 +197,21 @@ describe("useDocuments - project scope", () => {
   });
 
   it("selectProject narrows the list to that project only", () => {
-    desktop.assignments.value = { docA: "p1", docB: "p2" };
+    desktop.assignments.value = { docA: ["p1"], docB: ["p2"] };
     docs.selectProject("p1");
     expect(docs.activeProjectId.value).toBe("p1");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
   });
 
   it("project scope composes with the search filter", () => {
-    desktop.assignments.value = { docA: "p1", docB: "p1" };
+    desktop.assignments.value = { docA: ["p1"], docB: ["p1"] };
     docs.selectProject("p1");
     docs.searchQuery.value = "beta";
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
   it("documents with no assignment are hidden under a project scope but shown under all", () => {
-    desktop.assignments.value = { docA: "p1" }; // docB unassigned
+    desktop.assignments.value = { docA: ["p1"] }; // docB unassigned
     docs.selectProject("p1");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
     docs.selectAll();
@@ -208,6 +219,53 @@ describe("useDocuments - project scope", () => {
       "docA",
       "docB",
     ]);
+  });
+
+  it("a document in multiple projects shows under each project scope", () => {
+    desktop.assignments.value = { docA: ["p1", "p2"] };
+    docs.selectProject("p1");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+    docs.selectProject("p2");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+  });
+});
+
+describe("useDocuments - sorting", () => {
+  it("defaults to updated-desc (stable for equal timestamps)", () => {
+    expect(docs.sortKey.value).toBe("updated");
+    expect(docs.sortDirection.value).toBe("desc");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
+  });
+
+  it("setSort ascends by name on first click, desc on second", () => {
+    docs.setSort("name");
+    expect(docs.sortKey.value).toBe("name");
+    expect(docs.sortDirection.value).toBe("asc");
+    // Alpha before Beta.
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
+    docs.setSort("name");
+    expect(docs.sortDirection.value).toBe("desc");
+    // Beta before Alpha.
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docB",
+      "docA",
+    ]);
+  });
+
+  it("a per-project sort pref does not leak into the all-documents view", () => {
+    docs.selectProject("p1");
+    docs.setSort("owner");
+    expect(docs.sortKey.value).toBe("owner");
+    docs.selectAll();
+    // "__all__" has no pref -> default.
+    expect(docs.sortKey.value).toBe("updated");
+    expect(docs.sortDirection.value).toBe("desc");
   });
 });
 

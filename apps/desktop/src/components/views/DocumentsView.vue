@@ -30,13 +30,10 @@ import {
   getParentLabel,
   shouldShowBaseVersion,
 } from "../../utils/versionTree";
-import type {
-  Document,
-  DocumentType,
-  HealthStatus,
-  ModificationStatus,
-  Version,
-} from "../../data/mock";
+import { TYPE_CATEGORIES, typeCategory } from "../../utils/typeCategory";
+import type { SortKey } from "../../utils/sort";
+import type { SearchScope } from "../../utils/filter";
+import type { Document, ModificationStatus, Version } from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
@@ -54,17 +51,15 @@ const {
   selectedVersion,
   selectedVersionId,
   searchQuery,
+  searchScope,
   typeFilter,
-  tagFilter,
-  modifiedOnly,
-  healthFilter,
   activeFilterCount,
-  allTags,
+  sortKey,
+  sortDirection,
   selectDocument,
   selectVersion,
   toggleType,
-  toggleTag,
-  toggleHealth,
+  setSort,
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
@@ -73,23 +68,8 @@ const { log } = useActivityLog();
 const { runAction, openDocument, refreshAll, deleteDocument } =
   useVaultActions();
 
-const typeOptions: DocumentType[] = [
-  "docx",
-  "doc",
-  "xlsx",
-  "xls",
-  "pptx",
-  "ppt",
-  "pdf",
-  "md",
-  "txt",
-  "wps",
-  "et",
-  "dps",
-  "other",
-];
-const healthOptions: HealthStatus[] = ["synced", "needsReview"];
-
+/** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
+const typeCategories = TYPE_CATEGORIES;
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
 const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
@@ -194,6 +174,36 @@ function removeTagFromSelected(tag: string) {
   const doc = selectedDocument.value;
   if (!doc) return;
   desktop.removeTag(doc.id, tag);
+}
+
+/** ▲/▼ indicator for a sortable column header; "" when the column is inactive. */
+function sortIndicator(key: SortKey): string {
+  if (sortKey.value !== key) return "";
+  return sortDirection.value === "asc" ? "▲" : "▼";
+}
+
+/** Search-scope dropdown change (cast the raw string to SearchScope). */
+function onScopeChange(value: string) {
+  searchScope.value = value as SearchScope;
+}
+
+/** Resolve a project id to its display name (falls back to the raw id). */
+function projectName(id: string): string {
+  return desktop.projects.value.find((p) => p.id === id)?.name ?? id;
+}
+
+/** Remove the selected document from one project (keeps other memberships). */
+function removeProjectFromSelected(projectId: string) {
+  const doc = selectedDocument.value;
+  if (!doc) return;
+  desktop.unassignDocumentFromProject(doc.id, projectId);
+}
+
+/** Drag a document row onto a sidebar project to assign it (multi-membership). */
+function onDragStartDoc(event: DragEvent, document: Document) {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.setData("application/x-docvault-doc", document.id);
+  event.dataTransfer.effectAllowed = "copy";
 }
 
 // Two right-click context menus:
@@ -318,6 +328,18 @@ onBeforeUnmount(() => {
           </p>
         </div>
         <div class="toolbar">
+          <select
+            class="search-scope"
+            :value="searchScope"
+            :aria-label="t('search.scopeLabel')"
+            @change="onScopeChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="all">{{ t("search.scope.all") }}</option>
+            <option value="tags">{{ t("search.scope.tags") }}</option>
+            <option value="filename">{{ t("search.scope.filename") }}</option>
+            <option value="owner">{{ t("search.scope.owner") }}</option>
+            <option value="id">{{ t("search.scope.id") }}</option>
+          </select>
           <input
             v-model="searchQuery"
             type="search"
@@ -338,51 +360,14 @@ onBeforeUnmount(() => {
         <div class="filter-group">
           <span class="filter-label">{{ t("filters.type") }}</span>
           <button
-            v-for="tp in typeOptions"
-            :key="tp"
+            v-for="category in typeCategories"
+            :key="category"
             type="button"
             class="chip"
-            :class="{ active: typeFilter.has(tp) }"
-            @click="toggleType(tp)"
+            :class="{ active: typeFilter.has(category) }"
+            @click="toggleType(category)"
           >
-            {{ tp }}
-          </button>
-        </div>
-
-        <div class="filter-group">
-          <span class="filter-label">{{ t("filters.health") }}</span>
-          <button
-            v-for="hs in healthOptions"
-            :key="hs"
-            type="button"
-            class="chip"
-            :class="{ active: healthFilter.has(hs) }"
-            @click="toggleHealth(hs)"
-          >
-            {{ t(`status.${hs}`) }}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="chip"
-          :class="{ active: modifiedOnly }"
-          @click="modifiedOnly = !modifiedOnly"
-        >
-          {{ t("filters.modifiedOnly") }}
-        </button>
-
-        <div v-if="allTags.length" class="filter-group filter-tags">
-          <span class="filter-label">{{ t("filters.tags") }}</span>
-          <button
-            v-for="tag in allTags"
-            :key="tag"
-            type="button"
-            class="chip"
-            :class="{ active: tagFilter.includes(tag) }"
-            @click="toggleTag(tag)"
-          >
-            {{ tag }}
+            {{ t(`filters.category.${category}`) }}
           </button>
         </div>
 
@@ -405,12 +390,60 @@ onBeforeUnmount(() => {
         <table>
           <thead>
             <tr>
-              <th>{{ t("documents.columns.name") }}</th>
-              <th>{{ t("documents.columns.owner") }}</th>
-              <th>{{ t("documents.columns.currentVersion") }}</th>
-              <th>{{ t("documents.columns.status") }}</th>
-              <th>{{ t("documents.columns.modification") }}</th>
-              <th>{{ t("documents.columns.updated") }}</th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'name' }"
+                @click="setSort('name')"
+              >
+                {{ t("documents.columns.name") }}
+                <span class="sort-indicator">{{ sortIndicator("name") }}</span>
+              </th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'owner' }"
+                @click="setSort('owner')"
+              >
+                {{ t("documents.columns.owner") }}
+                <span class="sort-indicator">{{ sortIndicator("owner") }}</span>
+              </th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'currentVersion' }"
+                @click="setSort('currentVersion')"
+              >
+                {{ t("documents.columns.currentVersion") }}
+                <span class="sort-indicator">{{
+                  sortIndicator("currentVersion")
+                }}</span>
+              </th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'status' }"
+                @click="setSort('status')"
+              >
+                {{ t("documents.columns.status") }}
+                <span class="sort-indicator">{{ sortIndicator("status") }}</span>
+              </th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'modification' }"
+                @click="setSort('modification')"
+              >
+                {{ t("documents.columns.modification") }}
+                <span class="sort-indicator">{{
+                  sortIndicator("modification")
+                }}</span>
+              </th>
+              <th
+                class="sortable"
+                :class="{ sorted: sortKey === 'updated' }"
+                @click="setSort('updated')"
+              >
+                {{ t("documents.columns.updated") }}
+                <span class="sort-indicator">{{
+                  sortIndicator("updated")
+                }}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -420,15 +453,19 @@ onBeforeUnmount(() => {
               :class="{ selected: selectedDocumentId === document.id }"
               tabindex="0"
               role="button"
+              draggable="true"
               :aria-label="document.name"
               @click="chooseDocument(document)"
               @keydown.enter="chooseDocument(document)"
               @keydown.space.prevent="chooseDocument(document)"
+              @dragstart="onDragStartDoc($event, document)"
               @contextmenu.prevent.stop="openDocMenu($event, document)"
             >
               <td>
                 <div class="name-cell">
-                  <span class="file-type">{{ document.type }}</span>
+                  <span class="file-type">{{
+                    t(`filters.category.${typeCategory(document.type)}`)
+                  }}</span>
                   <strong>{{ document.name }}</strong>
                 </div>
                 <div v-if="document.tags?.length" class="row-tags">
@@ -448,8 +485,7 @@ onBeforeUnmount(() => {
                 <span
                   class="mod-pill"
                   :data-mod="document.modification ?? 'none'"
-                  >{{ t(`modification.${document.modification ?? "none"}`) }}</span
-                >
+                >{{ t(`modification.${document.modification ?? "none"}`) }}</span>
               </td>
               <td>{{ document.updatedAt }}</td>
             </tr>
@@ -554,8 +590,7 @@ onBeforeUnmount(() => {
           <span
             v-if="!selectedDocument?.tags?.length && !tagInputOpen"
             class="muted"
-            >{{ t("tags.empty") }}</span
-          >
+          >{{ t("tags.empty") }}</span>
           <button
             v-if="!tagInputOpen"
             type="button"
@@ -578,6 +613,32 @@ onBeforeUnmount(() => {
             @keydown.esc="closeTagInput"
             @blur="closeTagInput"
           />
+        </div>
+      </section>
+
+      <section class="doc-section" :aria-label="t('projects.label')">
+        <h3>{{ t("projects.title") }}</h3>
+        <div class="tag-chips">
+          <span
+            v-for="pid in selectedDocument?.projects ?? []"
+            :key="pid"
+            class="tag-chip"
+          >
+            {{ projectName(pid) }}
+            <button
+              type="button"
+              class="tag-remove"
+              :aria-label="t('actions.clear')"
+              :title="t('actions.clear')"
+              @click="removeProjectFromSelected(pid)"
+            >
+              <X aria-hidden="true" />
+            </button>
+          </span>
+          <span
+            v-if="!selectedDocument?.projects?.length"
+            class="muted"
+          >{{ t("projects.empty") }}</span>
         </div>
       </section>
 
@@ -1048,6 +1109,44 @@ th {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  color: var(--text-secondary);
+}
+
+th.sortable.sorted {
+  color: var(--text-primary);
+}
+
+.sort-indicator {
+  display: inline-block;
+  width: 12px;
+  margin-left: 2px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.search-scope {
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-scope:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 tbody tr {

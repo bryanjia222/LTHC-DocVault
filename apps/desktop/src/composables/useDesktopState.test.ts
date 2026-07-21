@@ -8,7 +8,7 @@ import { MODIFICATION_HASH_THRESHOLD_BYTES } from "../utils/tracking";
  * L2 command-contract tests for the desktop-local-state commands added in
  * src-tauri/src/local_state.rs:
  *   get_desktop_state ()                                    -> no args
- *   set_desktop_state (tags, tracked, projects, assignments) -> snake_case; sha256 omitted when null
+ *   set_desktop_state (tags, tracked, projects, assignments, sort_prefs) -> snake_case; sha256 omitted when null
  *   stat_files (paths)                                      -> { paths: string[] }
  *   probe_file (path, max_bytes)                            -> { path, max_bytes }
  *
@@ -37,11 +37,12 @@ beforeEach(() => {
   ds.probes.value = {};
   ds.projects.value = [];
   ds.assignments.value = {};
+  ds.sortPrefs.value = {};
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
     switch (cmd) {
       case "get_desktop_state":
-        return { tags: {}, tracked: [], projects: [], assignments: {} };
+        return { tags: {}, tracked: [], projects: [], assignments: {}, sort_prefs: {} };
       case "set_desktop_state":
         return undefined;
       case "stat_files":
@@ -71,7 +72,8 @@ describe("useDesktopState - get_desktop_state contract", () => {
         { document_id: "docA", path: "/p.docx", size: 9, mtime_ms: 7, sha256: "abc" },
       ],
       projects: [{ id: "p1", name: "Legal" }],
-      assignments: { docA: "p1" },
+      assignments: { docA: ["p1"] },
+      sort_prefs: { __all__: { key: "updated", direction: "desc" } },
     });
     await ds.loadDesktopState();
     expect(ds.tags.value).toEqual({ docA: ["legal"] });
@@ -79,7 +81,10 @@ describe("useDesktopState - get_desktop_state contract", () => {
       { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
     ]);
     expect(ds.projects.value).toEqual([{ id: "p1", name: "Legal" }]);
-    expect(ds.assignments.value).toEqual({ docA: "p1" });
+    expect(ds.assignments.value).toEqual({ docA: ["p1"] });
+    expect(ds.sortPrefs.value).toEqual({
+      __all__: { key: "updated", direction: "desc" },
+    });
   });
 
   it("defaults projects/assignments to empty when the payload omits them", async () => {
@@ -110,6 +115,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         ],
         projects: [],
         assignments: {},
+        sort_prefs: {},
       });
     });
   });
@@ -136,6 +142,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         ],
         projects: [],
         assignments: {},
+        sort_prefs: {},
       });
     });
   });
@@ -148,6 +155,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         tracked: [],
         projects: [],
         assignments: {},
+        sort_prefs: {},
       });
     });
   });
@@ -293,6 +301,7 @@ describe("useDesktopState - projects", () => {
         tracked: [],
         projects: [{ id, name: "Legal" }],
         assignments: {},
+        sort_prefs: {},
       });
     });
   });
@@ -324,31 +333,82 @@ describe("useDesktopState - projects", () => {
     expect(ds.projects.value.find((p) => p.id === a)?.name).toBe("Alpha");
   });
 
-  it("deleteProject removes the project and clears its assignments", async () => {
+  it("deleteProject removes the project and drops it from each doc's memberships", async () => {
     const id = createOrFail("Legal");
-    ds.setDocumentProject("docA", id);
+    const id2 = createOrFail("Finance");
+    ds.assignDocumentToProject("docA", id);
+    ds.assignDocumentToProject("docA", id2);
     vi.mocked(invoke).mockClear();
     ds.deleteProject(id);
-    expect(ds.projects.value).toEqual([]);
+    expect(ds.projects.value).toEqual([{ id: id2, name: "Finance" }]);
+    // docA keeps its other membership.
+    expect(ds.assignments.value).toEqual({ docA: [id2] });
+  });
+
+  it("assignDocumentToProject / unassignDocumentFromProject manage multi-membership; projectsFor reads it", () => {
+    const id = createOrFail("Legal");
+    const id2 = createOrFail("Finance");
+    ds.assignDocumentToProject("docA", id);
+    expect(ds.projectsFor("docA")).toEqual([id]);
+    ds.assignDocumentToProject("docA", id2);
+    expect(ds.projectsFor("docA")).toEqual([id, id2]);
+    // Idempotent - assigning the same project twice is a no-op.
+    ds.assignDocumentToProject("docA", id2);
+    expect(ds.projectsFor("docA")).toEqual([id, id2]);
+    ds.unassignDocumentFromProject("docA", id);
+    expect(ds.projectsFor("docA")).toEqual([id2]);
+    // Removing the last membership clears the entry entirely.
+    ds.unassignDocumentFromProject("docA", id2);
+    expect(ds.projectsFor("docA")).toEqual([]);
     expect(ds.assignments.value).toEqual({});
   });
 
-  it("setDocumentProject assigns and unassigns; projectFor reads it", () => {
-    const id = ds.createProject("Legal");
-    ds.setDocumentProject("docA", id);
-    expect(ds.projectFor("docA")).toBe(id);
-    ds.setDocumentProject("docA", null);
-    expect(ds.projectFor("docA")).toBeNull();
+  it("assignDocumentToProject ignores unknown project ids", () => {
+    ds.assignDocumentToProject("docA", "does-not-exist");
+    expect(ds.projectsFor("docA")).toEqual([]);
   });
 
-  it("setDocumentProject ignores unknown project ids", () => {
-    ds.setDocumentProject("docA", "does-not-exist");
-    expect(ds.projectFor("docA")).toBeNull();
+  it("moveProject reorders within the list and clamps the index", () => {
+    const a = createOrFail("A");
+    const b = createOrFail("B");
+    const c = createOrFail("C");
+    expect(ds.projects.value.map((p) => p.id)).toEqual([a, b, c]);
+    ds.moveProject(a, 2); // move A to the end
+    expect(ds.projects.value.map((p) => p.id)).toEqual([b, c, a]);
+    ds.moveProject(c, 99); // clamp to end
+    expect(ds.projects.value.map((p) => p.id)).toEqual([b, a, c]);
+    ds.moveProject("nope", 0); // unknown id is a no-op
+    expect(ds.projects.value.map((p) => p.id)).toEqual([b, a, c]);
+  });
+
+  it("setSortPref / getSortPref persist and read back, scoped by view", () => {
+    ds.setSortPref("__all__", "name", "asc");
+    ds.setSortPref("p1", "updated", "desc");
+    expect(ds.getSortPref("__all__")).toEqual({ key: "name", direction: "asc" });
+    expect(ds.getSortPref("p1")).toEqual({ key: "updated", direction: "desc" });
+    expect(ds.getSortPref("unset")).toBeNull();
+  });
+
+  it("setSortPref sends sort_prefs under the snake_case key", async () => {
+    ds.setSortPref("__all__", "name", "asc");
+    await vi.waitFor(() => {
+      expect(invokeArgs("set_desktop_state").sort_prefs).toEqual({
+        __all__: { key: "name", direction: "asc" },
+      });
+    });
+  });
+
+  it("deleteProject also drops the project's persisted sort pref", () => {
+    const id = createOrFail("Legal");
+    ds.setSortPref(id, "name", "asc");
+    expect(ds.getSortPref(id)).toEqual({ key: "name", direction: "asc" });
+    ds.deleteProject(id);
+    expect(ds.getSortPref(id)).toBeNull();
   });
 
   it("clearDoc clears tags, tracked, and the project assignment (but not the project)", async () => {
-    const id = ds.createProject("Legal");
-    ds.setDocumentProject("docA", id);
+    const id = createOrFail("Legal");
+    ds.assignDocumentToProject("docA", id);
     ds.addTag("docA", "x");
     ds.setTracked({
       documentId: "docA",

@@ -97,8 +97,14 @@ pub struct ProjectDef {
 ///
 /// `tags` maps document id -> tag list. `tracked` holds the source-file baseline
 /// captured at import time, used by the modification tracker. `projects` is the
-/// vault's project-folder list; `assignments` maps document id -> project id
-/// (single-membership: a document lives in at most one project).
+/// vault's project-folder list; `assignments` maps document id -> project id list
+/// (multi-membership: a document may belong to several projects). `sort_prefs`
+/// stores each project's persisted table sort (keyed by project id, with
+/// `"__all__"` for the ungrouped "all documents" view).
+///
+/// `assignments` is deserialized tolerantly: a legacy single `String` value
+/// (pre-multi-membership state files) is coerced to a one-element `Vec`, so old
+/// desktop-state.json files load without a migration step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DesktopStateSlice {
     #[serde(default)]
@@ -107,8 +113,51 @@ pub struct DesktopStateSlice {
     pub tracked: Vec<TrackedFile>,
     #[serde(default)]
     pub projects: Vec<ProjectDef>,
+    #[serde(default, deserialize_with = "deserialize_assignments")]
+    pub assignments: BTreeMap<String, Vec<String>>,
     #[serde(default)]
-    pub assignments: BTreeMap<String, String>,
+    pub sort_prefs: BTreeMap<String, SortPref>,
+}
+
+/// A persisted document-table sort for one project view. `key` is the column
+/// ("name" / "owner" / "currentVersion" / "status" / "modification" / "updated");
+/// `direction` is `"asc"` or `"desc"`. An empty `key` means "use the UI default".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SortPref {
+    pub key: String,
+    pub direction: String,
+}
+
+/// Deserialize `assignments` accepting either the legacy single-`String` value
+/// (coerced to a one-element list) or the current `Vec<String>` value, so older
+/// desktop-state.json files load transparently after the multi-membership change.
+fn deserialize_assignments<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        Many(Vec<String>),
+        One(String),
+    }
+
+    let map: BTreeMap<String, StringOrVec> = BTreeMap::deserialize(deserializer)?;
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (doc_id, value) in map {
+        out.insert(
+            doc_id,
+            match value {
+                StringOrVec::Many(vec) => vec,
+                StringOrVec::One(s) => vec![s],
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// A tracked source file: the path the user last committed for a document, plus

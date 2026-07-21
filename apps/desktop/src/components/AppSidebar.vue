@@ -130,6 +130,58 @@ function onProjectClick(id: string) {
   selectProject(id);
   setSection("documents");
 }
+
+// --- drag-and-drop: assign documents to projects + reorder projects ---
+/** Project id currently under the drag cursor, for the drop-target highlight. */
+const dragOverProjectId = ref<string | null>(null);
+
+/** A project row is draggable to reorder it within the sidebar. */
+function onProjectDragStart(event: DragEvent, id: string) {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.setData("application/x-docvault-project", id);
+  event.dataTransfer.effectAllowed = "move";
+}
+
+function onProjectDragOver(event: DragEvent, id: string) {
+  event.preventDefault();
+  if (event.dataTransfer) {
+    const moving = event.dataTransfer.types.includes(
+      "application/x-docvault-project",
+    );
+    event.dataTransfer.dropEffect = moving ? "move" : "copy";
+  }
+  dragOverProjectId.value = id;
+}
+
+function onProjectDragLeave(id: string) {
+  if (dragOverProjectId.value === id) dragOverProjectId.value = null;
+}
+
+/**
+ * Drop handler for a project row. A dropped document is assigned to the project
+ * (multi-membership); a dropped project is reordered to the target's slot
+ * (adjusted for the source's own removal so it lands on the target, not past it).
+ */
+function onProjectDrop(event: DragEvent, targetId: string) {
+  event.preventDefault();
+  dragOverProjectId.value = null;
+  const dt = event.dataTransfer;
+  if (!dt) return;
+  const docId = dt.getData("application/x-docvault-doc");
+  if (docId) {
+    desktop.assignDocumentToProject(docId, targetId);
+    return;
+  }
+  const projId = dt.getData("application/x-docvault-project");
+  if (!projId || projId === targetId) return;
+  const from = projects.value.findIndex((p) => p.id === projId);
+  const targetIndex = projects.value.findIndex((p) => p.id === targetId);
+  if (from === -1 || targetIndex === -1) return;
+  desktop.moveProject(
+    projId,
+    from < targetIndex ? targetIndex - 1 : targetIndex,
+  );
+}
 </script>
 
 <template>
@@ -216,15 +268,22 @@ function onProjectClick(id: string) {
             :class="{
               active:
                 activeSection === 'documents' && activeProjectId === proj.id,
+              'drag-target': dragOverProjectId === proj.id,
             }"
             type="button"
+            draggable="true"
             :aria-current="
               activeSection === 'documents' && activeProjectId === proj.id
                 ? 'page'
                 : undefined
             "
+            :title="t('sidebar.projectDropHint')"
             @click="onProjectClick(proj.id)"
             @contextmenu.prevent.stop="openCtx($event, proj.id)"
+            @dragstart="onProjectDragStart($event, proj.id)"
+            @dragover.prevent="onProjectDragOver($event, proj.id)"
+            @dragleave="onProjectDragLeave(proj.id)"
+            @drop.prevent="onProjectDrop($event, proj.id)"
           >
             <Folder class="nav-icon sub-icon" aria-hidden="true" />
             <span class="project-name">{{ proj.name }}</span>
@@ -317,6 +376,7 @@ function onProjectClick(id: string) {
 
 .nav-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -325,6 +385,7 @@ function onProjectClick(id: string) {
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-width: 0;
   height: 38px;
   padding: 0 12px;
   border: 1px solid transparent;
@@ -342,6 +403,12 @@ function onProjectClick(id: string) {
   background: var(--bg-active);
   color: var(--accent-text);
   font-weight: 650;
+}
+
+/* Drop target while dragging a document (assign) or project (reorder) onto it. */
+.nav-row.drag-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .nav-main {
@@ -391,6 +458,7 @@ function onProjectClick(id: string) {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   height: 38px;
   padding: 0 12px 0 28px;
 }
@@ -432,6 +500,7 @@ function onProjectClick(id: string) {
 
 .project-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
 }
 

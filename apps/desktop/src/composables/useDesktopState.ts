@@ -9,6 +9,7 @@ import {
   type FileStat,
   type ModificationStatus,
   type ProjectDef,
+  type SortPref,
   type TrackedFile,
 } from "../data/mock";
 import {
@@ -45,8 +46,10 @@ const tags: Ref<Record<string, string[]>> = ref({});
 const tracked: Ref<TrackedFile[]> = ref([]);
 /** User-created project folders for grouping documents (desktop-local, like tags). */
 const projects: Ref<ProjectDef[]> = ref([]);
-/** documentId -> projectId; single membership (a doc lives in one project). */
-const assignments: Ref<Record<string, string>> = ref({});
+/** documentId -> projectIds; multi-membership (a doc may belong to several projects). */
+const assignments: Ref<Record<string, string[]>> = ref({});
+/** Per-view persisted table sort: scope key (project id or "__all__") -> sort pref. */
+const sortPrefs: Ref<Record<string, SortPref>> = ref({});
 /** Latest probe per document id, populated by refreshModifications. */
 const probes: Ref<Record<string, FileProbe>> = ref({});
 const loaded: Ref<boolean> = ref(false);
@@ -79,6 +82,7 @@ async function loadDesktopState(): Promise<void> {
     tracked.value = mockDesktopState.tracked.map((t) => ({ ...t }));
     projects.value = mockDesktopState.projects.map((p) => ({ ...p }));
     assignments.value = { ...mockDesktopState.assignments };
+    sortPrefs.value = { ...mockDesktopState.sortPrefs };
     loaded.value = true;
     return;
   }
@@ -89,6 +93,7 @@ async function loadDesktopState(): Promise<void> {
     tracked.value = state.tracked;
     projects.value = state.projects;
     assignments.value = state.assignments;
+    sortPrefs.value = state.sortPrefs;
   } catch (e) {
     console.error("loadDesktopState failed", e);
   } finally {
@@ -117,6 +122,7 @@ async function saveDesktopState(): Promise<void> {
       tracked: tracked.value.map(toRawTrackedFile),
       projects: projects.value,
       assignments: assignments.value,
+      sort_prefs: sortPrefs.value,
     });
   } catch (e) {
     console.error("saveDesktopState failed", e);
@@ -192,35 +198,78 @@ function renameProject(id: string, name: string): boolean {
 }
 
 /**
- * Delete a project folder. Documents assigned to it are not deleted - they fall
- * back to the ungrouped "all documents" list (their assignment is cleared).
+ * Delete a project folder. Documents assigned to it are not deleted - the
+ * project id is simply dropped from each document's membership list, so the doc
+ * remains in the vault (and any other projects it belongs to).
  */
 function deleteProject(id: string): void {
   if (!projects.value.some((p) => p.id === id)) return;
   projects.value = projects.value.filter((p) => p.id !== id);
-  const next: Record<string, string> = {};
-  for (const [docId, projId] of Object.entries(assignments.value)) {
-    if (projId !== id) next[docId] = projId;
+  const next: Record<string, string[]> = {};
+  for (const [docId, pids] of Object.entries(assignments.value)) {
+    const filtered = pids.filter((p) => p !== id);
+    if (filtered.length > 0) next[docId] = filtered;
   }
   assignments.value = next;
+  // Drop the deleted project's persisted sort pref (no longer reachable).
+  if (sortPrefs.value[id]) {
+    const nextPrefs = { ...sortPrefs.value };
+    delete nextPrefs[id];
+    sortPrefs.value = nextPrefs;
+  }
   void saveDesktopState();
 }
 
-/** The project id a document is assigned to, or null when ungrouped. */
-function projectFor(docId: string): string | null {
-  return assignments.value[docId] ?? null;
+/** The project ids a document belongs to (possibly several), empty when ungrouped. */
+function projectsFor(docId: string): string[] {
+  return assignments.value[docId] ?? [];
 }
 
-/** Assign a document to a project, or unassign it (projectId null / unknown).
- * Persisted. */
-function setDocumentProject(docId: string, projectId: string | null): void {
-  const next = { ...assignments.value };
-  if (projectId && projects.value.some((p) => p.id === projectId)) {
-    next[docId] = projectId;
-  } else {
-    delete next[docId];
-  }
-  assignments.value = next;
+/** Assign a document to an additional project (multi-membership). Idempotent.
+ *  Persisted. Unknown project ids are ignored. */
+function assignDocumentToProject(docId: string, projectId: string): void {
+  if (!projects.value.some((p) => p.id === projectId)) return;
+  const current = assignments.value[docId] ?? [];
+  if (current.includes(projectId)) return;
+  assignments.value = { ...assignments.value, [docId]: [...current, projectId] };
+  void saveDesktopState();
+}
+
+/** Remove a document from one project (leaves any other memberships intact).
+ *  Persisted; no-op when the doc is not in the project. */
+function unassignDocumentFromProject(docId: string, projectId: string): void {
+  const current = assignments.value[docId];
+  if (!current || !current.includes(projectId)) return;
+  const next = current.filter((p) => p !== projectId);
+  const nextAssign = { ...assignments.value };
+  if (next.length === 0) delete nextAssign[docId];
+  else nextAssign[docId] = next;
+  assignments.value = nextAssign;
+  void saveDesktopState();
+}
+
+/** Move a project to a new index in the sidebar order (drag-to-reorder). Clamps
+ *  the target index into range and no-ops on unknown id. Persisted. */
+function moveProject(id: string, newIndex: number): void {
+  const from = projects.value.findIndex((p) => p.id === id);
+  if (from === -1) return;
+  const list = [...projects.value];
+  const [moved] = list.splice(from, 1);
+  const clamped = Math.max(0, Math.min(newIndex, list.length));
+  list.splice(clamped, 0, moved);
+  projects.value = list;
+  void saveDesktopState();
+}
+
+/** The persisted table sort for a view (project id or "__all__"), or null. */
+function getSortPref(scope: string): SortPref | null {
+  return sortPrefs.value[scope] ?? null;
+}
+
+/** Persist the table sort for a view. `key`/`direction` are stored verbatim
+ *  (strings) and re-validated by the composable when read back. */
+function setSortPref(scope: string, key: string, direction: string): void {
+  sortPrefs.value = { ...sortPrefs.value, [scope]: { key, direction } };
   void saveDesktopState();
 }
 
@@ -412,6 +461,7 @@ export function useDesktopState() {
     tracked,
     projects,
     assignments,
+    sortPrefs,
     probes,
     loaded,
     allTags,
@@ -426,8 +476,13 @@ export function useDesktopState() {
     createProject,
     renameProject,
     deleteProject,
-    projectFor,
-    setDocumentProject,
+    moveProject,
+    projectsFor,
+    assignDocumentToProject,
+    unassignDocumentFromProject,
+    // sort prefs
+    getSortPref,
+    setSortPref,
     // tracked
     trackedPathFor,
     modificationFor,

@@ -80,8 +80,16 @@ export interface DesktopState {
   tracked: TrackedFile[];
   /** Project folders, desktop-local like tags. Empty until the user adds one. */
   projects: ProjectDef[];
-  /** documentId -> projectId; single membership (a doc lives in one project). */
-  assignments: Record<string, string>;
+  /** documentId -> projectIds; multi-membership (a doc may belong to several projects). */
+  assignments: Record<string, string[]>;
+  /** Persisted per-project table sort: scope key (project id or "__all__") -> sort pref. */
+  sortPrefs: Record<string, SortPref>;
+}
+
+/** A persisted document-table sort for one project view. */
+export interface SortPref {
+  key: string;
+  direction: string;
 }
 
 export interface Version {
@@ -111,8 +119,8 @@ export interface Document {
   modification?: ModificationStatus;
   /** The tracked source-file path, if any. Merged in by useDocuments. */
   trackedPath?: string | null;
-  /** Project folder id this doc is assigned to, or null/undefined for "all". */
-  project?: string | null;
+  /** Project folder ids this doc belongs to (multi-membership); empty/undefined for "all". */
+  projects?: string[];
 }
 
 export type JobKind = "commit" | "export" | "checkout" | "delete" | "archive";
@@ -336,9 +344,10 @@ export const desktopState: DesktopState = {
     { id: "proj-finance", name: "财务项目" },
   ],
   assignments: {
-    "550e8400": "proj-legal",
-    "7c1b28d1": "proj-finance",
+    "550e8400": ["proj-legal"],
+    "7c1b28d1": ["proj-finance"],
   },
+  sortPrefs: {},
 };
 
 export const mockProbes: Record<string, FileProbe> = {

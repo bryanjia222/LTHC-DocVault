@@ -19,7 +19,8 @@ export const zhCN = {
     renameProject: "重命名",
     deleteProject: "删除",
     confirmDeleteProject:
-      "确认删除项目「{name}」？项目内的文档不会被删除，将归入「全部文档」。",
+      "确认删除项目「{name}」？不会删除项目内的文档，文档仍保留在仓库与其他所属项目中。",
+    projectDropHint: "拖入文档以加入该项目；拖动项目可调整顺序",
     projectNameTaken: "该项目名称已存在",
     projectNameEmpty: "项目名称不能为空",
     noProjects: "暂无项目，点击 + 新建",
@@ -121,7 +122,7 @@ export const zhCN = {
     title: "文档",
     subtitle: "选择文档查看版本历史与详情。",
     visible: "{count} 个可见",
-    searchPlaceholder: "搜索名称、所有者、ID",
+    searchPlaceholder: "搜索文档…",
     empty: "未匹配到文档，试试调整搜索条件。",
     emptyNoDocs: "还没有文档，添加第一个文档吧。",
     columns: {
@@ -133,6 +134,21 @@ export const zhCN = {
       updated: "更新时间",
     },
   },
+  search: {
+    scopeLabel: "搜索范围",
+    scope: {
+      all: "全部",
+      tags: "标签",
+      filename: "文件名",
+      owner: "作者",
+      id: "ID",
+    },
+  },
+  projects: {
+    label: "项目",
+    title: "所属项目",
+    empty: "未归入任何项目，将其拖入左侧栏项目即可加入。",
+  },
   filters: {
     title: "筛选",
     type: "类型",
@@ -142,6 +158,12 @@ export const zhCN = {
     clear: "清除筛选",
     active: "{count} 项筛选",
     noTags: "暂无标签",
+    category: {
+      document: "文档",
+      presentation: "PPT",
+      spreadsheet: "表格",
+      other: "其他",
+    },
   },
   tags: {
     title: "标签",

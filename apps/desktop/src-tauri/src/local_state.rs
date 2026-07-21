@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 
-use crate::dto::{DesktopStateSlice, FileProbe, FileStat, ProjectDef, TrackedFile};
+use crate::dto::{DesktopStateSlice, FileProbe, FileStat, ProjectDef, SortPref, TrackedFile};
 use crate::state::{self, AppState};
 
 /// On-disk shape: a versioned map of vault root -> slice. `version` is reserved
@@ -191,9 +191,9 @@ pub fn get_desktop_state(
     Ok(slice_for_root(&file, root.as_deref().unwrap_or("")))
 }
 
-/// Replace the current vault's slice (tags, tracked, projects, assignments)
-/// and persist. Refuses when no vault is open, since there is no root to key
-/// the slice by.
+/// Replace the current vault's slice (tags, tracked, projects, assignments,
+/// sort_prefs) and persist. Refuses when no vault is open, since there is no
+/// root to key the slice by.
 #[tauri::command(rename_all = "snake_case")]
 pub fn set_desktop_state(
     app: AppHandle,
@@ -201,7 +201,8 @@ pub fn set_desktop_state(
     tags: BTreeMap<String, Vec<String>>,
     tracked: Vec<TrackedFile>,
     projects: Vec<ProjectDef>,
-    assignments: BTreeMap<String, String>,
+    assignments: BTreeMap<String, Vec<String>>,
+    sort_prefs: BTreeMap<String, SortPref>,
 ) -> Result<(), String> {
     let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
     let mut file = load_file(&app)?;
@@ -212,6 +213,7 @@ pub fn set_desktop_state(
             tracked,
             projects,
             assignments,
+            sort_prefs,
         },
     );
     save_file(&app, &file)
@@ -280,7 +282,18 @@ mod tests {
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();
-                    m.insert("docA".to_owned(), "proj1".to_owned());
+                    m.insert("docA".to_owned(), vec!["proj1".to_owned()]);
+                    m
+                },
+                sort_prefs: {
+                    let mut m = BTreeMap::new();
+                    m.insert(
+                        "proj1".to_owned(),
+                        SortPref {
+                            key: "name".to_owned(),
+                            direction: "asc".to_owned(),
+                        },
+                    );
                     m
                 },
             },
@@ -302,7 +315,13 @@ mod tests {
         assert_eq!(slice.projects.len(), 1);
         assert_eq!(slice.projects[0].id, "proj1");
         assert_eq!(slice.projects[0].name, "诉讼案");
-        assert_eq!(slice.assignments.get("docA").unwrap(), "proj1");
+        assert_eq!(
+            slice.assignments.get("docA").unwrap(),
+            &vec!["proj1".to_owned()]
+        );
+        let sort = slice.sort_prefs.get("proj1").unwrap();
+        assert_eq!(sort.key, "name");
+        assert_eq!(sort.direction, "asc");
     }
 
     /// Two vault roots keep independent slices - switching vaults never leaks
@@ -325,9 +344,10 @@ mod tests {
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();
-                    m.insert("docA".to_owned(), "pa".to_owned());
+                    m.insert("docA".to_owned(), vec!["pa".to_owned()]);
                     m
                 },
+                sort_prefs: BTreeMap::new(),
             },
         );
         file.vaults.insert(
@@ -343,6 +363,7 @@ mod tests {
                 }],
                 projects: Vec::new(),
                 assignments: BTreeMap::new(),
+                sort_prefs: BTreeMap::new(),
             },
         );
 
@@ -353,7 +374,7 @@ mod tests {
         assert!(a.tracked.is_empty());
         assert_eq!(a.projects.len(), 1);
         assert_eq!(a.projects[0].id, "pa");
-        assert_eq!(a.assignments.get("docA").unwrap(), "pa");
+        assert_eq!(a.assignments.get("docA").unwrap(), &vec!["pa".to_owned()]);
         assert!(b.tags.is_empty());
         assert_eq!(b.tracked.len(), 1);
         assert!(b.projects.is_empty());
@@ -363,6 +384,32 @@ mod tests {
                 && none.tracked.is_empty()
                 && none.projects.is_empty()
                 && none.assignments.is_empty()
+                && none.sort_prefs.is_empty()
+        );
+    }
+
+    /// Legacy desktop-state.json files wrote `assignments` as docId -> single
+    /// projectId (String). The tolerant deserializer coerces each such value to
+    /// a one-element Vec, and accepts the current Vec shape alongside it, so old
+    /// files load transparently after the multi-membership change.
+    #[test]
+    fn assignments_migrate_legacy_single_string() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("desktop-state.json");
+        // docA uses the legacy single-String shape; docB uses the current Vec
+        // shape - both must round-trip into Vec<String>.
+        let json = r#"{"version":1,"vaults":{"/v":{"tags":{},"tracked":[],"projects":[{"id":"p1","name":"P"}],"assignments":{"docA":"p1","docB":["p1","p2"]},"sort_prefs":{}}}}"#;
+        fs::write(&path, json).unwrap();
+
+        let file = load_file_at(&path).unwrap();
+        let slice = slice_for_root(&file, "/v");
+        assert_eq!(
+            slice.assignments.get("docA").unwrap(),
+            &vec!["p1".to_owned()]
+        );
+        assert_eq!(
+            slice.assignments.get("docB").unwrap(),
+            &vec!["p1".to_owned(), "p2".to_owned()]
         );
     }
 

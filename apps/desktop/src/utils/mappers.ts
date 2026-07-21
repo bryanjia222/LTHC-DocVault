@@ -105,12 +105,19 @@ export interface RawProjectDef {
   name: string;
 }
 
+export interface RawSortPref {
+  key: string;
+  direction: string;
+}
+
 export interface RawDesktopState {
   tags: Record<string, string[]>;
   tracked: RawTrackedFile[];
   projects: RawProjectDef[];
-  /** documentId -> projectId. */
-  assignments: Record<string, string>;
+  /** documentId -> projectIds (multi-membership). */
+  assignments: Record<string, string[]>;
+  /** scope key (project id or "__all__") -> persisted table sort (snake_case wire). */
+  sort_prefs: Record<string, RawSortPref>;
 }
 
 export interface RawFileStat {
@@ -249,10 +256,11 @@ export function mapDesktopState(raw: RawDesktopState): DesktopState {
   return {
     tags: raw.tags,
     tracked: raw.tracked.map(mapTrackedFile),
-    // `projects`/`assignments` are newer fields; default to empty so older
-    // state files (and test fixtures) that omit them don't leak `undefined`.
+    // `projects`/`assignments`/`sort_prefs` are newer fields; default to empty so
+    // older state files (and test fixtures) that omit them don't leak `undefined`.
     projects: raw.projects ?? [],
     assignments: raw.assignments ?? {},
+    sortPrefs: raw.sort_prefs ?? {},
   };
 }
 

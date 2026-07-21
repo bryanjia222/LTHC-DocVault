@@ -2,12 +2,10 @@
 import { useI18n } from "vue-i18n";
 import { useJobs } from "../../composables/useJobs";
 import { useActivityLog } from "../../composables/useActivityLog";
-import { useVaultActions } from "../../composables/useVaultActions";
 
 const { t } = useI18n();
 const { jobs, cancelJob } = useJobs();
 const { logEntries, clear } = useActivityLog();
-const { runAction } = useVaultActions();
 </script>
 
 <template>
@@ -18,13 +16,6 @@ const { runAction } = useVaultActions();
           <h2>{{ t("jobs.title") }}</h2>
           <p>{{ t("jobs.subtitle") }}</p>
         </div>
-        <button
-          class="secondary"
-          type="button"
-          @click="runAction('actionLogs.jobCenter')"
-        >
-          {{ t("actions.viewAll") }}
-        </button>
       </div>
 
       <div class="job-list">
@@ -82,6 +73,9 @@ const { runAction } = useVaultActions();
   grid-template-columns: minmax(0, 1fr) 420px;
   grid-template-rows: minmax(0, 1fr);
   gap: 18px;
+  /* Fixed height so accumulating jobs / log entries can't gradually grow the
+     panel; content scrolls inside. Not too small to stay usable. */
+  height: 340px;
   min-height: 0;
 }
 

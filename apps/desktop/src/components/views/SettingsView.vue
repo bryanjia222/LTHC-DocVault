@@ -51,15 +51,17 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
     </div>
 
     <!-- 状态: vault summary + tasks + archive (the old sidebar vault block +
-         the Jobs/Archive views, unified into one tab). -->
-    <div v-if="settingsTab === 'status'" class="tab-pane status-pane">
+         the Jobs/Archive views, unified into one tab). v-show keeps every pane
+         mounted so switching tabs never pays a teardown/remount cost (the status
+         pane's heavy children made leaving it lag). -->
+    <div v-show="settingsTab === 'status'" class="tab-pane status-pane">
       <StatusVaultCard />
       <StatusTasksPanel />
       <StatusArchivePanel />
     </div>
 
     <!-- 存储: switch backend + storage / database / logging paths. -->
-    <div v-else-if="settingsTab === 'storage'" class="tab-pane">
+    <div v-show="settingsTab === 'storage'" class="tab-pane">
       <div class="surface settings-card switch-card">
         <h3>{{ t("settings.connectSection") }}</h3>
         <p class="switch-hint">{{ t("connect.switchHint") }}</p>
@@ -124,7 +126,7 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
     </div>
 
     <!-- 外观: theme / language / dev mode (+ dev reset card). -->
-    <div v-else-if="settingsTab === 'appearance'" class="tab-pane">
+    <div v-show="settingsTab === 'appearance'" class="tab-pane">
       <div class="settings-grid single">
         <div class="surface settings-card">
           <h3>{{ t("settings.appearanceSection") }}</h3>
