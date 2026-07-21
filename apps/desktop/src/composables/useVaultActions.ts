@@ -21,7 +21,7 @@ import { extOf, pickDocumentFile } from "../utils/file";
 export function useVaultActions() {
   const { t } = useI18n();
   const { log } = useActivityLog();
-  const { setSection } = useNavigation();
+  const { setSection, openSettingsTab } = useNavigation();
   const { toggleTheme, isDark } = useTheme();
   const { selectedDocument, selectedVersion, documents } = useDocuments();
   const {
@@ -430,6 +430,14 @@ export function useVaultActions() {
     log(t("actionLogs.navigate", { section: t(labelKey) }));
   }
 
+  /** Open Settings on the 状态 (status) tab - the unified tasks/archive view. */
+  function openStatus() {
+    openSettingsTab("status");
+    log(
+      t("actionLogs.navigate", { section: t("settings.tabs.status") }),
+    );
+  }
+
   function toggleCurrentTheme() {
     toggleTheme();
     log(
@@ -442,6 +450,7 @@ export function useVaultActions() {
   return {
     runAction,
     navigate,
+    openStatus,
     toggleCurrentTheme,
     commitModifiedDocument,
     openDocument,

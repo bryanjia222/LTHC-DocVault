@@ -75,9 +75,12 @@ beforeEach(() => {
   docs.selectedDocumentId.value = "";
   docs.selectedVersionId.value = "";
   docs.clearFilters();
+  docs.activeProjectId.value = null;
   desktop.tags.value = {};
   desktop.tracked.value = [];
   desktop.probes.value = {};
+  desktop.projects.value = [];
+  desktop.assignments.value = {};
 });
 
 describe("useDocuments - enrichment", () => {
@@ -112,6 +115,12 @@ describe("useDocuments - enrichment", () => {
       "/a.docx",
     );
     expect(docs.documents.value.find((d) => d.id === "docB")?.trackedPath).toBeNull();
+  });
+
+  it("exposes the project assignment (null when unassigned)", () => {
+    desktop.assignments.value = { docA: "p1" };
+    expect(docs.documents.value.find((d) => d.id === "docA")?.project).toBe("p1");
+    expect(docs.documents.value.find((d) => d.id === "docB")?.project).toBeNull();
   });
 });
 
@@ -158,6 +167,43 @@ describe("useDocuments - filteredDocuments wiring", () => {
     expect(docs.activeFilterCount.value).toBeGreaterThan(0);
     docs.clearFilters();
     expect(docs.activeFilterCount.value).toBe(0);
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
+  });
+});
+
+describe("useDocuments - project scope", () => {
+  it("selectAll (null scope) shows every document", () => {
+    desktop.assignments.value = { docA: "p1", docB: "p2" };
+    docs.selectAll();
+    expect(docs.activeProjectId.value).toBeNull();
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
+      "docA",
+      "docB",
+    ]);
+  });
+
+  it("selectProject narrows the list to that project only", () => {
+    desktop.assignments.value = { docA: "p1", docB: "p2" };
+    docs.selectProject("p1");
+    expect(docs.activeProjectId.value).toBe("p1");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+  });
+
+  it("project scope composes with the search filter", () => {
+    desktop.assignments.value = { docA: "p1", docB: "p1" };
+    docs.selectProject("p1");
+    docs.searchQuery.value = "beta";
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
+  });
+
+  it("documents with no assignment are hidden under a project scope but shown under all", () => {
+    desktop.assignments.value = { docA: "p1" }; // docB unassigned
+    docs.selectProject("p1");
+    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
+    docs.selectAll();
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
       "docA",
       "docB",

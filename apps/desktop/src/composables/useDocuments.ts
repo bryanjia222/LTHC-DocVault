@@ -35,13 +35,22 @@ const tagFilter = ref<string[]>([]);
 const modifiedOnly = ref(false);
 const healthFilter = ref<Set<HealthStatus>>(new Set());
 
-/** Vault documents enriched with desktop-local tags / modification / trackedPath. */
+/**
+ * Sidebar project scope. When set, `filteredDocuments` only shows documents
+ * assigned to this project; `null` means "all documents" (the 文档 node). A
+ * document with no assignment is never hidden by this - it shows under "all".
+ */
+const activeProjectId = ref<string | null>(null);
+
+/** Vault documents enriched with desktop-local tags / modification / trackedPath
+ *  / project. */
 const documents = computed<Document[]>(() =>
   vaultDocuments.value.map((doc) => ({
     ...doc,
     tags: desktop.tags.value[doc.id] ?? [],
     modification: desktop.modificationFor(doc.id),
     trackedPath: desktop.trackedPathFor(doc.id),
+    project: desktop.projectFor(doc.id),
   })),
 );
 
@@ -60,15 +69,20 @@ const selectedVersion = computed<Version | undefined>(
 );
 
 export function useDocuments() {
-  const filteredDocuments = computed<Document[]>(() =>
-    filterDocuments(documents.value, {
+  const filteredDocuments = computed<Document[]>(() => {
+    const matched = filterDocuments(documents.value, {
       query: searchQuery.value,
       types: typeFilter.value,
       tags: tagFilter.value,
       modifiedOnly: modifiedOnly.value,
       health: healthFilter.value,
-    }),
-  );
+    });
+    // Scope by the sidebar's active project AFTER the multi-dimension filter,
+    // so search/type/tag/health filters compose with project grouping. null
+    // (the 文档 node) shows everything matched.
+    const pid = activeProjectId.value;
+    return pid ? matched.filter((d) => d.project === pid) : matched;
+  });
 
   const totalVersions = computed(() =>
     vaultDocuments.value.reduce(
@@ -124,6 +138,16 @@ export function useDocuments() {
     healthFilter.value = new Set();
   }
 
+  /** Scope the document list to a single project folder (sidebar click). */
+  function selectProject(projectId: string | null) {
+    activeProjectId.value = projectId;
+  }
+
+  /** Show all documents (the 文档 node) - clears the project scope. */
+  function selectAll() {
+    activeProjectId.value = null;
+  }
+
   return {
     // enriched + filtered data
     documents,
@@ -141,6 +165,10 @@ export function useDocuments() {
     healthFilter,
     activeFilterCount,
     allTags: desktop.allTags,
+    // project scope
+    activeProjectId,
+    selectProject,
+    selectAll,
     // selection + filter controls
     selectDocument,
     selectVersion,

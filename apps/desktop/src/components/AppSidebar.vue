@@ -1,23 +1,135 @@
 <script setup lang="ts">
-import { Archive, FileText, Settings, Activity } from "@lucide/vue";
+import { computed, nextTick, ref } from "vue";
+import {
+  FileText,
+  Folder,
+  FolderPlus,
+  Pencil,
+  Settings,
+  Trash2,
+} from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { navigationItems, useNavigation } from "../composables/useNavigation";
+import { useNavigation } from "../composables/useNavigation";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
-import { useVault } from "../composables/useVault";
+import { useDesktopState } from "../composables/useDesktopState";
 
 const { t } = useI18n();
-const { activeSection } = useNavigation();
+const { activeSection, setSection } = useNavigation();
 const { navigate } = useVaultActions();
-const { documents, totalVersions } = useDocuments();
-const { config } = useVault();
+const { activeProjectId, selectAll, selectProject } = useDocuments();
+const desktop = useDesktopState();
 
-const navIcons = {
-  documents: FileText,
-  jobs: Activity,
-  archive: Archive,
-  settings: Settings,
-} as const;
+const projects = computed(() => desktop.projects.value);
+
+// --- new project inline input ---
+const creating = ref(false);
+const newName = ref("");
+const createError = ref("");
+const createInputEl = ref<HTMLInputElement | null>(null);
+
+function startCreate() {
+  newName.value = "";
+  createError.value = "";
+  creating.value = true;
+  nextTick(() => createInputEl.value?.focus());
+}
+
+function commitCreate() {
+  const id = desktop.createProject(newName.value);
+  if (!id) {
+    createError.value = newName.value.trim()
+      ? t("sidebar.projectNameTaken")
+      : t("sidebar.projectNameEmpty");
+    return;
+  }
+  creating.value = false;
+  newName.value = "";
+  createError.value = "";
+  selectProject(id);
+  setSection("documents");
+}
+
+function cancelCreate() {
+  creating.value = false;
+  newName.value = "";
+  createError.value = "";
+}
+
+// --- rename inline input ---
+const editingId = ref<string | null>(null);
+const editName = ref("");
+const editError = ref("");
+const editInputEl = ref<HTMLInputElement | null>(null);
+
+function startRename(id: string, current: string) {
+  editingId.value = id;
+  editName.value = current;
+  editError.value = "";
+  nextTick(() => editInputEl.value?.focus());
+}
+
+function commitRename() {
+  if (!editingId.value) return;
+  const ok = desktop.renameProject(editingId.value, editName.value);
+  if (!ok) {
+    editError.value = editName.value.trim()
+      ? t("sidebar.projectNameTaken")
+      : t("sidebar.projectNameEmpty");
+    return;
+  }
+  editingId.value = null;
+  editName.value = "";
+  editError.value = "";
+}
+
+function cancelRename() {
+  editingId.value = null;
+  editName.value = "";
+  editError.value = "";
+}
+
+// --- project context menu (rename / delete) ---
+const ctx = ref<{ projectId: string; x: number; y: number } | null>(null);
+
+function openCtx(event: MouseEvent, id: string) {
+  ctx.value = { projectId: id, x: event.clientX, y: event.clientY };
+}
+
+function closeCtx() {
+  ctx.value = null;
+}
+
+function ctxRename() {
+  const id = ctx.value?.projectId;
+  const proj = id ? projects.value.find((p) => p.id === id) : undefined;
+  closeCtx();
+  if (id && proj) startRename(id, proj.name);
+}
+
+function ctxDelete() {
+  const id = ctx.value?.projectId;
+  closeCtx();
+  if (!id) return;
+  const proj = projects.value.find((p) => p.id === id);
+  if (!proj) return;
+  if (!window.confirm(t("sidebar.confirmDeleteProject", { name: proj.name }))) {
+    return;
+  }
+  desktop.deleteProject(id);
+  // Deleting the active project falls back to "all documents".
+  if (activeProjectId.value === id) selectAll();
+}
+
+function onDocumentsClick() {
+  selectAll();
+  setSection("documents");
+}
+
+function onProjectClick(id: string) {
+  selectProject(id);
+  setSection("documents");
+}
 </script>
 
 <template>
@@ -30,41 +142,140 @@ const navIcons = {
       </div>
     </div>
 
-    <nav class="nav-list" :aria-label="t('nav.primary')">
-      <button
-        v-for="item in navigationItems"
-        :key="item.id"
-        :class="{ active: activeSection === item.id }"
-        type="button"
-        :aria-current="activeSection === item.id ? 'page' : undefined"
-        @click="navigate(item.id)"
+    <div class="nav-section" :aria-label="t('nav.primary')">
+      <!-- 文档 (all documents) row + add-project button -->
+      <div
+        class="nav-row"
+        :class="{
+          active: activeSection === 'documents' && !activeProjectId,
+        }"
       >
-        <component
-          :is="navIcons[item.id]"
-          class="nav-icon"
-          aria-hidden="true"
-        />
-        {{ t(item.labelKey) }}
-      </button>
-    </nav>
+        <button
+          class="nav-main"
+          type="button"
+          :aria-current="
+            activeSection === 'documents' && !activeProjectId
+              ? 'page'
+              : undefined
+          "
+          @click="onDocumentsClick"
+        >
+          <FileText class="nav-icon" aria-hidden="true" />
+          <span>{{ t("nav.documents") }}</span>
+        </button>
+        <button
+          class="icon-btn"
+          type="button"
+          :title="t('sidebar.addProject')"
+          :aria-label="t('sidebar.addProject')"
+          @click="startCreate"
+        >
+          <FolderPlus class="nav-icon" aria-hidden="true" />
+        </button>
+      </div>
 
-    <div class="sidebar-block">
-      <div class="block-title">{{ t("sidebar.vault") }}</div>
-      <dl>
-        <div>
-          <dt>{{ t("sidebar.documents") }}</dt>
-          <dd>{{ documents.length }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("sidebar.versions") }}</dt>
-          <dd>{{ totalVersions }}</dd>
-        </div>
-        <div>
-          <dt>{{ t("sidebar.backend") }}</dt>
-          <dd>{{ t(`backend.${config.backend}`) }}</dd>
-        </div>
-      </dl>
+      <!-- new project inline input -->
+      <div v-if="creating" class="project-input-row">
+        <Folder class="nav-icon sub-icon" aria-hidden="true" />
+        <input
+          ref="createInputEl"
+          v-model="newName"
+          type="text"
+          class="project-input"
+          :placeholder="t('sidebar.projectPlaceholder')"
+          @input="createError = ''"
+          @keydown.enter="commitCreate"
+          @keydown.escape="cancelCreate"
+          @blur="cancelCreate"
+        />
+      </div>
+      <p v-if="createError" class="field-error">{{ createError }}</p>
+
+      <!-- project sub-items -->
+      <div class="project-list">
+        <template v-for="proj in projects" :key="proj.id">
+          <div
+            v-if="editingId === proj.id"
+            class="project-input-row"
+          >
+            <Folder class="nav-icon sub-icon" aria-hidden="true" />
+            <input
+              ref="editInputEl"
+              v-model="editName"
+              type="text"
+              class="project-input"
+              @input="editError = ''"
+              @keydown.enter="commitRename"
+              @keydown.escape="cancelRename"
+              @blur="cancelRename"
+            />
+          </div>
+          <button
+            v-else
+            class="nav-row project-row"
+            :class="{
+              active:
+                activeSection === 'documents' && activeProjectId === proj.id,
+            }"
+            type="button"
+            :aria-current="
+              activeSection === 'documents' && activeProjectId === proj.id
+                ? 'page'
+                : undefined
+            "
+            @click="onProjectClick(proj.id)"
+            @contextmenu.prevent.stop="openCtx($event, proj.id)"
+          >
+            <Folder class="nav-icon sub-icon" aria-hidden="true" />
+            <span class="project-name">{{ proj.name }}</span>
+          </button>
+        </template>
+        <p v-if="projects.length === 0 && !creating" class="empty-hint">
+          {{ t("sidebar.noProjects") }}
+        </p>
+        <p v-if="editError" class="field-error">{{ editError }}</p>
+      </div>
     </div>
+
+    <button
+      class="nav-row settings-row"
+      :class="{ active: activeSection === 'settings' }"
+      type="button"
+      :aria-current="activeSection === 'settings' ? 'page' : undefined"
+      @click="navigate('settings')"
+    >
+      <Settings class="nav-icon" aria-hidden="true" />
+      <span>{{ t("nav.settings") }}</span>
+    </button>
+
+    <!-- project context menu -->
+    <Teleport to="body">
+      <div
+        v-if="ctx"
+        class="ctx-backdrop"
+        @click="closeCtx"
+        @contextmenu.prevent="closeCtx"
+      >
+        <ul
+          class="ctx-menu"
+          :style="{ top: `${ctx.y}px`, left: `${ctx.x}px` }"
+          @click.stop
+        >
+          <li>
+            <button type="button" @click="ctxRename">
+              <Pencil class="nav-icon" aria-hidden="true" />
+              {{ t("sidebar.renameProject") }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="danger" @click="ctxDelete">
+              <Trash2 class="nav-icon" aria-hidden="true" />
+              {{ t("sidebar.deleteProject") }}
+            </button>
+          </li>
+        </ul>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -104,33 +315,128 @@ const navIcons = {
   color: var(--text-muted);
 }
 
-.nav-list {
+.nav-section {
   display: grid;
   gap: 6px;
 }
 
-.nav-list button {
+.nav-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   height: 38px;
   padding: 0 12px;
-  border-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   text-align: left;
   color: var(--text-primary);
 }
 
-.nav-list button:hover {
+.nav-row:hover {
   background: var(--bg-hover);
-  border-color: transparent;
 }
 
-.nav-list button.active {
+.nav-row.active {
   background: var(--bg-active);
   color: var(--accent-text);
   font-weight: 650;
+}
+
+.nav-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.icon-btn {
+  display: grid;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.project-row {
+  padding-left: 28px;
+}
+
+.project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px 0 28px;
+}
+
+.project-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.project-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sub-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.field-error {
+  margin: 2px 0 0 28px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.empty-hint {
+  margin: 4px 0 0 28px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.project-list {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-row {
+  margin-top: auto;
 }
 
 .nav-icon {
@@ -144,28 +450,43 @@ const navIcons = {
   stroke-width: 2;
 }
 
-.sidebar-block {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-soft);
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
 }
 
-.block-title {
-  margin-bottom: 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
+.ctx-menu {
+  position: fixed;
+  min-width: 160px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--overlay-shadow);
 }
 
-.sidebar-block dl {
-  display: grid;
-  gap: 10px;
-}
-
-.sidebar-block dl div {
+.ctx-menu button {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+}
+
+.ctx-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.ctx-menu button.danger {
+  color: var(--danger-text);
 }
 </style>

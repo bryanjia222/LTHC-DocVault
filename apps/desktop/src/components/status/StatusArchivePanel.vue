@@ -10,7 +10,7 @@ const { config, repoSize, loadRepoSize } = useVault();
 const { totalVersions } = useDocuments();
 
 const repoSizeLabel = computed(() =>
-  repoSize.value == null ? "—" : formatByteSize(repoSize.value),
+  repoSize.value == null ? "-" : formatByteSize(repoSize.value),
 );
 
 onMounted(() => {
@@ -20,12 +20,6 @@ onMounted(() => {
 
 <template>
   <section class="archive-view">
-    <div class="archive-intro surface">
-      <h2>{{ t("archive.title") }}</h2>
-      <p class="subtitle">{{ t("archive.subtitle") }}</p>
-      <p class="description">{{ t("archive.description") }}</p>
-    </div>
-
     <div class="archive-grid">
       <div class="surface archive-card">
         <h3>{{ t("archive.currentBackend") }}</h3>
@@ -80,26 +74,6 @@ onMounted(() => {
   flex-direction: column;
   gap: 18px;
   min-height: 0;
-  overflow: auto;
-}
-
-.archive-intro {
-  padding: 20px;
-}
-
-.archive-intro h2 {
-  font-size: 18px;
-}
-
-.archive-intro .subtitle {
-  margin-top: 4px;
-  color: var(--text-muted);
-}
-
-.archive-intro .description {
-  margin-top: 12px;
-  color: var(--text-secondary);
-  line-height: 1.6;
 }
 
 .archive-grid {

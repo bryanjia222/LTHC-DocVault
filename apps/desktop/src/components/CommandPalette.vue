@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { markRaw, computed, nextTick, ref, watch, type Component } from "vue";
 import {
-  Archive,
-  ArrowRightLeft,
   Activity,
+  ArrowRightLeft,
   Download,
   ExternalLink,
   FileText,
@@ -20,7 +19,7 @@ import type { NavigationId } from "../composables/useNavigation";
 
 const { t } = useI18n();
 const { isOpen, close } = useCommandPalette();
-const { navigate, runAction, toggleCurrentTheme } = useVaultActions();
+const { navigate, runAction, toggleCurrentTheme, openStatus } = useVaultActions();
 
 interface Command {
   id: string;
@@ -32,8 +31,6 @@ interface Command {
 
 const navIcons = {
   documents: FileText,
-  jobs: Activity,
-  archive: Archive,
   settings: Settings,
 } as const;
 
@@ -43,7 +40,7 @@ const inputEl = ref<HTMLInputElement | null>(null);
 
 const commands = computed<Command[]>(() => {
   const navigation: Command[] = (
-    ["documents", "jobs", "archive", "settings"] as NavigationId[]
+    ["documents", "settings"] as NavigationId[]
   ).map((id) => ({
     id: `nav-${id}`,
     label: t(`nav.${id}`),
@@ -51,6 +48,14 @@ const commands = computed<Command[]>(() => {
     icon: markRaw(navIcons[id]),
     run: () => navigate(id),
   }));
+  // "状态" jumps straight to Settings > Status (unified tasks/archive view).
+  navigation.push({
+    id: "nav-status",
+    label: t("settings.tabs.status"),
+    group: "navigation",
+    icon: markRaw(Activity),
+    run: () => openStatus(),
+  });
 
   const actions: Command[] = [
     {

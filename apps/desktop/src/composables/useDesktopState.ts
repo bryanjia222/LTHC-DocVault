@@ -8,6 +8,7 @@ import {
   type FileProbe,
   type FileStat,
   type ModificationStatus,
+  type ProjectDef,
   type TrackedFile,
 } from "../data/mock";
 import {
@@ -42,6 +43,10 @@ import { isTauri } from "./useVault";
 
 const tags: Ref<Record<string, string[]>> = ref({});
 const tracked: Ref<TrackedFile[]> = ref([]);
+/** User-created project folders for grouping documents (desktop-local, like tags). */
+const projects: Ref<ProjectDef[]> = ref([]);
+/** documentId -> projectId; single membership (a doc lives in one project). */
+const assignments: Ref<Record<string, string>> = ref({});
 /** Latest probe per document id, populated by refreshModifications. */
 const probes: Ref<Record<string, FileProbe>> = ref({});
 const loaded: Ref<boolean> = ref(false);
@@ -72,6 +77,8 @@ async function loadDesktopState(): Promise<void> {
   if (!isTauri()) {
     tags.value = structuredClone(mockDesktopState.tags);
     tracked.value = mockDesktopState.tracked.map((t) => ({ ...t }));
+    projects.value = mockDesktopState.projects.map((p) => ({ ...p }));
+    assignments.value = { ...mockDesktopState.assignments };
     loaded.value = true;
     return;
   }
@@ -80,6 +87,8 @@ async function loadDesktopState(): Promise<void> {
     const state: DesktopState = mapDesktopState(raw);
     tags.value = state.tags;
     tracked.value = state.tracked;
+    projects.value = state.projects;
+    assignments.value = state.assignments;
   } catch (e) {
     console.error("loadDesktopState failed", e);
   } finally {
@@ -106,6 +115,8 @@ async function saveDesktopState(): Promise<void> {
     await invoke("set_desktop_state", {
       tags: tags.value,
       tracked: tracked.value.map(toRawTrackedFile),
+      projects: projects.value,
+      assignments: assignments.value,
     });
   } catch (e) {
     console.error("saveDesktopState failed", e);
@@ -136,6 +147,81 @@ function removeTag(docId: string, tag: string): void {
     docId,
     current.filter((t) => t !== tag),
   );
+}
+
+// --- projects (desktop-local folders for grouping documents) ---
+
+/** Stable id for a new project. Uses crypto.randomUUID when available (secure
+ * webview / Node 16+), falling back to a random string for older runtimes. */
+function makeProjectId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `proj-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Create a project folder and persist it, returning the new id. Rejects empty /
+ * whitespace names and names already in use (case-insensitive) by returning
+ * null, so the caller can surface a validation error.
+ */
+function createProject(name: string): string | null {
+  const clean = name.trim();
+  if (!clean) return null;
+  const lower = clean.toLowerCase();
+  if (projects.value.some((p) => p.name.toLowerCase() === lower)) return null;
+  const id = makeProjectId();
+  projects.value = [...projects.value, { id, name: clean }];
+  void saveDesktopState();
+  return id;
+}
+
+/** Rename a project. Returns false (no-op) on empty name, a name taken by
+ * another project, or an unknown id. */
+function renameProject(id: string, name: string): boolean {
+  const clean = name.trim();
+  if (!clean) return false;
+  const lower = clean.toLowerCase();
+  if (projects.value.some((p) => p.id !== id && p.name.toLowerCase() === lower)) {
+    return false;
+  }
+  if (!projects.value.some((p) => p.id === id)) return false;
+  projects.value = projects.value.map((p) => (p.id === id ? { ...p, name: clean } : p));
+  void saveDesktopState();
+  return true;
+}
+
+/**
+ * Delete a project folder. Documents assigned to it are not deleted - they fall
+ * back to the ungrouped "all documents" list (their assignment is cleared).
+ */
+function deleteProject(id: string): void {
+  if (!projects.value.some((p) => p.id === id)) return;
+  projects.value = projects.value.filter((p) => p.id !== id);
+  const next: Record<string, string> = {};
+  for (const [docId, projId] of Object.entries(assignments.value)) {
+    if (projId !== id) next[docId] = projId;
+  }
+  assignments.value = next;
+  void saveDesktopState();
+}
+
+/** The project id a document is assigned to, or null when ungrouped. */
+function projectFor(docId: string): string | null {
+  return assignments.value[docId] ?? null;
+}
+
+/** Assign a document to a project, or unassign it (projectId null / unknown).
+ * Persisted. */
+function setDocumentProject(docId: string, projectId: string | null): void {
+  const next = { ...assignments.value };
+  if (projectId && projects.value.some((p) => p.id === projectId)) {
+    next[docId] = projectId;
+  } else {
+    delete next[docId];
+  }
+  assignments.value = next;
+  void saveDesktopState();
 }
 
 // --- tracked source files ---
@@ -192,6 +278,11 @@ function clearDoc(docId: string): void {
     const nextTags = { ...tags.value };
     delete nextTags[docId];
     tags.value = nextTags;
+  }
+  if (assignments.value[docId]) {
+    const nextAssign = { ...assignments.value };
+    delete nextAssign[docId];
+    assignments.value = nextAssign;
   }
   tracked.value = tracked.value.filter((t) => t.documentId !== docId);
   const nextProbes = { ...probes.value };
@@ -319,6 +410,8 @@ export function useDesktopState() {
     // state
     tags,
     tracked,
+    projects,
+    assignments,
     probes,
     loaded,
     allTags,
@@ -329,6 +422,12 @@ export function useDesktopState() {
     setDocumentTags,
     addTag,
     removeTag,
+    // projects
+    createProject,
+    renameProject,
+    deleteProject,
+    projectFor,
+    setDocumentProject,
     // tracked
     trackedPathFor,
     modificationFor,

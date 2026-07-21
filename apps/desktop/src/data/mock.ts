@@ -68,10 +68,20 @@ export interface FileProbe {
   sha256?: string | null;
 }
 
+/** A user-created project folder for grouping documents in the sidebar. */
+export interface ProjectDef {
+  id: string;
+  name: string;
+}
+
 /** Desktop-local annotations for the active vault (tags + tracked files). */
 export interface DesktopState {
   tags: Record<string, string[]>;
   tracked: TrackedFile[];
+  /** Project folders, desktop-local like tags. Empty until the user adds one. */
+  projects: ProjectDef[];
+  /** documentId -> projectId; single membership (a doc lives in one project). */
+  assignments: Record<string, string>;
 }
 
 export interface Version {
@@ -101,6 +111,8 @@ export interface Document {
   modification?: ModificationStatus;
   /** The tracked source-file path, if any. Merged in by useDocuments. */
   trackedPath?: string | null;
+  /** Project folder id this doc is assigned to, or null/undefined for "all". */
+  project?: string | null;
 }
 
 export type JobKind = "commit" | "export" | "checkout" | "delete" | "archive";
@@ -319,6 +331,14 @@ export const desktopState: DesktopState = {
       sha256: "b".repeat(64),
     },
   ],
+  projects: [
+    { id: "proj-legal", name: "法务项目" },
+    { id: "proj-finance", name: "财务项目" },
+  ],
+  assignments: {
+    "550e8400": "proj-legal",
+    "7c1b28d1": "proj-finance",
+  },
 };
 
 export const mockProbes: Record<string, FileProbe> = {

@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 
-use crate::dto::{DesktopStateSlice, FileProbe, FileStat, TrackedFile};
+use crate::dto::{DesktopStateSlice, FileProbe, FileStat, ProjectDef, TrackedFile};
 use crate::state::{self, AppState};
 
 /// On-disk shape: a versioned map of vault root -> slice. `version` is reserved
@@ -191,19 +191,29 @@ pub fn get_desktop_state(
     Ok(slice_for_root(&file, root.as_deref().unwrap_or("")))
 }
 
-/// Replace the current vault's slice (tags + tracked) and persist. Refuses when
-/// no vault is open, since there is no root to key the slice by.
+/// Replace the current vault's slice (tags, tracked, projects, assignments)
+/// and persist. Refuses when no vault is open, since there is no root to key
+/// the slice by.
 #[tauri::command(rename_all = "snake_case")]
 pub fn set_desktop_state(
     app: AppHandle,
     state: State<AppState>,
     tags: BTreeMap<String, Vec<String>>,
     tracked: Vec<TrackedFile>,
+    projects: Vec<ProjectDef>,
+    assignments: BTreeMap<String, String>,
 ) -> Result<(), String> {
     let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
     let mut file = load_file(&app)?;
-    file.vaults
-        .insert(root, DesktopStateSlice { tags, tracked });
+    file.vaults.insert(
+        root,
+        DesktopStateSlice {
+            tags,
+            tracked,
+            projects,
+            assignments,
+        },
+    );
     save_file(&app, &file)
 }
 
@@ -236,8 +246,8 @@ mod tests {
         assert!(file.vaults.is_empty());
     }
 
-    /// Writing then reading round-trips tags and tracked files verbatim, and
-    /// omits `sha256` when it is `None`.
+    /// Writing then reading round-trips tags, tracked files, projects and
+    /// assignments verbatim, and omits `sha256` when it is `None`.
     #[test]
     fn save_then_load_round_trips() {
         let temp = tempfile::tempdir().unwrap();
@@ -264,6 +274,15 @@ mod tests {
                     mtime_ms: 5,
                     sha256: None,
                 }],
+                projects: vec![ProjectDef {
+                    id: "proj1".to_owned(),
+                    name: "诉讼案".to_owned(),
+                }],
+                assignments: {
+                    let mut m = BTreeMap::new();
+                    m.insert("docA".to_owned(), "proj1".to_owned());
+                    m
+                },
             },
         );
         save_file_at(&path, &file).unwrap();
@@ -280,10 +299,14 @@ mod tests {
         assert_eq!(slice.tracked.len(), 1);
         assert_eq!(slice.tracked[0].path, "/tmp/a.docx");
         assert_eq!(slice.tracked[0].sha256, None);
+        assert_eq!(slice.projects.len(), 1);
+        assert_eq!(slice.projects[0].id, "proj1");
+        assert_eq!(slice.projects[0].name, "诉讼案");
+        assert_eq!(slice.assignments.get("docA").unwrap(), "proj1");
     }
 
     /// Two vault roots keep independent slices - switching vaults never leaks
-    /// tags or tracked files from one into the other.
+    /// tags, tracked files, projects or assignments from one into the other.
     #[test]
     fn slices_are_isolated_per_root() {
         let mut file = DesktopStateFile::default();
@@ -296,6 +319,15 @@ mod tests {
                     m
                 },
                 tracked: Vec::new(),
+                projects: vec![ProjectDef {
+                    id: "pa".to_owned(),
+                    name: "项目甲".to_owned(),
+                }],
+                assignments: {
+                    let mut m = BTreeMap::new();
+                    m.insert("docA".to_owned(), "pa".to_owned());
+                    m
+                },
             },
         );
         file.vaults.insert(
@@ -309,6 +341,8 @@ mod tests {
                     mtime_ms: 1,
                     sha256: None,
                 }],
+                projects: Vec::new(),
+                assignments: BTreeMap::new(),
             },
         );
 
@@ -317,9 +351,19 @@ mod tests {
         let none = slice_for_root(&file, "/c");
         assert_eq!(a.tags.get("docA").unwrap(), &["t1"]);
         assert!(a.tracked.is_empty());
+        assert_eq!(a.projects.len(), 1);
+        assert_eq!(a.projects[0].id, "pa");
+        assert_eq!(a.assignments.get("docA").unwrap(), "pa");
         assert!(b.tags.is_empty());
         assert_eq!(b.tracked.len(), 1);
-        assert!(none.tags.is_empty() && none.tracked.is_empty());
+        assert!(b.projects.is_empty());
+        assert!(b.assignments.is_empty());
+        assert!(
+            none.tags.is_empty()
+                && none.tracked.is_empty()
+                && none.projects.is_empty()
+                && none.assignments.is_empty()
+        );
     }
 
     /// `stat_at` reports exists/size/mtime for a real file and `exists: false`

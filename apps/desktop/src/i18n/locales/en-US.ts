@@ -14,6 +14,15 @@ export const enUS = {
     documents: "Documents",
     versions: "Versions",
     backend: "Backend",
+    addProject: "New project",
+    projectPlaceholder: "Project name…",
+    renameProject: "Rename",
+    deleteProject: "Delete",
+    confirmDeleteProject:
+      "Delete project \"{name}\"? Its documents are not deleted - they return to \"All documents\".",
+    projectNameTaken: "A project with this name already exists",
+    projectNameEmpty: "Project name cannot be empty",
+    noProjects: "No projects yet - click + to add one",
   },
   page: {
     title: "Document Workspace",
@@ -254,6 +263,7 @@ export const enUS = {
     cancelled: "Cancelled",
     current: "current",
     archived: "archived",
+    vaultTitle: "Vault status",
   },
   backend: {
     restic: "Restic",
@@ -308,6 +318,11 @@ export const enUS = {
     subtitle: "Preview of the current VaultConfig (read-only).",
     readOnlyNote:
       "Settings are read-only for now; editing will arrive in a later release.",
+    tabs: {
+      status: "Status",
+      storage: "Storage",
+      appearance: "Appearance",
+    },
     connectSection: "Switch vault / backend",
     storageSection: "Storage",
     databaseSection: "Database",

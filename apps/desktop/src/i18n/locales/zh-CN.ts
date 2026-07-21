@@ -14,6 +14,15 @@ export const zhCN = {
     documents: "文档",
     versions: "版本",
     backend: "后端",
+    addProject: "新建项目",
+    projectPlaceholder: "项目名称…",
+    renameProject: "重命名",
+    deleteProject: "删除",
+    confirmDeleteProject:
+      "确认删除项目「{name}」？项目内的文档不会被删除，将归入「全部文档」。",
+    projectNameTaken: "该项目名称已存在",
+    projectNameEmpty: "项目名称不能为空",
+    noProjects: "暂无项目，点击 + 新建",
   },
   page: {
     title: "文档工作台",
@@ -252,6 +261,7 @@ export const zhCN = {
     cancelled: "已取消",
     current: "当前",
     archived: "已归档",
+    vaultTitle: "仓库状态",
   },
   backend: {
     restic: "Restic",
@@ -302,6 +312,11 @@ export const zhCN = {
     title: "设置",
     subtitle: "预览当前 VaultConfig 配置（只读）。",
     readOnlyNote: "配置目前为只读预览，编辑能力将在后续版本提供。",
+    tabs: {
+      status: "状态",
+      storage: "存储",
+      appearance: "外观",
+    },
     connectSection: "切换仓库 / 后端",
     storageSection: "存储",
     databaseSection: "数据库",

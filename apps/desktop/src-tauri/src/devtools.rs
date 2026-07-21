@@ -442,6 +442,8 @@ mod tests {
             DesktopStateSlice {
                 tags: BTreeMap::new(),
                 tracked: Vec::new(),
+                projects: Vec::new(),
+                assignments: BTreeMap::new(),
             },
         );
         file.vaults.insert(
@@ -449,6 +451,8 @@ mod tests {
             DesktopStateSlice {
                 tags: BTreeMap::new(),
                 tracked: Vec::new(),
+                projects: Vec::new(),
+                assignments: BTreeMap::new(),
             },
         );
         save_file_at(&state_file, &file).unwrap();

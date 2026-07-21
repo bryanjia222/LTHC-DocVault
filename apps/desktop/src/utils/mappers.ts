@@ -100,9 +100,17 @@ export interface RawTrackedFile {
   sha256?: string;
 }
 
+export interface RawProjectDef {
+  id: string;
+  name: string;
+}
+
 export interface RawDesktopState {
   tags: Record<string, string[]>;
   tracked: RawTrackedFile[];
+  projects: RawProjectDef[];
+  /** documentId -> projectId. */
+  assignments: Record<string, string>;
 }
 
 export interface RawFileStat {
@@ -241,6 +249,10 @@ export function mapDesktopState(raw: RawDesktopState): DesktopState {
   return {
     tags: raw.tags,
     tracked: raw.tracked.map(mapTrackedFile),
+    // `projects`/`assignments` are newer fields; default to empty so older
+    // state files (and test fixtures) that omit them don't leak `undefined`.
+    projects: raw.projects ?? [],
+    assignments: raw.assignments ?? {},
   };
 }
 

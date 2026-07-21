@@ -14,8 +14,6 @@ import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
-import JobsView from "./components/views/JobsView.vue";
-import ArchiveView from "./components/views/ArchiveView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
 import { useNavigation } from "./composables/useNavigation";
 import { useCommandPalette } from "./composables/useCommandPalette";
@@ -176,8 +174,6 @@ onBeforeUnmount(() => {
         </section>
         <template v-else>
           <DocumentsView v-if="activeSection === 'documents'" />
-          <JobsView v-else-if="activeSection === 'jobs'" />
-          <ArchiveView v-else-if="activeSection === 'archive'" />
           <SettingsView v-else-if="activeSection === 'settings'" />
         </template>
       </div>

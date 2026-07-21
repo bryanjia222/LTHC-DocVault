@@ -133,8 +133,8 @@ async function loadConfig(): Promise<void> {
 
 /**
  * Load the on-disk repo size (bytes) for the active vault. Refreshed after
- * commits/deletes so the ArchiveView stat stays current. Mocks a value outside
- * Tauri so browser dev still renders.
+ * commits/deletes so the Settings > 状态 archive stat stays current. Mocks a
+ * value outside Tauri so browser dev still renders.
  */
 async function loadRepoSize(): Promise<void> {
   if (!isTauri()) {

@@ -80,19 +80,35 @@ pub enum ConnectError {
     Other(String),
 }
 
+/// A user-created project folder for grouping documents in the sidebar. The
+/// DocVault backend has no folder concept, so projects are desktop-local
+/// annotations (like tags): each vault root owns its own project list. `id` is a
+/// client-generated stable identifier (UUID); `name` is the display label.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProjectDef {
+    pub id: String,
+    pub name: String,
+}
+
 /// Desktop-local annotations for one vault, stored in `desktop-state.json`
 /// (separate from any vault's own `config.toml`/DB). The DocVault backend never
 /// persists local file paths or tags, so these live entirely on the desktop side
 /// and are scoped by vault root - switching vaults swaps the slice.
 ///
 /// `tags` maps document id -> tag list. `tracked` holds the source-file baseline
-/// captured at import time, used by the modification tracker.
+/// captured at import time, used by the modification tracker. `projects` is the
+/// vault's project-folder list; `assignments` maps document id -> project id
+/// (single-membership: a document lives in at most one project).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DesktopStateSlice {
     #[serde(default)]
     pub tags: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub tracked: Vec<TrackedFile>,
+    #[serde(default)]
+    pub projects: Vec<ProjectDef>,
+    #[serde(default)]
+    pub assignments: BTreeMap<String, String>,
 }
 
 /// A tracked source file: the path the user last committed for a document, plus
