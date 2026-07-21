@@ -213,7 +213,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
           @click="onDocumentsClick"
         >
           <FileText class="nav-icon" aria-hidden="true" />
-          <span>{{ t("nav.documents") }}</span>
+          <span>{{ t("nav.allDocuments") }}</span>
         </button>
         <button
           class="icon-btn"
@@ -295,6 +295,20 @@ function onProjectDrop(event: DragEvent, targetId: string) {
         <p v-if="editError" class="field-error">{{ editError }}</p>
       </div>
     </div>
+
+    <button
+      class="nav-row trash-row"
+      :class="{ active: activeSection === 'trash' }"
+      type="button"
+      :aria-current="activeSection === 'trash' ? 'page' : undefined"
+      @click="navigate('trash')"
+    >
+      <Trash2 class="nav-icon" aria-hidden="true" />
+      <span>{{ t("nav.trash") }}</span>
+      <span v-if="desktop.trashed.value.length" class="nav-badge">{{
+        desktop.trashed.value.length
+      }}</span>
+    </button>
 
     <button
       class="nav-row settings-row"
@@ -506,6 +520,27 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 
 .settings-row {
   margin-top: auto;
+}
+
+.trash-row {
+  justify-content: flex-start;
+}
+
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.nav-row.active .nav-badge {
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .nav-icon {

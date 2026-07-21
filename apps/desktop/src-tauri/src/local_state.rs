@@ -192,9 +192,10 @@ pub fn get_desktop_state(
 }
 
 /// Replace the current vault's slice (tags, tracked, projects, assignments,
-/// sort_prefs) and persist. Refuses when no vault is open, since there is no
-/// root to key the slice by.
+/// sort_prefs, trashed) and persist. Refuses when no vault is open, since there
+/// is no root to key the slice by.
 #[tauri::command(rename_all = "snake_case")]
+#[allow(clippy::too_many_arguments)] // each arg maps 1:1 to the JS payload
 pub fn set_desktop_state(
     app: AppHandle,
     state: State<AppState>,
@@ -203,6 +204,7 @@ pub fn set_desktop_state(
     projects: Vec<ProjectDef>,
     assignments: BTreeMap<String, Vec<String>>,
     sort_prefs: BTreeMap<String, SortPref>,
+    trashed: Vec<String>,
 ) -> Result<(), String> {
     let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
     let mut file = load_file(&app)?;
@@ -214,6 +216,7 @@ pub fn set_desktop_state(
             projects,
             assignments,
             sort_prefs,
+            trashed,
         },
     );
     save_file(&app, &file)
@@ -296,6 +299,7 @@ mod tests {
                     );
                     m
                 },
+                trashed: vec!["docA".to_owned()],
             },
         );
         save_file_at(&path, &file).unwrap();
@@ -322,6 +326,7 @@ mod tests {
         let sort = slice.sort_prefs.get("proj1").unwrap();
         assert_eq!(sort.key, "name");
         assert_eq!(sort.direction, "asc");
+        assert_eq!(slice.trashed, vec!["docA".to_owned()]);
     }
 
     /// Two vault roots keep independent slices - switching vaults never leaks
@@ -348,6 +353,7 @@ mod tests {
                     m
                 },
                 sort_prefs: BTreeMap::new(),
+                trashed: Vec::new(),
             },
         );
         file.vaults.insert(
@@ -364,6 +370,7 @@ mod tests {
                 projects: Vec::new(),
                 assignments: BTreeMap::new(),
                 sort_prefs: BTreeMap::new(),
+                trashed: Vec::new(),
             },
         );
 
@@ -385,6 +392,7 @@ mod tests {
                 && none.projects.is_empty()
                 && none.assignments.is_empty()
                 && none.sort_prefs.is_empty()
+                && none.trashed.is_empty()
         );
     }
 

@@ -74,8 +74,8 @@ const { logEntries, clear } = useActivityLog();
   grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   /* Fixed height so accumulating jobs / log entries can't gradually grow the
-     panel; content scrolls inside. Not too small to stay usable. */
-  height: 340px;
+     panel; content scrolls inside. Tall enough to read several entries at once. */
+  height: 460px;
   min-height: 0;
 }
 

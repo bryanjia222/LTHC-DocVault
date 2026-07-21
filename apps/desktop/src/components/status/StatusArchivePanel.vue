@@ -1,21 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useVault } from "../../composables/useVault";
 import { useDocuments } from "../../composables/useDocuments";
 import { formatByteSize } from "../../utils/mappers";
 
 const { t } = useI18n();
-const { config, repoSize, loadRepoSize } = useVault();
+const { config, repoSize } = useVault();
 const { totalVersions } = useDocuments();
 
 const repoSizeLabel = computed(() =>
   repoSize.value == null ? "-" : formatByteSize(repoSize.value),
 );
-
-onMounted(() => {
-  void loadRepoSize();
-});
 </script>
 
 <template>

@@ -445,6 +445,7 @@ mod tests {
                 projects: Vec::new(),
                 assignments: BTreeMap::new(),
                 sort_prefs: BTreeMap::new(),
+                trashed: Vec::new(),
             },
         );
         file.vaults.insert(
@@ -455,6 +456,7 @@ mod tests {
                 projects: Vec::new(),
                 assignments: BTreeMap::new(),
                 sort_prefs: BTreeMap::new(),
+                trashed: Vec::new(),
             },
         );
         save_file_at(&state_file, &file).unwrap();

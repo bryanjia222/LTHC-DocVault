@@ -250,6 +250,14 @@ function docMenuExport() {
   runAction("actionLogs.export");
 }
 
+/** Commit the right-clicked document's tracked source as a new version. Only
+ *  meaningful when the tracker reports "modified"; the menu item is disabled
+ *  otherwise so the user can't request a no-op commit. */
+function docMenuCommit() {
+  closeDocMenu();
+  openCommitModified();
+}
+
 function docMenuRefresh() {
   closeDocMenu();
   void refreshAll();
@@ -268,11 +276,6 @@ function docMenuDelete() {
 function versionMenuCheckout() {
   closeVersionMenu();
   runAction("actionLogs.checkout");
-}
-
-function versionMenuExport() {
-  closeVersionMenu();
-  runAction("actionLogs.export");
 }
 
 function versionMenuRefresh() {
@@ -328,6 +331,13 @@ onBeforeUnmount(() => {
           </p>
         </div>
         <div class="toolbar">
+          <button
+            class="primary"
+            type="button"
+            @click="runAction('actionLogs.addDocument')"
+          >
+            {{ t("actions.addDocument") }}
+          </button>
           <select
             class="search-scope"
             :value="searchScope"
@@ -346,13 +356,6 @@ onBeforeUnmount(() => {
             :placeholder="t('documents.searchPlaceholder')"
             :aria-label="t('actions.search')"
           />
-          <button
-            class="primary"
-            type="button"
-            @click="runAction('actionLogs.addDocument')"
-          >
-            {{ t("actions.addDocument") }}
-          </button>
         </div>
       </div>
 
@@ -531,34 +534,7 @@ onBeforeUnmount(() => {
           <button
             class="icon-action-button"
             type="button"
-            :title="t('actions.open')"
-            :aria-label="t('actions.open')"
-            @click="runAction('actionLogs.open')"
-          >
-            <ExternalLink aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button"
-            type="button"
-            :disabled="modificationStatus !== 'modified'"
-            :title="t('source.commitModified')"
-            :aria-label="t('source.commitModified')"
-            @click="openCommitModified()"
-          >
-            <Upload aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button"
-            type="button"
-            :title="t('actions.export')"
-            :aria-label="t('actions.export')"
-            @click="runAction('actionLogs.export')"
-          >
-            <Download aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button"
-            type="button"
+            :disabled="!selectedVersion"
             :title="t('actions.checkout')"
             :aria-label="t('actions.checkout')"
             @click="runAction('actionLogs.checkout')"
@@ -844,25 +820,7 @@ onBeforeUnmount(() => {
             <button
               class="icon-action-button"
               type="button"
-              :disabled="modificationStatus !== 'modified'"
-              :title="t('source.commitModified')"
-              :aria-label="t('source.commitModified')"
-              @click="openCommitModified()"
-            >
-              <Upload aria-hidden="true" />
-            </button>
-            <button
-              class="icon-action-button"
-              type="button"
-              :title="t('actions.export')"
-              :aria-label="t('actions.export')"
-              @click="runAction('actionLogs.export')"
-            >
-              <Download aria-hidden="true" />
-            </button>
-            <button
-              class="icon-action-button"
-              type="button"
+              :disabled="!selectedVersion"
               :title="t('actions.checkout')"
               :aria-label="t('actions.checkout')"
               @click="runAction('actionLogs.checkout')"
@@ -945,6 +903,21 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
+          :disabled="modificationStatus !== 'modified'"
+          :title="
+            modificationStatus === 'modified'
+              ? ''
+              : t('source.commitModifiedDisabled')
+          "
+          @click="docMenuCommit"
+        >
+          <Upload aria-hidden="true" />
+          {{ t("source.commitModified") }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
           @click="docMenuStatus"
         >
           <Info aria-hidden="true" />
@@ -1004,15 +977,6 @@ onBeforeUnmount(() => {
         >
           <ArrowRightLeft aria-hidden="true" />
           {{ t("versionMenu.checkout", { label: selectedVersion?.label ?? "" }) }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="versionMenuExport"
-        >
-          <Download aria-hidden="true" />
-          {{ t("versionMenu.export", { label: selectedVersion?.label ?? "" }) }}
         </button>
         <div class="ctx-divider"></div>
         <button
@@ -1321,7 +1285,7 @@ tbody tr.selected {
 
 .action-row {
   display: grid;
-  grid-template-columns: repeat(4, 34px);
+  grid-template-columns: repeat(2, 34px);
   justify-content: start;
   gap: 8px;
 }
@@ -1682,8 +1646,13 @@ tbody tr.selected {
   cursor: pointer;
 }
 
-.ctx-item:hover:not(.ctx-info) {
+.ctx-item:hover:not(.ctx-info):not(:disabled) {
   background: var(--bg-hover);
+}
+
+.ctx-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .ctx-item.danger {

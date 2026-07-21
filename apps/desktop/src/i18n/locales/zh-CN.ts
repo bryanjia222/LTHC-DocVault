@@ -5,9 +5,11 @@ export const zhCN = {
   nav: {
     primary: "主导航",
     documents: "文档",
+    allDocuments: "全部文档",
     jobs: "任务",
     archive: "归档",
     settings: "设置",
+    trash: "回收站",
   },
   sidebar: {
     vault: "仓库",
@@ -90,6 +92,16 @@ export const zhCN = {
   },
   confirm: {
     delete: "确认删除文档「{name}」？其所有版本与备份快照都将被移除（不会删除源文件）。",
+    moveToTrash:
+      "将文档「{name}」移入回收站？它会从文档列表中隐藏，可在回收站中恢复或永久删除。",
+    permanentDelete:
+      "永久删除文档「{name}」？其所有版本与备份快照都将被移除（不会删除源文件），且无法恢复。",
+    permanentDeleteAgain:
+      "再次确认：永久删除「{name}」的全部历史记录？此操作不可撤销。",
+    emptyTrash:
+      "清空回收站？将永久删除回收站中的 {count} 个文档及其全部版本与备份快照，且无法恢复。",
+    emptyTrashAgain:
+      "再次确认：永久删除回收站中全部 {count} 个文档的所有历史记录？此操作不可撤销。",
   },
   actionLogs: {
     refresh: "刷新仓库",
@@ -102,6 +114,8 @@ export const zhCN = {
     open: "打开文档",
     rename: "重命名文档",
     delete: "删除文档",
+    restore: "从回收站恢复文档",
+    emptyTrash: "清空回收站",
     preview: "预览文档",
     history: "打开版本历史",
     jobCenter: "打开任务中心",
@@ -177,6 +191,7 @@ export const zhCN = {
     path: "源路径",
     notTracked: "本机未追踪该文档的源文件。",
     commitModified: "提交修改",
+    commitModifiedDisabled: "文档未修改，无需提交",
     open: "打开",
     documentStatus: "文档状态",
     rename: "重命名",
@@ -187,6 +202,24 @@ export const zhCN = {
   versionMenu: {
     checkout: "切换到 {label} 版本",
     export: "导出 {label} 版本",
+  },
+  trash: {
+    title: "回收站",
+    subtitle: "已删除的文档暂存于此，可恢复或永久删除。",
+    empty: "回收站为空。",
+    count: "{count} 个文档",
+    restore: "恢复",
+    permanentDelete: "永久删除",
+    emptyTrash: "清空回收站",
+    permanentDeleteHint: "永久删除将移除该文档的所有版本与备份快照，且无法恢复。",
+  },
+  exportCommit: {
+    title: "导出未提交的文档",
+    subtitle: "该文档有未提交的修改。导出仅包含最近已提交的版本，不含当前修改。",
+    hint: "可先提交以保存当前修改，或直接导出已提交的版本。",
+    commit: "先提交",
+    exportDirect: "直接导出",
+    cancel: "取消",
   },
   modification: {
     none: "未追踪",
@@ -272,6 +305,10 @@ export const zhCN = {
     renamed: "已重命名文档：{name} → {newName}",
     latest: "latest",
     cleared: "活动日志已清空",
+    movedToTrash: "已将「{target}」移入回收站",
+    restored: "已从回收站恢复「{target}」",
+    trashEmpty: "回收站为空",
+    trashEmptied: "已清空回收站（{count} 个文档）",
     commandRun: "执行命令：{command}",
   },
   status: {

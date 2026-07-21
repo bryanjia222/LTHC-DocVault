@@ -50,6 +50,9 @@ const projects: Ref<ProjectDef[]> = ref([]);
 const assignments: Ref<Record<string, string[]>> = ref({});
 /** Per-view persisted table sort: scope key (project id or "__all__") -> sort pref. */
 const sortPrefs: Ref<Record<string, SortPref>> = ref({});
+/** Document ids soft-deleted to the recycle bin (desktop-local hide). The vault
+ *  still holds these docs + history until permanently deleted from the bin. */
+const trashed: Ref<string[]> = ref([]);
 /** Latest probe per document id, populated by refreshModifications. */
 const probes: Ref<Record<string, FileProbe>> = ref({});
 const loaded: Ref<boolean> = ref(false);
@@ -83,6 +86,7 @@ async function loadDesktopState(): Promise<void> {
     projects.value = mockDesktopState.projects.map((p) => ({ ...p }));
     assignments.value = { ...mockDesktopState.assignments };
     sortPrefs.value = { ...mockDesktopState.sortPrefs };
+    trashed.value = [...mockDesktopState.trashed];
     loaded.value = true;
     return;
   }
@@ -94,6 +98,7 @@ async function loadDesktopState(): Promise<void> {
     projects.value = state.projects;
     assignments.value = state.assignments;
     sortPrefs.value = state.sortPrefs;
+    trashed.value = state.trashed;
   } catch (e) {
     console.error("loadDesktopState failed", e);
   } finally {
@@ -123,6 +128,7 @@ async function saveDesktopState(): Promise<void> {
       projects: projects.value,
       assignments: assignments.value,
       sort_prefs: sortPrefs.value,
+      trashed: trashed.value,
     });
   } catch (e) {
     console.error("saveDesktopState failed", e);
@@ -273,6 +279,40 @@ function setSortPref(scope: string, key: string, direction: string): void {
   void saveDesktopState();
 }
 
+// --- recycle bin (desktop-local soft-delete) ---
+
+/** True when the document is soft-deleted into the recycle bin (hidden). */
+function isTrashed(docId: string): boolean {
+  return trashed.value.includes(docId);
+}
+
+/**
+ * Move a document to the recycle bin: a desktop-local hide. The vault still
+ * holds the document and all its history; the user can restore it or
+ * permanently delete it from the bin. No-op when already trashed. Persisted.
+ */
+function trashDoc(docId: string): void {
+  if (trashed.value.includes(docId)) return;
+  trashed.value = [...trashed.value, docId];
+  void saveDesktopState();
+}
+
+/**
+ * Restore a document from the recycle bin (un-hide). The document's tags /
+ * tracked source are untouched while trashed, so it reappears exactly as it was.
+ * No-op when not trashed. Persisted.
+ */
+function restoreDoc(docId: string): void {
+  if (!trashed.value.includes(docId)) return;
+  trashed.value = trashed.value.filter((id) => id !== docId);
+  void saveDesktopState();
+}
+
+/** All document ids currently in the recycle bin. */
+function trashedIds(): string[] {
+  return trashed.value;
+}
+
 // --- tracked source files ---
 
 function trackedFor(docId: string): TrackedFile | undefined {
@@ -318,9 +358,9 @@ function clearTracked(docId: string): void {
 
 /**
  * Remove every desktop-local annotation for a document (tags, tracked source,
- * probe cache) in one pass and persist. Called when a document is deleted so no
- * orphaned metadata lingers in desktop-state.json. The document's source file
- * on disk is not touched (delete only "unmanages" the document).
+ * probe cache, recycle-bin membership) in one pass and persist. Called when a
+ * document is permanently deleted so no orphaned metadata lingers in
+ * desktop-state.json. The document's source file on disk is not touched.
  */
 function clearDoc(docId: string): void {
   if (tags.value[docId]) {
@@ -337,6 +377,9 @@ function clearDoc(docId: string): void {
   const nextProbes = { ...probes.value };
   delete nextProbes[docId];
   probes.value = nextProbes;
+  if (trashed.value.includes(docId)) {
+    trashed.value = trashed.value.filter((id) => id !== docId);
+  }
   void saveDesktopState();
 }
 
@@ -462,6 +505,7 @@ export function useDesktopState() {
     projects,
     assignments,
     sortPrefs,
+    trashed,
     probes,
     loaded,
     allTags,
@@ -483,6 +527,11 @@ export function useDesktopState() {
     // sort prefs
     getSortPref,
     setSortPref,
+    // recycle bin
+    isTrashed,
+    trashDoc,
+    restoreDoc,
+    trashedIds,
     // tracked
     trackedPathFor,
     modificationFor,

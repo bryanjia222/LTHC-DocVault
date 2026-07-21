@@ -10,6 +10,7 @@ import {
   Search,
   Settings,
   Sun,
+  Trash2,
   Upload,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
@@ -32,6 +33,7 @@ interface Command {
 const navIcons = {
   documents: FileText,
   settings: Settings,
+  trash: Trash2,
 } as const;
 
 const query = ref("");
@@ -40,7 +42,7 @@ const inputEl = ref<HTMLInputElement | null>(null);
 
 const commands = computed<Command[]>(() => {
   const navigation: Command[] = (
-    ["documents", "settings"] as NavigationId[]
+    ["documents", "trash", "settings"] as NavigationId[]
   ).map((id) => ({
     id: `nav-${id}`,
     label: t(`nav.${id}`),

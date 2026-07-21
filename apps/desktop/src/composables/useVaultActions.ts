@@ -23,7 +23,13 @@ export function useVaultActions() {
   const { log } = useActivityLog();
   const { setSection, openSettingsTab } = useNavigation();
   const { toggleTheme, isDark } = useTheme();
-  const { selectedDocument, selectedVersion, documents } = useDocuments();
+  const {
+    selectedDocument,
+    selectedDocumentId,
+    selectedVersion,
+    documents,
+    selectFirstVisible,
+  } = useDocuments();
   const {
     commit,
     exportVersion,
@@ -38,7 +44,7 @@ export function useVaultActions() {
     removeLibraryCopy,
   } = useVault();
   const desktop = useDesktopState();
-  const { openAddDocument } = useDialogs();
+  const { openAddDocument, openExportCommitPrompt } = useDialogs();
 
   function runAction(actionKey: string) {
     if (actionKey === "actionLogs.addDocument") {
@@ -147,6 +153,32 @@ export function useVaultActions() {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
+    // Export writes the selected (committed) version, NOT the working copy. When
+    // the tracker reports the source as "modified", the user's latest edits are
+    // not in any committed version - so exporting would silently skip them. Prompt
+    // so the user can commit first (capturing the edits) or export the committed
+    // version as-is. `performExport` runs the actual save + job after the choice.
+    if (doc.modification === "modified") {
+      openExportCommitPrompt();
+      return;
+    }
+    await performExport();
+  }
+
+  /**
+   * Run the actual export: native save dialog, then the export job. Split out of
+   * `exportAction` so the export-commit prompt's "export directly" path can
+   * bypass the modification check (the user explicitly chose to export the
+   * committed version).
+   */
+  async function performExport() {
+    const actionKey = "actionLogs.export" as const;
+    const doc = selectedDocument.value;
+    const ver = selectedVersion.value;
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
     if (!isTauri()) return;
     const ext = extOf(doc.originalFilename) ?? "docx";
     const out = await save({
@@ -206,13 +238,13 @@ export function useVaultActions() {
   }
 
   /**
-   * Delete the selected document: confirm (destructive), then spawn the backend
-   * delete job. Delete only "unmanages" the document - it removes DB rows, restic
-   * snapshots, and the local archive directory, but never the user's source
-   * file. Desktop-local annotations (tags / tracked source) are cleared right
-   * away so no orphaned metadata lingers; the document list refreshes when the
-   * job succeeds (refreshKinds includes "delete"). The job's truthful state
-   * arrives later via `job:update`.
+   * Soft-delete the selected document: move it to the recycle bin (a
+   * desktop-local hide). The vault still holds the document and all its history;
+   * the user can restore it or permanently delete it from the bin. This is the
+   * reversible delete from the document list, so a single confirmation suffices
+   * - the irreversible "all history deleted" warning + double-confirm lives on
+   * `permanentlyDeleteDocument` / `emptyTrash`. If the just-trashed document was
+   * the active selection, the detail panel moves to the next visible document.
    */
   async function deleteDocument() {
     const actionKey = "actionLogs.delete" as const;
@@ -228,8 +260,63 @@ export function useVaultActions() {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
+    if (!window.confirm(t("confirm.moveToTrash", { name: doc.name }))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    desktop.trashDoc(doc.id);
+    if (selectedDocumentId.value === doc.id) selectFirstVisible();
+    log(t("log.movedToTrash", { target: doc.name }));
+  }
+
+  /** Restore a document from the recycle bin (un-hide). No backend call - the
+   *  document and its history were never removed, only hidden. */
+  function restoreDocument(docId: string) {
+    const actionKey = "actionLogs.restore" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    desktop.restoreDoc(docId);
+    log(t("log.restored", { target: doc.name }));
+  }
+
+  /**
+   * Permanently delete a document from the recycle bin: this is the irreversible
+   * step that "unmanages" the document - it removes DB rows, restic snapshots,
+   * and the local archive directory (never the user's source file). Double-
+   * confirmed because ALL version history and backup snapshots are gone for good.
+   * Desktop-local annotations + bin membership are cleared right away; the job's
+   * truthful state arrives later via `job:update`.
+   */
+  async function permanentlyDeleteDocument(docId: string) {
+    const actionKey = "actionLogs.delete" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
     if (!isTauri()) return;
-    if (!window.confirm(t("confirm.delete", { name: doc.name }))) {
+    if (!window.confirm(t("confirm.permanentDelete", { name: doc.name }))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    if (!window.confirm(t("confirm.permanentDeleteAgain", { name: doc.name }))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -237,8 +324,7 @@ export function useVaultActions() {
       const id = await sendDelete({ document_id: doc.id });
       desktop.clearDoc(doc.id);
       // Best-effort: remove the tool-owned library working copy so it does not
-      // outlive its document. Failure is non-fatal - the doc is already being
-      // unmanaged and the copy can be rebuilt from the archive if needed.
+      // outlive its document. Failure is non-fatal.
       try {
         await removeLibraryCopy({ document_id: doc.id });
       } catch (e) {
@@ -248,6 +334,57 @@ export function useVaultActions() {
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
     }
+  }
+
+  /**
+   * Empty the recycle bin: permanently delete every document in it. Like
+   * `permanentlyDeleteDocument` this is irreversible (all history + snapshots
+   * removed), so it is double-confirmed. Each document is unmanaged in turn;
+   * a per-document failure is logged but does not abort the rest of the batch.
+   */
+  async function emptyTrash() {
+    const actionKey = "actionLogs.emptyTrash" as const;
+    const ids = desktop.trashedIds();
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (ids.length === 0) {
+      log(t("log.trashEmpty"));
+      return;
+    }
+    if (!isTauri()) return;
+    if (!window.confirm(t("confirm.emptyTrash", { count: ids.length }))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    if (!window.confirm(t("confirm.emptyTrashAgain", { count: ids.length }))) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    for (const id of ids) {
+      try {
+        await sendDelete({ document_id: id });
+        desktop.clearDoc(id);
+        try {
+          await removeLibraryCopy({ document_id: id });
+        } catch (e) {
+          console.warn("removeLibraryCopy failed", e);
+        }
+      } catch (e) {
+        const doc = documents.value.find((d) => d.id === id);
+        log(
+          t("log.actionFailed", {
+            action: t(actionKey),
+            error: `${doc?.name ?? id}: ${String(e)}`,
+          }),
+        );
+      }
+    }
+    log(t("log.trashEmptied", { count: ids.length }));
   }
 
   /**
@@ -457,6 +594,10 @@ export function useVaultActions() {
     resetToStageAction,
     refreshAll,
     deleteDocument,
+    restoreDocument,
+    permanentlyDeleteDocument,
+    emptyTrash,
+    performExport,
     renameDocument,
   };
 }

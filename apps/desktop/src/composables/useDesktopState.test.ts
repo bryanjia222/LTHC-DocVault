@@ -8,7 +8,7 @@ import { MODIFICATION_HASH_THRESHOLD_BYTES } from "../utils/tracking";
  * L2 command-contract tests for the desktop-local-state commands added in
  * src-tauri/src/local_state.rs:
  *   get_desktop_state ()                                    -> no args
- *   set_desktop_state (tags, tracked, projects, assignments, sort_prefs) -> snake_case; sha256 omitted when null
+ *   set_desktop_state (tags, tracked, projects, assignments, sort_prefs, trashed) -> snake_case; sha256 omitted when null
  *   stat_files (paths)                                      -> { paths: string[] }
  *   probe_file (path, max_bytes)                            -> { path, max_bytes }
  *
@@ -74,6 +74,7 @@ describe("useDesktopState - get_desktop_state contract", () => {
       projects: [{ id: "p1", name: "Legal" }],
       assignments: { docA: ["p1"] },
       sort_prefs: { __all__: { key: "updated", direction: "desc" } },
+      trashed: ["docA"],
     });
     await ds.loadDesktopState();
     expect(ds.tags.value).toEqual({ docA: ["legal"] });
@@ -85,6 +86,19 @@ describe("useDesktopState - get_desktop_state contract", () => {
     expect(ds.sortPrefs.value).toEqual({
       __all__: { key: "updated", direction: "desc" },
     });
+    expect(ds.trashed.value).toEqual(["docA"]);
+  });
+
+  it("defaults trashed to empty when the payload omits it", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      tags: {},
+      tracked: [],
+      projects: [],
+      assignments: {},
+      sort_prefs: {},
+    });
+    await ds.loadDesktopState();
+    expect(ds.trashed.value).toEqual([]);
   });
 
   it("defaults projects/assignments to empty when the payload omits them", async () => {
@@ -116,6 +130,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         projects: [],
         assignments: {},
         sort_prefs: {},
+        trashed: [],
       });
     });
   });
@@ -143,6 +158,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         projects: [],
         assignments: {},
         sort_prefs: {},
+        trashed: [],
       });
     });
   });
@@ -156,6 +172,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         projects: [],
         assignments: {},
         sort_prefs: {},
+        trashed: [],
       });
     });
   });
@@ -302,6 +319,7 @@ describe("useDesktopState - projects", () => {
         projects: [{ id, name: "Legal" }],
         assignments: {},
         sort_prefs: {},
+        trashed: [],
       });
     });
   });

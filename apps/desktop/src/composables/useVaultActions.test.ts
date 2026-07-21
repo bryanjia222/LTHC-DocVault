@@ -69,6 +69,7 @@ beforeEach(() => {
   desktop.tags.value = {};
   desktop.tracked.value = [];
   desktop.probes.value = {};
+  desktop.trashed.value = [];
   vi.mocked(invoke).mockClear();
   vi.mocked(open).mockClear();
   vi.mocked(save).mockClear();
@@ -174,6 +175,33 @@ describe("useVaultActions - export", () => {
     actions.runAction("actionLogs.export");
     await flush();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("prompts to commit first when the selected document is modified (no export)", async () => {
+    asTauri();
+    // `modification` is derived by useDocuments from desktop tracked + probe,
+    // not carried on the vault doc - so stage a tracked source whose probe
+    // differs (stat + sha) to make the selected document report "modified".
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    desktop.probes.value = {
+      [docA.id]: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
+    };
+    vi.mocked(save).mockClear();
+    vi.mocked(invoke).mockClear();
+
+    actions.runAction("actionLogs.export");
+    await flush();
+
+    // Modified docs open the commit-or-export prompt instead of exporting the
+    // stale committed version behind the user's back.
+    expect(dialogs.exportCommitPromptOpen.value).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "export_version",
+      expect.anything(),
+    );
   });
 });
 
@@ -463,13 +491,95 @@ describe("useVaultActions - refresh all", () => {
   });
 });
 
-describe("useVaultActions - delete document", () => {
+describe("useVaultActions - delete document (soft-delete to recycle bin)", () => {
   let confirmSpy: ReturnType<typeof vi.spyOn>;
   afterEach(() => {
     confirmSpy?.mockRestore();
   });
 
-  it("confirms, spawns the delete job, and clears desktop annotations", async () => {
+  it("confirms once and moves the selected document to the recycle bin (no backend delete)", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+
+    // Soft-delete is a desktop-local hide: the doc lands in the bin, not gone.
+    expect(desktop.isTrashed(docA.id)).toBe(true);
+    // No irreversible backend delete is spawned from the list's delete action.
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "remove_library_copy",
+      expect.anything(),
+    );
+  });
+
+  it("does not trash when the confirm dialog is cancelled", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(desktop.isTrashed(docA.id)).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("does not trash when no document is selected", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    documents.value = [];
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(desktop.isTrashed(docA.id)).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("still soft-deletes outside Tauri (the hide is desktop-local, needs no backend)", async () => {
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.deleteDocument();
+    await flush();
+
+    expect(desktop.isTrashed(docA.id)).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+});
+
+describe("useVaultActions - restore document", () => {
+  it("restores a trashed document (un-hide) with no backend call", async () => {
+    asTauri();
+    desktop.trashDoc(docA.id);
+    vi.mocked(invoke).mockClear();
+
+    actions.restoreDocument(docA.id);
+
+    expect(desktop.isTrashed(docA.id)).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("does not invoke when the document id is unknown", async () => {
+    asTauri();
+    vi.mocked(invoke).mockClear();
+
+    actions.restoreDocument("nope");
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+});
+
+describe("useVaultActions - permanently delete document", () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+  afterEach(() => {
+    confirmSpy?.mockRestore();
+  });
+
+  it("double-confirms, then spawns the delete job and clears desktop annotations", async () => {
     asTauri();
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     desktop.tags.value = { [docA.id]: ["t1"] };
@@ -478,7 +588,7 @@ describe("useVaultActions - delete document", () => {
     ];
     vi.mocked(invoke).mockResolvedValue("job-del");
 
-    await actions.deleteDocument();
+    await actions.permanentlyDeleteDocument(docA.id);
 
     expect(invoke).toHaveBeenCalledWith("delete_document", {
       document_id: docA.id,
@@ -492,24 +602,37 @@ describe("useVaultActions - delete document", () => {
     });
   });
 
-  it("does not invoke when the confirm dialog is cancelled", async () => {
+  it("requires both confirms - cancels on the first with no backend call", async () => {
     asTauri();
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
-    await actions.deleteDocument();
+    await actions.permanentlyDeleteDocument(docA.id);
     await flush();
 
     expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
   });
 
-  it("does not invoke when no document is selected", async () => {
+  it("requires both confirms - cancels on the second with no backend call", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    documents.value = [];
+    confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
-    await actions.deleteDocument();
+    await actions.permanentlyDeleteDocument(docA.id);
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("does not invoke when the document id is unknown", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.permanentlyDeleteDocument("nope");
     await flush();
 
     expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
@@ -519,10 +642,98 @@ describe("useVaultActions - delete document", () => {
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
-    await actions.deleteDocument();
+    await actions.permanentlyDeleteDocument(docA.id);
     await flush();
 
     expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+});
+
+describe("useVaultActions - empty recycle bin", () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+  afterEach(() => {
+    confirmSpy?.mockRestore();
+  });
+
+  it("double-confirms, then permanently deletes every trashed document", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const docB: Document = { ...docA, id: "docB" };
+    documents.value = [docA, docB];
+    desktop.trashDoc(docA.id);
+    desktop.trashDoc(docB.id);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.emptyTrash();
+
+    expect(invoke).toHaveBeenCalledWith("delete_document", {
+      document_id: docA.id,
+    });
+    expect(invoke).toHaveBeenCalledWith("delete_document", {
+      document_id: docB.id,
+    });
+    // Each document's desktop annotations + bin membership are cleared.
+    expect(desktop.trashedIds()).toEqual([]);
+    expect(invoke).toHaveBeenCalledWith("remove_library_copy", {
+      document_id: docA.id,
+    });
+    expect(invoke).toHaveBeenCalledWith("remove_library_copy", {
+      document_id: docB.id,
+    });
+  });
+
+  it("no-ops when the bin is already empty (no backend call)", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.emptyTrash();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+  });
+
+  it("requires both confirms - cancels on the first with no backend call", async () => {
+    asTauri();
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    desktop.trashDoc(docA.id);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.emptyTrash();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    // Still trashed - the bin was not emptied.
+    expect(desktop.isTrashed(docA.id)).toBe(true);
+  });
+
+  it("requires both confirms - cancels on the second with no backend call", async () => {
+    asTauri();
+    confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    desktop.trashDoc(docA.id);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.emptyTrash();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(desktop.isTrashed(docA.id)).toBe(true);
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    desktop.trashDoc(docA.id);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+
+    await actions.emptyTrash();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    // Soft-delete membership is untouched (only the backend delete was skipped).
+    expect(desktop.isTrashed(docA.id)).toBe(true);
   });
 });
 

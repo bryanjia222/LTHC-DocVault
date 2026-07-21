@@ -83,7 +83,10 @@ const selectedDocument = computed<Document | undefined>(
   () =>
     documents.value.find(
       (document) => document.id === selectedDocumentId.value,
-    ) ?? documents.value[0],
+    ) ??
+    // Fall back to the first non-trashed document so the detail panel never
+    // parks on a recycle-bin document after a soft-delete.
+    documents.value.find((document) => !desktop.isTrashed(document.id)),
 );
 
 const selectedVersion = computed<Version | undefined>(
@@ -100,18 +103,26 @@ export function useDocuments() {
       searchScope: searchScope.value,
       types: typeFilter.value,
     });
+    // Hide recycle-bin (soft-deleted) documents from the working list. They are
+    // still in `documents` (enriched) so the bin view can show them.
+    const visible = matched.filter((d) => !desktop.isTrashed(d.id));
     // Scope by the sidebar's active project AFTER the filter, so search + type
     // filters compose with project grouping. null (the 文档 node) shows all.
     const pid = activeProjectId.value;
     const scoped = pid
-      ? matched.filter((d) => (d.projects ?? []).includes(pid))
-      : matched;
+      ? visible.filter((d) => (d.projects ?? []).includes(pid))
+      : visible;
     return sortDocuments(
       scoped,
       effectiveSort.value.key,
       effectiveSort.value.direction,
     );
   });
+
+  /** Documents currently in the recycle bin (soft-deleted, hidden from the list). */
+  const trashedDocuments = computed<Document[]>(() =>
+    documents.value.filter((d) => desktop.isTrashed(d.id)),
+  );
 
   const totalVersions = computed(() =>
     vaultDocuments.value.reduce(
@@ -174,10 +185,27 @@ export function useDocuments() {
     activeProjectId.value = null;
   }
 
+  /**
+   * Select the first non-trashed document (or clear selection when none remain),
+   * used after a soft-delete so the detail panel doesn't stay parked on the doc
+   * that was just moved to the recycle bin.
+   */
+  function selectFirstVisible() {
+    const first = documents.value.find((d) => !desktop.isTrashed(d.id));
+    if (first) {
+      selectedDocumentId.value = first.id;
+      selectedVersionId.value = first.versions[0]?.id ?? "";
+    } else {
+      selectedDocumentId.value = "";
+      selectedVersionId.value = "";
+    }
+  }
+
   return {
     // enriched + filtered data
     documents,
     filteredDocuments,
+    trashedDocuments,
     selectedDocument,
     selectedDocumentId,
     selectedVersion,
@@ -200,6 +228,7 @@ export function useDocuments() {
     // selection + filter controls
     selectDocument,
     selectVersion,
+    selectFirstVisible,
     toggleType,
     clearFilters,
   };

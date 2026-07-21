@@ -118,6 +118,8 @@ export interface RawDesktopState {
   assignments: Record<string, string[]>;
   /** scope key (project id or "__all__") -> persisted table sort (snake_case wire). */
   sort_prefs: Record<string, RawSortPref>;
+  /** Document ids soft-deleted to the recycle bin (desktop-local hide). */
+  trashed: string[];
 }
 
 export interface RawFileStat {
@@ -256,11 +258,13 @@ export function mapDesktopState(raw: RawDesktopState): DesktopState {
   return {
     tags: raw.tags,
     tracked: raw.tracked.map(mapTrackedFile),
-    // `projects`/`assignments`/`sort_prefs` are newer fields; default to empty so
-    // older state files (and test fixtures) that omit them don't leak `undefined`.
+    // `projects`/`assignments`/`sort_prefs`/`trashed` are newer fields; default
+    // to empty so older state files (and test fixtures) that omit them don't
+    // leak `undefined`.
     projects: raw.projects ?? [],
     assignments: raw.assignments ?? {},
     sortPrefs: raw.sort_prefs ?? {},
+    trashed: raw.trashed ?? [],
   };
 }
 

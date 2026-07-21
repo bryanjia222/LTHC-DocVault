@@ -135,17 +135,45 @@ async function loadConfig(): Promise<void> {
  * Load the on-disk repo size (bytes) for the active vault. Refreshed after
  * commits/deletes so the Settings > 状态 archive stat stays current. Mocks a
  * value outside Tauri so browser dev still renders.
+ *
+ * `repo_size` is expensive (restic spawns `restic stats --mode raw-data`; the
+ * local-copy backend walks the versions dir), and the Settings > 状态 tab mounts
+ * two cards that both call this on `onMounted`. To keep entering Settings (and
+ * the first tab switch right after) from hitching on a redundant restic spawn,
+ * concurrent callers coalesce onto one in-flight fetch and a fresh-enough cached
+ * value is served without re-fetching. `force` bypasses the cache for callers
+ * that know the underlying data just changed (connect / reset / job-terminal).
  */
-async function loadRepoSize(): Promise<void> {
+const REPO_SIZE_TTL_MS = 10_000;
+let repoSizeLoadedAt: number | null = null;
+let repoSizePromise: Promise<void> | null = null;
+
+async function loadRepoSize(force = false): Promise<void> {
   if (!isTauri()) {
     repoSize.value = 45 * 1024 * 1024;
     return;
   }
-  try {
-    repoSize.value = await invoke<number>("repo_size");
-  } catch (e) {
-    error.value = String(e);
+  // Coalesce concurrent callers (e.g. the two status cards mounting together)
+  // onto the single in-flight fetch.
+  if (repoSizePromise) return repoSizePromise;
+  if (
+    !force &&
+    repoSizeLoadedAt !== null &&
+    Date.now() - repoSizeLoadedAt < REPO_SIZE_TTL_MS
+  ) {
+    return;
   }
+  repoSizePromise = (async () => {
+    try {
+      repoSize.value = await invoke<number>("repo_size");
+      repoSizeLoadedAt = Date.now();
+    } catch (e) {
+      error.value = String(e);
+    } finally {
+      repoSizePromise = null;
+    }
+  })();
+  return repoSizePromise;
 }
 
 // --- write actions (return the spawned job id; state arrives via events) ---
@@ -324,7 +352,7 @@ async function connect(params: ConnectParams): Promise<ConnectOutcome> {
     loadDocuments(),
     loadConfig(),
     loadJobs(),
-    loadRepoSize(),
+    loadRepoSize(true),
   ]);
   return outcome;
 }
@@ -357,7 +385,7 @@ async function resetToStage(
     loadDocuments(),
     loadConfig(),
     loadJobs(),
-    loadRepoSize(),
+    loadRepoSize(true),
   ]);
 }
 
@@ -396,7 +424,7 @@ async function subscribeJobs(
     if (refreshKinds.includes(raw.kind) && raw.status === "succeeded") {
       void loadDocuments();
       if (raw.kind === "archive" || raw.kind === "delete") {
-        void loadRepoSize();
+        void loadRepoSize(true);
       }
     }
     if (TERMINAL_STATUSES.has(raw.status)) {

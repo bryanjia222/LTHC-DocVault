@@ -3,11 +3,13 @@ import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useVault } from "../../composables/useVault";
 import { useDocuments } from "../../composables/useDocuments";
+import { useJobs } from "../../composables/useJobs";
 import { formatByteSize } from "../../utils/mappers";
 
 const { t } = useI18n();
 const { config, repoSize, loadRepoSize } = useVault();
 const { documents, totalVersions } = useDocuments();
+const { activeJobCount } = useJobs();
 
 const repoSizeLabel = computed(() =>
   repoSize.value == null ? "-" : formatByteSize(repoSize.value),
@@ -23,12 +25,20 @@ onMounted(() => {
     <h3>{{ t("status.vaultTitle") }}</h3>
     <div class="stat-grid">
       <div class="stat">
-        <span class="stat-label">{{ t("sidebar.documents") }}</span>
+        <span class="stat-label">{{ t("metrics.currentDocuments") }}</span>
         <strong>{{ documents.length }}</strong>
       </div>
       <div class="stat">
-        <span class="stat-label">{{ t("sidebar.versions") }}</span>
+        <span class="stat-label">{{ t("metrics.storedVersions") }}</span>
         <strong>{{ totalVersions }}</strong>
+      </div>
+      <div class="stat">
+        <span class="stat-label">{{ t("metrics.activeJobs") }}</span>
+        <strong>{{ activeJobCount }}</strong>
+      </div>
+      <div class="stat">
+        <span class="stat-label">{{ t("metrics.vaultHealth") }}</span>
+        <strong>{{ t("metrics.ready") }}</strong>
       </div>
       <div class="stat">
         <span class="stat-label">{{ t("sidebar.backend") }}</span>
@@ -56,7 +66,7 @@ onMounted(() => {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -68,7 +78,7 @@ onMounted(() => {
   border-bottom: 1px solid var(--border-soft);
 }
 
-.stat:last-child {
+.stat:nth-last-child(-n + 3) {
   border-bottom: 0;
   padding-bottom: 0;
 }

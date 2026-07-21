@@ -5,16 +5,17 @@ import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
 import AppTopbar from "./components/AppTopbar.vue";
 import AppContextMenu from "./components/AppContextMenu.vue";
-import MetricsBar from "./components/MetricsBar.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import AddDocumentDialog from "./components/AddDocumentDialog.vue";
 import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
 import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
 import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
+import ExportCommitPromptDialog from "./components/ExportCommitPromptDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
+import TrashView from "./components/views/TrashView.vue";
 import { useNavigation } from "./composables/useNavigation";
 import { useCommandPalette } from "./composables/useCommandPalette";
 import { useActivityLog } from "./composables/useActivityLog";
@@ -118,7 +119,7 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
  */
 let setupDone = false;
 async function runPostConnectSetup(): Promise<void> {
-  await Promise.all([loadDocuments(), loadConfig(), loadJobs(), loadRepoSize()]);
+  await Promise.all([loadDocuments(), loadConfig(), loadJobs(), loadRepoSize(true)]);
   await desktop.loadDesktopState();
   await ensureLibraryCopies();
   await desktop.loadDesktopState();
@@ -158,7 +159,6 @@ onBeforeUnmount(() => {
 
     <main class="workspace">
       <AppTopbar />
-      <MetricsBar />
 
       <div class="view-host">
         <div v-if="booting" class="boot-state">{{ t("boot.loading") }}</div>
@@ -175,6 +175,7 @@ onBeforeUnmount(() => {
         <template v-else>
           <DocumentsView v-if="activeSection === 'documents'" />
           <SettingsView v-else-if="activeSection === 'settings'" />
+          <TrashView v-else-if="activeSection === 'trash'" />
         </template>
       </div>
     </main>
@@ -185,6 +186,7 @@ onBeforeUnmount(() => {
     <CommitModifiedDialog />
     <DocumentStatusDialog />
     <RenameDialog />
+    <ExportCommitPromptDialog />
     <AppContextMenu />
     <ToastHost />
   </div>

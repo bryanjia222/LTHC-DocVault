@@ -9,7 +9,7 @@ import { ref } from "vue";
  * "状态" tab, so `settingsTab` remembers which settings tab is open.
  */
 
-export type NavigationId = "documents" | "settings";
+export type NavigationId = "documents" | "settings" | "trash";
 export type SettingsTab = "status" | "storage" | "appearance";
 
 const activeSection = ref<NavigationId>("documents");

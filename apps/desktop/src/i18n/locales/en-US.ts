@@ -5,9 +5,11 @@ export const enUS = {
   nav: {
     primary: "Primary",
     documents: "Documents",
+    allDocuments: "All documents",
     jobs: "Jobs",
     archive: "Archive",
     settings: "Settings",
+    trash: "Recycle bin",
   },
   sidebar: {
     vault: "Vault",
@@ -91,6 +93,16 @@ export const enUS = {
   },
   confirm: {
     delete: "Delete document \"{name}\"? All its versions and backup snapshots will be removed (the source file is not deleted).",
+    moveToTrash:
+      "Move document \"{name}\" to the recycle bin? It will be hidden from the document list; restore or permanently delete it from the bin.",
+    permanentDelete:
+      "Permanently delete document \"{name}\"? All its versions and backup snapshots will be removed (the source file is not deleted) and cannot be recovered.",
+    permanentDeleteAgain:
+      "Are you sure? Permanently deleting \"{name}\" removes all of its history. This cannot be undone.",
+    emptyTrash:
+      "Empty the recycle bin? This permanently deletes {count} document(s) and all their versions and backup snapshots, and cannot be undone.",
+    emptyTrashAgain:
+      "Are you sure? Permanently deleting all {count} document(s) in the bin removes all their history. This cannot be undone.",
   },
   actionLogs: {
     refresh: "Refresh vault",
@@ -103,6 +115,8 @@ export const enUS = {
     open: "Open document",
     rename: "Rename document",
     delete: "Delete document",
+    restore: "Restore document from recycle bin",
+    emptyTrash: "Empty recycle bin",
     preview: "Preview document",
     history: "Open versions",
     jobCenter: "Open job center",
@@ -178,6 +192,7 @@ export const enUS = {
     path: "Source path",
     notTracked: "No source file tracked for this document on this machine.",
     commitModified: "Commit modified",
+    commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
     documentStatus: "Document status",
     rename: "Rename",
@@ -188,6 +203,26 @@ export const enUS = {
   versionMenu: {
     checkout: "Switch to version {label}",
     export: "Export version {label}",
+  },
+  trash: {
+    title: "Recycle bin",
+    subtitle: "Deleted documents are held here until restored or permanently deleted.",
+    empty: "Recycle bin is empty.",
+    count: "{count} document(s)",
+    restore: "Restore",
+    permanentDelete: "Permanently delete",
+    emptyTrash: "Empty recycle bin",
+    permanentDeleteHint:
+      "Permanent deletion removes all of the document's versions and backup snapshots, and cannot be undone.",
+  },
+  exportCommit: {
+    title: "Export uncommitted document",
+    subtitle:
+      "This document has uncommitted changes. Exporting only includes the last committed version, not your current edits.",
+    hint: "Commit first to save your current edits, or export the committed version as-is.",
+    commit: "Commit first",
+    exportDirect: "Export directly",
+    cancel: "Cancel",
   },
   modification: {
     none: "Not tracked",
@@ -274,6 +309,10 @@ export const enUS = {
     renamed: "Renamed document: {name} -> {newName}",
     latest: "latest",
     cleared: "Activity log cleared",
+    movedToTrash: "Moved \"{target}\" to the recycle bin",
+    restored: "Restored \"{target}\" from the recycle bin",
+    trashEmpty: "Recycle bin is empty",
+    trashEmptied: "Emptied the recycle bin ({count} document(s))",
     commandRun: "Run command: {command}",
   },
   status: {

@@ -117,6 +117,13 @@ pub struct DesktopStateSlice {
     pub assignments: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub sort_prefs: BTreeMap<String, SortPref>,
+    /// Document ids soft-deleted to the recycle bin (desktop-local hide). The
+    /// backend vault still holds these documents and all their history until the
+    /// user permanently deletes them from the bin; this list only suppresses them
+    /// from the document list. Restoring removes the id; permanent delete clears
+    /// it (and unmanages the document in the backend).
+    #[serde(default)]
+    pub trashed: Vec<String>,
 }
 
 /// A persisted document-table sort for one project view. `key` is the column

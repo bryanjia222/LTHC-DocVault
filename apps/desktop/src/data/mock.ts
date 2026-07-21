@@ -84,6 +84,8 @@ export interface DesktopState {
   assignments: Record<string, string[]>;
   /** Persisted per-project table sort: scope key (project id or "__all__") -> sort pref. */
   sortPrefs: Record<string, SortPref>;
+  /** Document ids soft-deleted to the recycle bin (desktop-local hide). */
+  trashed: string[];
 }
 
 /** A persisted document-table sort for one project view. */
@@ -348,6 +350,7 @@ export const desktopState: DesktopState = {
     "7c1b28d1": ["proj-finance"],
   },
   sortPrefs: {},
+  trashed: [],
 };
 
 export const mockProbes: Record<string, FileProbe> = {
