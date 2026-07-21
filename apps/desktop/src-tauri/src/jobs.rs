@@ -203,7 +203,9 @@ fn phase_a_commit(
                 &lib_path,
                 &docvault_storage::NEVER_CANCELLED,
             ) {
-                return Err(format!("committed but failed to materialize library copy: {e}"));
+                return Err(format!(
+                    "committed but failed to materialize library copy: {e}"
+                ));
             }
         }
         _ => {} // source is the library copy, or path unknown - nothing to materialize
@@ -390,7 +392,10 @@ mod tests {
                 .list_versions(&DocumentRef::IdPrefix(documents[0].id.as_str().to_owned()))
                 .unwrap();
             assert_eq!(versions.len(), 1);
-            assert_eq!(versions[0].archive_status, "pending", "version is pending until Phase B");
+            assert_eq!(
+                versions[0].archive_status, "pending",
+                "version is pending until Phase B"
+            );
             let lib_path = crate::library::library_path_for_doc(vault, documents[0].id.as_str())
                 .expect("library path resolves");
             assert!(lib_path.exists(), "library copy materialized by Phase A");
@@ -409,9 +414,7 @@ mod tests {
         // Phase B finalized the version: no longer pending.
         let vault = vault.lock().unwrap();
         let vault = vault.as_ref().unwrap();
-        let versions = vault
-            .list_versions(&DocumentRef::IdPrefix(doc_id))
-            .unwrap();
+        let versions = vault.list_versions(&DocumentRef::IdPrefix(doc_id)).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(
             versions[0].archive_status, "archived",
@@ -459,8 +462,16 @@ mod tests {
         );
         wait_for_terminal(&terminal2);
         let record2 = registry.get(&_job_id2).expect("second job recorded");
-        assert_eq!(record2.status, JobStatus::Succeeded, "commit-modified should succeed");
-        assert!(record2.error.is_none(), "unexpected error: {:?}", record2.error);
+        assert_eq!(
+            record2.status,
+            JobStatus::Succeeded,
+            "commit-modified should succeed"
+        );
+        assert!(
+            record2.error.is_none(),
+            "unexpected error: {:?}",
+            record2.error
+        );
 
         let vault = vault.lock().unwrap();
         let vault = vault.as_ref().unwrap();
@@ -499,14 +510,20 @@ mod tests {
 
         wait_for_terminal(&terminal);
         let record = registry.get(&job_id).expect("job recorded");
-        assert_eq!(record.status, JobStatus::Succeeded, "raw-binary commit archives");
-        assert!(record.error.is_none(), "unexpected error: {:?}", record.error);
+        assert_eq!(
+            record.status,
+            JobStatus::Succeeded,
+            "raw-binary commit archives"
+        );
+        assert!(
+            record.error.is_none(),
+            "unexpected error: {:?}",
+            record.error
+        );
 
         let vault = vault.lock().unwrap();
         let vault = vault.as_ref().unwrap();
-        let versions = vault
-            .list_versions(&DocumentRef::IdPrefix(doc_id))
-            .unwrap();
+        let versions = vault.list_versions(&DocumentRef::IdPrefix(doc_id)).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].archive_status, "archived");
         assert_eq!(versions[0].original_filename, "notes.txt");
@@ -523,9 +540,13 @@ mod tests {
         path: String,
         document_ref: DocumentRef,
     ) -> (String, Arc<AtomicUsize>, String) {
-        let (document, version) =
-            phase_a_commit(&vault, &PathBuf::from(&path), document_ref, CommitMetadata::default())
-                .expect("Phase A commit succeeds");
+        let (document, version) = phase_a_commit(
+            &vault,
+            PathBuf::from(&path),
+            document_ref,
+            CommitMetadata::default(),
+        )
+        .expect("Phase A commit succeeds");
         let doc_id = document.id.as_str().to_owned();
         let terminal = Arc::new(AtomicUsize::new(0));
         let on_event = {

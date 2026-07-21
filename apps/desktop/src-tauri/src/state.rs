@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use docvault_core::DocVault;
 use docvault_jobs::{JobRegistry, JobStatus};
-use docvault_storage::{VaultPaths, VaultStorage};
+use docvault_storage::{StorageError, StorageOverrides, VaultPaths, VaultStorage};
 use docvault_types::VaultConfig;
 use tauri::AppHandle;
 use tracing::warn;
@@ -25,6 +25,12 @@ pub struct AppState {
     pub vault: Arc<Mutex<Option<DocVault>>>,
     pub jobs: JobRegistry,
     pub last_open_error: Arc<Mutex<Option<String>>>,
+    /// The bundled restic binary path resolved once at startup (`None` when no
+    /// bundled binary is available, in which case the storage layer falls back
+    /// to its own auto-discovery). Injected into every vault open/init via
+    /// [`restic_override`] so the bundled binary is used regardless of where the
+    /// vault lives - replacing the former `DOCVAULT_RESTIC_PATH` env var.
+    pub restic_path: Mutex<Option<PathBuf>>,
 }
 
 impl AppState {
@@ -33,6 +39,7 @@ impl AppState {
             vault: Arc::new(Mutex::new(None)),
             jobs: JobRegistry::new(),
             last_open_error: Arc::new(Mutex::new(None)),
+            restic_path: Mutex::new(None),
         }
     }
 }
@@ -83,6 +90,18 @@ pub(crate) fn set_open_error(state: &AppState, message: Option<String>) {
         .unwrap_or_else(|e| e.into_inner()) = message;
 }
 
+/// Build the [`StorageOverrides`] that inject the desktop's bundled restic
+/// binary into a vault open/init. Only `restic_path` is set: the backend and
+/// password always come from the vault's `config.toml` (written by
+/// [`write_config`] at init, or already present at open).
+fn restic_override(state: &AppState) -> StorageOverrides {
+    StorageOverrides {
+        backend: None,
+        restic_path: state.restic_path.lock().unwrap().clone(),
+        restic_password: None,
+    }
+}
+
 /// Open the vault on startup if the user has previously connected one. Requires
 /// a saved root pref (written by every `connect_vault`): with no pref the app
 /// stays at onboarding rather than auto-opening whatever vault might happen to
@@ -100,7 +119,7 @@ pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
     if !paths.config_path.exists() {
         return;
     }
-    match VaultStorage::open(paths) {
+    match VaultStorage::open_with_overrides(paths, &restic_override(state)) {
         Ok(storage) => {
             set_open_error(state, None);
             *lock_vault(&state.vault) = Some(DocVault::new(storage));
@@ -145,12 +164,14 @@ pub fn connect_vault_core(
 
     let (mode, resolved_backend) = if empty {
         write_config(&paths, backend, restic_password.as_deref())?;
-        let storage = VaultStorage::init(paths).map_err(|e| ConnectError::Other(e.to_string()))?;
+        let storage = VaultStorage::init_with_overrides(paths, &restic_override(state))
+            .map_err(|e| ConnectError::Other(e.to_string()))?;
         let backend = backend.to_owned();
         *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("initialized", backend)
     } else if is_recognized_vault(&paths) {
-        let storage = VaultStorage::open(paths).map_err(|e| ConnectError::Other(e.to_string()))?;
+        let storage = VaultStorage::open_with_overrides(paths, &restic_override(state))
+            .map_err(|e| ConnectError::Other(e.to_string()))?;
         let backend = storage.backend().as_str().to_owned();
         *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("opened", backend)
@@ -193,12 +214,7 @@ pub fn probe_vault(root_dir: &str) -> VaultProbe {
     }
     let empty = is_empty_dir(&root).unwrap_or(false);
     VaultProbe {
-        status: if empty {
-            "empty"
-        } else {
-            "unrecognized"
-        }
-        .to_owned(),
+        status: if empty { "empty" } else { "unrecognized" }.to_owned(),
         backend: None,
     }
 }
@@ -232,31 +248,17 @@ fn is_recognized_vault(paths: &VaultPaths) -> bool {
 
 /// Write a fresh `config.toml` for a newly initialized vault. For restic the
 /// password is required; the restic binary path is left unset so the storage
-/// layer auto-discovers the bundled binary.
+/// layer uses the bundled binary (injected via [`restic_override`]). Delegates
+/// to the storage crate so the desktop and CLI share one config-writing path.
 fn write_config(
     paths: &VaultPaths,
     backend: &str,
     restic_password: Option<&str>,
 ) -> Result<(), ConnectError> {
-    if let Some(parent) = paths.config_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| ConnectError::Other(e.to_string()))?;
-    }
-    let mut config = VaultConfig::for_paths(
-        paths.data_dir.clone(),
-        paths.repo_dir.clone(),
-        paths.db_path.clone(),
-    );
-    config.storage.backend = backend.to_owned();
-    if backend == "restic" {
-        config.storage.restic_password = restic_password
-            .filter(|value| !value.is_empty())
-            .ok_or(ConnectError::ResticPasswordRequired)?
-            .to_owned();
-    }
-    let rendered =
-        toml::to_string_pretty(&config).map_err(|e| ConnectError::Other(e.to_string()))?;
-    fs::write(&paths.config_path, rendered).map_err(|e| ConnectError::Other(e.to_string()))?;
-    Ok(())
+    docvault_storage::write_initial_config(paths, backend, restic_password).map_err(|e| match e {
+        StorageError::ResticPasswordRequired => ConnectError::ResticPasswordRequired,
+        other => ConnectError::Other(other.to_string()),
+    })
 }
 
 #[cfg(test)]

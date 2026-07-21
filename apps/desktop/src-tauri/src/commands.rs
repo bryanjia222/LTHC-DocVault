@@ -1,4 +1,4 @@
-use tauri::{AppHandle, ipc::Response, Manager, State};
+use tauri::{ipc::Response, AppHandle, Manager, State};
 
 use docvault_storage::{DocumentRef, VaultPaths, NEVER_CANCELLED};
 use docvault_types::VaultConfig;
@@ -147,7 +147,12 @@ pub async fn preview_version(
         // No extension => export writes `temp_dir/original_filename` and returns
         // that path, so read the path export reports (not `preview` itself).
         let exported = vault
-            .export_version(&document_ref, &version, &temp_dir.path().join("preview"), &NEVER_CANCELLED)
+            .export_version(
+                &document_ref,
+                &version,
+                temp_dir.path().join("preview"),
+                &NEVER_CANCELLED,
+            )
             .map_err(|e| e.to_string())?;
         let bytes = std::fs::read(&exported).map_err(|e| e.to_string())?;
         // Drop the temp dir (and its file) now that bytes are in memory.

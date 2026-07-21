@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 use docvault_types::VaultConfig;
 
-use crate::{BackupBackend, StorageResult, VaultPaths};
+use crate::{BackupBackend, StorageError, StorageResult, VaultPaths};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResticConfig {
@@ -31,13 +31,37 @@ pub(crate) struct StorageSettings {
     pub(crate) restic_password: String,
 }
 
-pub(crate) fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings> {
+/// Caller-supplied values that override the on-disk `config.toml` when present
+/// (`Some`). `None` means "use what the config file says". This replaces the
+/// former `DOCVAULT_*` env-var overrides: configuration now comes only from
+/// `config.toml` plus these explicit parameters (CLI flags / the desktop's
+/// in-process bundled-restic path), never from the process environment.
+///
+/// - `backend` / `restic_password`: typically left `None` - the vault's config
+///   is the source of truth (the desktop connect dialog and CLI `init` write
+///   the chosen backend + password into config before opening).
+/// - `restic_path`: the one value commonly overridden, because the bundled
+///   restic binary is install-specific (not per-vault) and must not be
+///   persisted into a vault's portable config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StorageOverrides {
+    pub backend: Option<BackupBackend>,
+    pub restic_path: Option<PathBuf>,
+    pub restic_password: Option<String>,
+}
+
+pub(crate) fn read_settings(
+    paths: &VaultPaths,
+    overrides: &StorageOverrides,
+) -> StorageResult<StorageSettings> {
     let config = read_config(paths)?;
-    let backend = env::var("DOCVAULT_BACKUP_BACKEND")
-        .ok()
-        .unwrap_or_else(|| config.storage.backend.clone());
-    let restic_path = env::var_os("DOCVAULT_RESTIC_PATH")
-        .map(PathBuf::from)
+    let backend = match overrides.backend {
+        Some(backend) => backend,
+        None => BackupBackend::parse(&config.storage.backend)?,
+    };
+    let restic_path = overrides
+        .restic_path
+        .clone()
         .or_else(|| {
             config
                 .storage
@@ -47,12 +71,13 @@ pub(crate) fn read_settings(paths: &VaultPaths) -> StorageResult<StorageSettings
                 .map(PathBuf::from)
         })
         .unwrap_or_else(|| bundled_or_system_restic(paths));
-    let restic_password = env::var("DOCVAULT_RESTIC_PASSWORD")
-        .ok()
+    let restic_password = overrides
+        .restic_password
+        .clone()
         .unwrap_or_else(|| config.storage.restic_password.clone());
 
     Ok(StorageSettings {
-        backend: BackupBackend::parse(&backend)?,
+        backend,
         restic_path,
         restic_password,
     })
@@ -81,6 +106,41 @@ pub(crate) fn default_config(paths: &VaultPaths) -> StorageResult<String> {
         paths.repo_dir.clone(),
         paths.db_path.clone(),
     ))?)
+}
+
+/// Write a fresh `config.toml` for a newly initialized vault with the chosen
+/// `backend`. For `restic` a non-empty `restic_password` is required (returned
+/// as [`StorageError::ResticPasswordRequired`] otherwise); for `local-copy` the
+/// password is left at the config default (unused). The restic binary path is
+/// intentionally NOT persisted here - it is install-specific (bundled vs PATH)
+/// and resolved at open time via [`StorageOverrides::restic_path`] or
+/// auto-discovery, never written to the vault's portable config. Used by both
+/// the desktop connect flow and the CLI `init` command so the two share one
+/// config-writing path.
+pub fn write_initial_config(
+    paths: &VaultPaths,
+    backend: &str,
+    restic_password: Option<&str>,
+) -> StorageResult<()> {
+    let backend = BackupBackend::parse(backend)?;
+    if let Some(parent) = paths.config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut config = VaultConfig::for_paths(
+        paths.data_dir.clone(),
+        paths.repo_dir.clone(),
+        paths.db_path.clone(),
+    );
+    config.storage.backend = backend.as_str().to_owned();
+    if backend == BackupBackend::Restic {
+        config.storage.restic_password = restic_password
+            .filter(|value| !value.is_empty())
+            .ok_or(StorageError::ResticPasswordRequired)?
+            .to_owned();
+    }
+    let rendered = toml::to_string_pretty(&config)?;
+    fs::write(&paths.config_path, rendered)?;
+    Ok(())
 }
 
 /// Resolve the restic binary when neither config nor env supplies one (§5.4

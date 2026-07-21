@@ -80,7 +80,12 @@ impl VaultConfig {
     pub fn for_paths(data_dir: PathBuf, repo_dir: PathBuf, db_path: PathBuf) -> Self {
         Self {
             storage: StorageConfig {
-                backend: "restic".to_owned(),
+                // local-copy is the safe default: it needs no external binary,
+                // so a fresh `init` (no config yet) works everywhere. Restic is
+                // opt-in via an explicit backend choice (CLI `--backend restic`
+                // or the desktop connect dialog), which writes the chosen
+                // backend into config.toml before the vault is opened.
+                backend: "local-copy".to_owned(),
                 data_dir: config_path(data_dir),
                 repo_dir: config_path(repo_dir),
                 restic_path: None,
@@ -132,7 +137,7 @@ impl Default for LoggingConfig {
 }
 
 fn default_storage_backend() -> String {
-    "restic".to_owned()
+    "local-copy".to_owned()
 }
 
 fn default_restic_password() -> String {

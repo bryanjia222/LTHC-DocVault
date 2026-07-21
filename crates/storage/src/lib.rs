@@ -5,22 +5,6 @@ mod paths;
 mod restic;
 mod sqlite;
 
-#[cfg(test)]
-pub(crate) mod test_support {
-    //! Test-only helpers shared across the crate's test modules.
-    use std::sync::Mutex;
-
-    /// Serializes tests that pollute process-global `DOCVAULT_*` env vars with
-    /// tests that read config. [`crate::config::read_settings`] honors env
-    /// overrides, so a test that sets `DOCVAULT_BACKUP_BACKEND` (etc.) can flip
-    /// another test's backend mid-run when tests execute in parallel. Any test
-    /// that reads config (directly or via `VaultStorage::init`) acquires this
-    /// lock so it never observes another test's transient env pollution, and
-    /// the env-polluting tests in `paths` acquire it so they don't clobber a
-    /// concurrent reader.
-    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
-}
-
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -33,8 +17,8 @@ use rusqlite::{Connection, params};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-pub use config::ResticConfig;
 pub(crate) use config::StorageSettings;
+pub use config::{ResticConfig, StorageOverrides, write_initial_config};
 pub use error::{DatabaseError, ResticError, StorageError, StorageResult};
 pub use paths::VaultPaths;
 
@@ -95,6 +79,18 @@ pub struct VaultStorage {
 
 impl VaultStorage {
     pub fn init(paths: VaultPaths) -> StorageResult<Self> {
+        Self::init_with_overrides(paths, &StorageOverrides::default())
+    }
+
+    /// Initialize a vault, applying caller-supplied `overrides` on top of the
+    /// on-disk `config.toml` (see [`StorageOverrides`]). Used by the desktop
+    /// (to inject the bundled restic path) and the CLI (for `--restic-path`);
+    /// [`VaultStorage::init`] is the no-override convenience for tests and
+    /// config-only callers.
+    pub fn init_with_overrides(
+        paths: VaultPaths,
+        overrides: &StorageOverrides,
+    ) -> StorageResult<Self> {
         info!(root_dir = %paths.root_dir.display(), "initializing vault storage");
         fs::create_dir_all(&paths.root_dir)?;
         fs::create_dir_all(&paths.data_dir)?;
@@ -110,7 +106,7 @@ impl VaultStorage {
             fs::write(&paths.config_path, config::default_config(&paths)?)?;
         }
 
-        let settings = config::read_settings(&paths)?;
+        let settings = config::read_settings(&paths, overrides)?;
         let connection = Connection::open(&paths.db_path)?;
         let mut storage = Self {
             paths,
@@ -128,8 +124,19 @@ impl VaultStorage {
     }
 
     pub fn open(paths: VaultPaths) -> StorageResult<Self> {
+        Self::open_with_overrides(paths, &StorageOverrides::default())
+    }
+
+    /// Open an existing vault, applying caller-supplied `overrides` on top of
+    /// the on-disk `config.toml` (see [`StorageOverrides`]). Used by the desktop
+    /// (bundled restic path) and the CLI (`--restic-path`); [`VaultStorage::open`]
+    /// is the no-override convenience.
+    pub fn open_with_overrides(
+        paths: VaultPaths,
+        overrides: &StorageOverrides,
+    ) -> StorageResult<Self> {
         debug!(root_dir = %paths.root_dir.display(), "opening vault storage");
-        let settings = config::read_settings(&paths)?;
+        let settings = config::read_settings(&paths, overrides)?;
         let connection = Connection::open(&paths.db_path)?;
         let mut storage = Self {
             paths,
@@ -374,8 +381,15 @@ impl VaultStorage {
         for version in &pending {
             match self.archive_pending_version(version, cancel) {
                 Ok(()) => recovered += 1,
-                Err(StorageError::IntakeMissing { document_id, version_id }) => {
-                    warn!(document_id, version_id, "pending version has no intake copy; left pending for manual review");
+                Err(StorageError::IntakeMissing {
+                    document_id,
+                    version_id,
+                }) => {
+                    warn!(
+                        document_id,
+                        version_id,
+                        "pending version has no intake copy; left pending for manual review"
+                    );
                 }
                 Err(error) => return Err(error),
             }
@@ -477,17 +491,12 @@ impl VaultStorage {
 
     /// Rename a document's display name. Does not touch the on-disk source file
     /// or any version's `original_filename` (historical).
-    pub fn rename_document(
-        &self,
-        document_ref: &DocumentRef,
-        new_name: &str,
-    ) -> StorageResult<()> {
+    pub fn rename_document(&self, document_ref: &DocumentRef, new_name: &str) -> StorageResult<()> {
         let document = self.resolve_document_ref(document_ref)?;
         self.set_document_name(document.id.as_str(), new_name)?;
         info!(
             document_id = document.id.as_str(),
-            new_name,
-            "document renamed"
+            new_name, "document renamed"
         );
         Ok(())
     }
@@ -508,7 +517,8 @@ impl VaultStorage {
             "archiving source for document version"
         );
         let manifest = docvault_ooxml::manifest_for(source_path)?;
-        let archive = self.archive_source(document.id.as_str(), &version_id, source_path, cancel)?;
+        let archive =
+            self.archive_source(document.id.as_str(), &version_id, source_path, cancel)?;
         let original_filename = source_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -905,8 +915,7 @@ mod tests {
         write_local_copy_config(&paths);
         let source = write_source(&paths.root_dir, "report.docx", b"version one");
         let storage = VaultStorage::init(paths.clone()).unwrap();
-        let (document, version) =
-            commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+        let (document, version) = commit(&storage, DocumentRef::Name("report".to_owned()), &source);
 
         // The local-copy archive exists before delete.
         let archive_path = paths.versions_dir.join(&version.archive_reference);
@@ -920,9 +929,11 @@ mod tests {
             .unwrap();
 
         assert!(storage.list_documents().unwrap().is_empty());
-        assert!(storage
-            .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
-            .is_err());
+        assert!(
+            storage
+                .list_versions(&DocumentRef::IdPrefix(document.id.as_str().to_owned()))
+                .is_err()
+        );
         // The per-document archive directory is removed.
         assert!(!paths.versions_dir.join(document.id.as_str()).exists());
     }
@@ -966,8 +977,7 @@ mod tests {
         write_local_copy_config(&paths);
         let source = write_source(&paths.root_dir, "report.docx", b"version one");
         let storage = VaultStorage::init(paths).unwrap();
-        let (document, version) =
-            commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+        let (document, version) = commit(&storage, DocumentRef::Name("report".to_owned()), &source);
 
         storage
             .rename_document(
@@ -1191,13 +1201,19 @@ mod tests {
 
         let intake_a = storage.intake_path(doc_a.id.as_str(), &ver_a.id, &ver_a.original_filename);
         let intake_b = storage.intake_path(doc_b.id.as_str(), &ver_b.id, &ver_b.original_filename);
-        assert!(!intake_a.exists(), "A's intake removed by archive_pending_version");
+        assert!(
+            !intake_a.exists(),
+            "A's intake removed by archive_pending_version"
+        );
         assert!(intake_b.exists(), "B's intake still present while pending");
 
         // gc_intake is a no-op for B (still pending) and would only sweep
         // orphans; B's intake must survive.
         storage.gc_intake();
-        assert!(intake_b.exists(), "gc_intake preserves pending version intake");
+        assert!(
+            intake_b.exists(),
+            "gc_intake preserves pending version intake"
+        );
     }
 
     #[test]

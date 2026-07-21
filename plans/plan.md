@@ -3,10 +3,10 @@
 依据代码审计的 11 项问题，分三批修复。每批独立可验证（fmt/clippy/test + npm lint/build）并单独提交。全程遵守 AGENTS.md：复用优先、最小改动、单一 restic 发现机制、storage/jobs 保持 Tauri-free、无 speculative 架构、无兼容 shim。
 
 公共验证命令（每批结束都跑）：
-- Rust（workspace + 桌面，测试需清环境以避开 `DOCVAULT_*` 覆盖）：
+- Rust（workspace + 桌面）：
   `cargo fmt --all && cargo clippy --all-targets -- -D warnings`
-  `env -u DOCVAULT_ROOT_DIR -u DOCVAULT_DATA_DIR -u DOCVAULT_DB_PATH -u DOCVAULT_BACKUP_BACKEND -u DOCVAULT_RESTIC_PATH -u DOCVAULT_RESTIC_PASSWORD cargo test --workspace`
-  `env -u DOCVAULT_ROOT_DIR -u DOCVAULT_DATA_DIR -u DOCVAULT_DB_PATH -u DOCVAULT_BACKUP_BACKEND -u DOCVAULT_RESTIC_PATH -u DOCVAULT_RESTIC_PASSWORD cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+  `cargo test --workspace`
+  `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 - 前端：`cd apps/desktop && npm run lint && npm run build`
 
 ---

@@ -109,8 +109,8 @@ third_party/
 
 开发和运行时查找 Restic 的优先级为：
 
-1. 配置文件中的 `restic_path`
-2. 环境变量 `DOCVAULT_RESTIC_PATH`
+1. 显式参数（CLI `--restic-path`，或桌面端注入的内置 Restic 路径）
+2. 配置文件中的 `restic_path`
 3. 应用打包内置的 Restic sidecar
 4. 开发环境中的 `third_party/restic/<version>/<target>/restic(.exe)`
 5. 系统 `PATH` 中的 `restic`
@@ -305,7 +305,7 @@ Checkout 额外会更新 `documents.current_version_id`。后续提交新版本�
 
 ## 配置说明（基础层）
 
-系统基础配置存储于本地配置文件。默认位置由系统配置目录决定，也可以用 `DOCVAULT_ROOT_DIR` 覆盖：
+系统基础配置存储于本地配置文件。默认位置由系统配置目录决定，也可通过 CLI `--root-dir` 或桌面端连接参数显式指定（不再读取任何 `DOCVAULT_*` 环境变量）：
 
 ```text
 Windows: %APPDATA%/DocVault/config.toml 或 %LOCALAPPDATA% 对应的应用配置目录
@@ -341,7 +341,7 @@ level = "info"
 | data_dir | 临时文件与 staging 目录              |
 | repo_dir | 归档仓库存储路径                     |
 | restic_path | 可选 Restic 可执行文件路径；为空时使用内置或自动发现 |
-| restic_password | 本地 Restic 仓库密码；也可用 `DOCVAULT_RESTIC_PASSWORD` 覆盖 |
+| restic_password | 本地 Restic 仓库密码；初始化时通过 CLI `--restic-password` 或桌面端连接对话框设置 |
 
 #### database
 

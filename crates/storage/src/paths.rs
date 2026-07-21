@@ -57,36 +57,6 @@ impl VaultPaths {
         Self::new_with_repo(root_dir, data_dir, repo_dir, db_path)
     }
 
-    pub fn from_env() -> Self {
-        let root_dir = env::var_os("DOCVAULT_ROOT_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(default_root_dir);
-        let config_path = absolute_path(root_dir.join("config.toml"));
-        let config = read_config_file(&config_path).ok();
-        let data_dir = env::var_os("DOCVAULT_DATA_DIR")
-            .map(PathBuf::from)
-            .or_else(|| {
-                config
-                    .as_ref()
-                    .map(|config| PathBuf::from(&config.storage.data_dir))
-            })
-            .unwrap_or_else(|| root_dir.join("data"));
-        let db_path = env::var_os("DOCVAULT_DB_PATH")
-            .map(PathBuf::from)
-            .or_else(|| {
-                config
-                    .as_ref()
-                    .map(|config| PathBuf::from(&config.database.path))
-            })
-            .unwrap_or_else(|| root_dir.join("db.sqlite"));
-        let repo_dir = config
-            .as_ref()
-            .map(|config| PathBuf::from(&config.storage.repo_dir))
-            .unwrap_or_else(|| root_dir.join("repo"));
-
-        Self::new_with_repo(root_dir, data_dir, repo_dir, db_path)
-    }
-
     pub fn new(
         root_dir: impl Into<PathBuf>,
         data_dir: impl Into<PathBuf>,
@@ -139,31 +109,34 @@ fn default_root_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::{Path, PathBuf}};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
-    use crate::{BackupBackend, config::read_settings};
+    use crate::{BackupBackend, StorageOverrides, config::read_settings};
 
     use super::*;
 
+    /// `from_root` with no config on disk derives data/db/repo relative to the
+    /// root (no environment consulted).
     #[test]
-    fn docvault_root_dir_overrides_default_root() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+    fn from_root_uses_root_relative_defaults_without_config() {
         let temp_dir = tempfile::tempdir().unwrap();
-        set_env("DOCVAULT_ROOT_DIR", temp_dir.path());
-        remove_env("DOCVAULT_DATA_DIR");
-        remove_env("DOCVAULT_DB_PATH");
+        let root = temp_dir.path().join("vault");
 
-        let paths = VaultPaths::from_env();
+        let paths = VaultPaths::from_root(&root);
 
-        assert_eq!(paths.root_dir, absolute(temp_dir.path()));
-        assert_eq!(paths.data_dir, absolute(temp_dir.path().join("data")));
-        assert_eq!(paths.db_path, absolute(temp_dir.path().join("db.sqlite")));
-        remove_docvault_env();
+        assert_eq!(paths.root_dir, absolute(&root));
+        assert_eq!(paths.data_dir, absolute(root.join("data")));
+        assert_eq!(paths.db_path, absolute(root.join("db.sqlite")));
+        assert_eq!(paths.repo_dir, absolute(root.join("repo")));
     }
 
+    /// `from_root` reads data/repo/db locations from the vault's `config.toml`
+    /// when present, so an existing vault keeps its configured layout.
     #[test]
-    fn config_file_paths_are_used_by_from_env() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+    fn from_root_reads_paths_from_config_file() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path().join("vault");
         let data_dir = temp_dir.path().join("configured-data");
@@ -180,25 +153,24 @@ mod tests {
             ),
         )
         .unwrap();
-        set_env("DOCVAULT_ROOT_DIR", &root);
-        remove_env("DOCVAULT_DATA_DIR");
-        remove_env("DOCVAULT_DB_PATH");
 
-        let paths = VaultPaths::from_env();
+        let paths = VaultPaths::from_root(&root);
 
         assert_eq!(paths.data_dir, absolute(data_dir));
         assert_eq!(paths.repo_dir, absolute(repo_dir));
         assert_eq!(paths.db_path, absolute(db_path));
-        remove_docvault_env();
     }
 
+    /// Explicit [`StorageOverrides`] win over the on-disk config for every
+    /// field. This is the replacement for the former `DOCVAULT_*` env-var
+    /// overrides: the same override semantics, but passed explicitly by the
+    /// caller instead of read from the process environment.
     #[test]
-    fn env_overrides_config_backend_and_restic_path() {
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
+    fn read_settings_overrides_win_over_config() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path().join("vault");
         let config_restic = temp_dir.path().join("config-restic");
-        let env_restic = temp_dir.path().join("env-restic");
+        let override_restic = temp_dir.path().join("override-restic");
         let paths = VaultPaths::new_with_repo(
             &root,
             temp_dir.path().join("data"),
@@ -217,37 +189,50 @@ mod tests {
             ),
         )
         .unwrap();
-        set_env("DOCVAULT_BACKUP_BACKEND", "local-copy");
-        set_env("DOCVAULT_RESTIC_PATH", &env_restic);
-        set_env("DOCVAULT_RESTIC_PASSWORD", "from-env");
 
-        let settings = read_settings(&paths).unwrap();
+        let overrides = StorageOverrides {
+            backend: Some(BackupBackend::LocalCopy),
+            restic_path: Some(override_restic.clone()),
+            restic_password: Some("from-override".to_owned()),
+        };
+        let settings = read_settings(&paths, &overrides).unwrap();
 
         assert_eq!(settings.backend, BackupBackend::LocalCopy);
-        assert_eq!(settings.restic_path, env_restic);
-        assert_eq!(settings.restic_password, "from-env");
-        remove_docvault_env();
+        assert_eq!(settings.restic_path, override_restic);
+        assert_eq!(settings.restic_password, "from-override");
     }
 
-    fn set_env(key: &str, value: impl AsRef<Path>) {
-        unsafe {
-            env::set_var(key, value.as_ref());
-        }
-    }
+    /// With default (all-`None`) overrides, `read_settings` reads every field
+    /// from the on-disk config - including a configured `restic_path`.
+    #[test]
+    fn read_settings_uses_config_when_overrides_absent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("vault");
+        let config_restic = temp_dir.path().join("config-restic");
+        let paths = VaultPaths::new_with_repo(
+            &root,
+            temp_dir.path().join("data"),
+            temp_dir.path().join("repo"),
+            temp_dir.path().join("db.sqlite"),
+        );
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &paths.config_path,
+            format!(
+                "[storage]\nbackend = \"restic\"\ndata_dir = \"{}\"\nrepo_dir = \"{}\"\nrestic_path = \"{}\"\nrestic_password = \"from-config\"\n\n[database]\npath = \"{}\"\n",
+                config_path(&paths.data_dir),
+                config_path(&paths.repo_dir),
+                config_path(&config_restic),
+                config_path(&paths.db_path)
+            ),
+        )
+        .unwrap();
 
-    fn remove_env(key: &str) {
-        unsafe {
-            env::remove_var(key);
-        }
-    }
+        let settings = read_settings(&paths, &StorageOverrides::default()).unwrap();
 
-    fn remove_docvault_env() {
-        remove_env("DOCVAULT_ROOT_DIR");
-        remove_env("DOCVAULT_DATA_DIR");
-        remove_env("DOCVAULT_DB_PATH");
-        remove_env("DOCVAULT_BACKUP_BACKEND");
-        remove_env("DOCVAULT_RESTIC_PATH");
-        remove_env("DOCVAULT_RESTIC_PASSWORD");
+        assert_eq!(settings.backend, BackupBackend::Restic);
+        assert_eq!(settings.restic_path, config_restic);
+        assert_eq!(settings.restic_password, "from-config");
     }
 
     fn absolute(path: impl Into<PathBuf>) -> PathBuf {

@@ -106,23 +106,21 @@ impl VaultStorage {
             return Ok(None);
         }
         let value: Value = serde_json::from_slice(&output.stdout)?;
-        Ok(value
-            .as_array()
-            .and_then(|snapshots| {
-                snapshots.iter().find_map(|snapshot| {
-                    let tags = snapshot.get("tags").and_then(Value::as_array)?;
-                    let matches = tags.iter().any(|t| t.as_str() == Some(tag));
-                    if matches {
-                        snapshot
-                            .get("short_id")
-                            .and_then(Value::as_str)
-                            .or_else(|| snapshot.get("id").and_then(Value::as_str))
-                            .map(str::to_owned)
-                    } else {
-                        None
-                    }
-                })
-            }))
+        Ok(value.as_array().and_then(|snapshots| {
+            snapshots.iter().find_map(|snapshot| {
+                let tags = snapshot.get("tags").and_then(Value::as_array)?;
+                let matches = tags.iter().any(|t| t.as_str() == Some(tag));
+                if matches {
+                    snapshot
+                        .get("short_id")
+                        .and_then(Value::as_str)
+                        .or_else(|| snapshot.get("id").and_then(Value::as_str))
+                        .map(str::to_owned)
+                } else {
+                    None
+                }
+            })
+        }))
     }
 
     pub(crate) fn restic_restore(
@@ -199,10 +197,7 @@ impl VaultStorage {
             return Err(restic_failed("stats", output.stderr));
         }
         let value: Value = serde_json::from_slice(&output.stdout)?;
-        Ok(value
-            .get("total_size")
-            .and_then(Value::as_u64)
-            .unwrap_or(0))
+        Ok(value.get("total_size").and_then(Value::as_u64).unwrap_or(0))
     }
 
     fn run_restic<const N: usize>(
@@ -379,9 +374,6 @@ mod tests {
 
     #[test]
     fn restic_backup_uses_expected_args_and_records_snapshot_id() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -417,9 +409,6 @@ mod tests {
     /// content-aware archiving this errored at the unpack step.
     #[test]
     fn restic_backup_archives_raw_binary_document() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -453,9 +442,6 @@ mod tests {
     /// reclaims the intake. This is the path recovery re-runs idempotently.
     #[test]
     fn archive_pending_version_archives_via_restic_and_records_snapshot() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -500,8 +486,11 @@ mod tests {
         assert!(log.contains("docvault:"));
 
         // Intake reclaimed after the archive is finalized.
-        let intake =
-            storage.intake_path(document.id.as_str(), &version.id, &version.original_filename);
+        let intake = storage.intake_path(
+            document.id.as_str(),
+            &version.id,
+            &version.original_filename,
+        );
         assert!(!intake.exists(), "intake reclaimed after restic archive");
     }
 
@@ -512,9 +501,6 @@ mod tests {
     /// data. This is the key guarantee that a crash at any point is safe.
     #[test]
     fn archive_pending_version_reuses_existing_snapshot_without_backup() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -544,10 +530,7 @@ mod tests {
         assert_eq!(versions[0].snapshot_id.as_deref(), Some("reuse123"));
 
         let log = fs::read_to_string(log_path).unwrap();
-        assert!(
-            log.contains("snapshots"),
-            "tag-check ran a snapshots query"
-        );
+        assert!(log.contains("snapshots"), "tag-check ran a snapshots query");
         assert!(
             !log.contains("backup"),
             "no backup ran - the existing snapshot was reused"
@@ -556,9 +539,6 @@ mod tests {
 
     #[test]
     fn restic_backup_failure_is_propagated() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -585,9 +565,6 @@ mod tests {
 
     #[test]
     fn restic_commit_reclaims_staging_package() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -620,9 +597,6 @@ mod tests {
 
     #[test]
     fn gc_staging_reclaims_leaked_backup_and_restore_dirs() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -633,8 +607,19 @@ mod tests {
         // Simulate a crash that left orphan staging behind.
         let leaked_backup = paths.staging_dir.join("backup").join("dead-doc").join("v1");
         fs::create_dir_all(leaked_backup.join("package").join("word")).unwrap();
-        fs::write(leaked_backup.join("package").join("word").join("document.xml"), b"x").unwrap();
-        let leaked_restore = paths.staging_dir.join("restore").join("dead-doc").join("v2");
+        fs::write(
+            leaked_backup
+                .join("package")
+                .join("word")
+                .join("document.xml"),
+            b"x",
+        )
+        .unwrap();
+        let leaked_restore = paths
+            .staging_dir
+            .join("restore")
+            .join("dead-doc")
+            .join("v2");
         fs::create_dir_all(leaked_restore).unwrap();
 
         storage.gc_staging();
@@ -645,9 +630,6 @@ mod tests {
 
     #[test]
     fn delete_forgets_restic_snapshots() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -685,9 +667,6 @@ mod tests {
 
     #[test]
     fn restic_version_cached_once_per_session() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -712,9 +691,6 @@ mod tests {
     /// the child is killed and `ResticError::Cancelled` propagates.
     #[test]
     fn restic_command_respects_cancellation() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");
@@ -744,9 +720,6 @@ mod tests {
     /// rather than blocking forever.
     #[test]
     fn restic_command_times_out() {
-        // read_settings honors DOCVAULT_* env overrides; hold the shared env
-        // lock so an env-polluting test can't flip this test's backend mid-run.
-        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp_dir.path());
         let log_path = temp_dir.path().join("restic.log");

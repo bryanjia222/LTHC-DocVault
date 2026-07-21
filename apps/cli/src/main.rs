@@ -1,9 +1,11 @@
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode};
 
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use docvault_core::DocVault;
-use docvault_storage::{DocumentRef, VaultPaths, VaultStorage};
+use docvault_storage::{
+    DocumentRef, StorageOverrides, VaultPaths, VaultStorage, write_initial_config,
+};
 use docvault_types::CommitMetadata;
 use serde_json::json;
 use tracing::error;
@@ -13,13 +15,53 @@ use tracing_subscriber::filter::LevelFilter;
 #[command(name = "docvault")]
 #[command(about = "Local-first Office document version vault")]
 struct Cli {
+    #[command(flatten)]
+    global: GlobalArgs,
     #[command(subcommand)]
     command: Command,
 }
 
+/// Options that apply to every subcommand. Configuration comes from the vault's
+/// `config.toml` plus these explicit flags - never from `DOCVAULT_*` environment
+/// variables (those were dropped to avoid silent, easily-overlooked overrides).
+#[derive(Debug, Args)]
+struct GlobalArgs {
+    /// Vault root directory (defaults to ~/.DocVault).
+    #[arg(long, value_name = "ROOT_DIR")]
+    root_dir: Option<PathBuf>,
+    /// Path to the restic binary. Overrides config `restic_path` and the bundled
+    /// binary / PATH auto-discovery.
+    #[arg(long, value_name = "RESTIC_PATH")]
+    restic_path: Option<PathBuf>,
+    /// Log level: error, warn, info, debug, trace.
+    #[arg(long, value_name = "LOG_LEVEL", default_value = "warn")]
+    log_level: String,
+}
+
+impl GlobalArgs {
+    /// The vault root: the explicit `--root-dir`, or the platform default
+    /// (`~/.DocVault`) when unset.
+    fn root(&self) -> PathBuf {
+        self.root_dir
+            .clone()
+            .unwrap_or_else(VaultPaths::default_root)
+    }
+
+    /// Overrides applied on top of `config.toml` when opening/initializing. Only
+    /// `restic_path` is overridden (from `--restic-path`); backend and password
+    /// always come from the config file.
+    fn overrides(&self) -> StorageOverrides {
+        StorageOverrides {
+            backend: None,
+            restic_path: self.restic_path.clone(),
+            restic_password: None,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
-    Init,
+    Init(InitArgs),
     Commit(CommitArgs),
     List(FormatArgs),
     Versions(DocumentFormatArgs),
@@ -30,6 +72,17 @@ enum Command {
     },
     Export(VersionOutputArgs),
     Checkout(CheckoutArgs),
+}
+
+#[derive(Debug, Args)]
+struct InitArgs {
+    /// Backup backend to initialize the vault with (`local-copy` needs no
+    /// external binary; `restic` requires --restic-password).
+    #[arg(long, default_value = "local-copy")]
+    backend: String,
+    /// Restic repository password (required when --backend restic).
+    #[arg(long)]
+    restic_password: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -107,8 +160,9 @@ enum OutputFormat {
 }
 
 fn main() -> ExitCode {
-    init_tracing();
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    init_tracing(&cli.global.log_level);
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             error!(%error, "docvault command failed");
@@ -118,11 +172,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn init_tracing() {
-    let level = env::var("DOCVAULT_LOG_LEVEL")
-        .ok()
-        .and_then(|value| value.parse::<LevelFilter>().ok())
-        .unwrap_or(LevelFilter::WARN);
+fn init_tracing(level: &str) {
+    let level = level.parse::<LevelFilter>().unwrap_or(LevelFilter::WARN);
     tracing_subscriber::fmt()
         .with_max_level(level)
         .with_writer(std::io::stderr)
@@ -132,21 +183,27 @@ fn init_tracing() {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Init => init_vault(),
-        Command::Commit(args) => commit_document(args),
-        Command::List(args) => list_documents(args.format),
-        Command::Versions(args) => list_versions(args),
-        Command::Current(args) => show_current(args),
+        Command::Init(args) => init_vault(&cli.global, &args),
+        Command::Commit(args) => commit_document(&cli.global, args),
+        Command::List(args) => list_documents(&cli.global, args.format),
+        Command::Versions(args) => list_versions(&cli.global, args),
+        Command::Current(args) => show_current(&cli.global, args),
         Command::Config { command } => match command {
-            ConfigCommand::Show(args) => show_config(args.format),
+            ConfigCommand::Show(args) => show_config(&cli.global, args.format),
         },
-        Command::Export(args) => export_version(args),
-        Command::Checkout(args) => checkout_version(args),
+        Command::Export(args) => export_version(&cli.global, args),
+        Command::Checkout(args) => checkout_version(&cli.global, args),
     }
 }
 
-fn init_vault() -> Result<()> {
-    let storage = VaultStorage::init(VaultPaths::from_env())?;
+fn init_vault(global: &GlobalArgs, args: &InitArgs) -> Result<()> {
+    let paths = VaultPaths::from_root(global.root());
+    // Write the chosen backend (and restic password) into config.toml before
+    // init, so the vault persists the user's choice; restic_path is NOT
+    // persisted (it is install-specific) - it comes from --restic-path or
+    // auto-discovery at open time.
+    write_initial_config(&paths, &args.backend, args.restic_password.as_deref())?;
+    let storage = VaultStorage::init_with_overrides(paths, &global.overrides())?;
     println!(
         "DocVault initialized at {}",
         storage.paths().root_dir.display()
@@ -159,13 +216,16 @@ fn init_vault() -> Result<()> {
     Ok(())
 }
 
-fn commit_document(args: CommitArgs) -> Result<()> {
+fn commit_document(global: &GlobalArgs, args: CommitArgs) -> Result<()> {
     let document_ref = args.document_ref()?;
     let metadata = CommitMetadata {
         author: args.author,
         note: args.note,
     };
-    let storage = VaultStorage::init(VaultPaths::from_env())?;
+    let storage = VaultStorage::init_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let (_, version) = vault.commit_document(
         &args.path,
@@ -181,8 +241,11 @@ fn commit_document(args: CommitArgs) -> Result<()> {
     Ok(())
 }
 
-fn list_documents(format: OutputFormat) -> Result<()> {
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+fn list_documents(global: &GlobalArgs, format: OutputFormat) -> Result<()> {
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let documents = vault.list_documents()?;
     match format {
@@ -222,9 +285,12 @@ fn list_documents(format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-fn list_versions(args: DocumentFormatArgs) -> Result<()> {
+fn list_versions(global: &GlobalArgs, args: DocumentFormatArgs) -> Result<()> {
     let document_ref = args.document.document_ref()?;
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let versions = vault.list_versions(&document_ref)?;
     match args.format.format {
@@ -243,9 +309,12 @@ fn list_versions(args: DocumentFormatArgs) -> Result<()> {
     Ok(())
 }
 
-fn show_current(args: DocumentFormatArgs) -> Result<()> {
+fn show_current(global: &GlobalArgs, args: DocumentFormatArgs) -> Result<()> {
     let document_ref = args.document.document_ref()?;
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let current = vault.current_version(&document_ref)?;
     match (args.format.format, current) {
@@ -262,8 +331,11 @@ fn show_current(args: DocumentFormatArgs) -> Result<()> {
     Ok(())
 }
 
-fn show_config(format: OutputFormat) -> Result<()> {
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+fn show_config(global: &GlobalArgs, format: OutputFormat) -> Result<()> {
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let paths = storage.paths();
     match format {
         OutputFormat::Table => {
@@ -304,10 +376,13 @@ fn show_config(format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-fn export_version(args: VersionOutputArgs) -> Result<()> {
+fn export_version(global: &GlobalArgs, args: VersionOutputArgs) -> Result<()> {
     let document_ref = args.document.document_ref()?;
     let requested_version = requested_version(args.version, args.version_id);
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let exported = vault.export_version(
         &document_ref,
@@ -319,10 +394,13 @@ fn export_version(args: VersionOutputArgs) -> Result<()> {
     Ok(())
 }
 
-fn checkout_version(args: CheckoutArgs) -> Result<()> {
+fn checkout_version(global: &GlobalArgs, args: CheckoutArgs) -> Result<()> {
     let document_ref = args.document.document_ref()?;
     let requested_version = requested_version(args.version, args.version_id);
-    let storage = VaultStorage::open(VaultPaths::from_env())?;
+    let storage = VaultStorage::open_with_overrides(
+        VaultPaths::from_root(global.root()),
+        &global.overrides(),
+    )?;
     let vault = DocVault::new(storage);
     let exported = vault.checkout_version(
         &document_ref,

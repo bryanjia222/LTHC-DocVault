@@ -206,9 +206,10 @@ fn json_format_outputs_parseable_json() {
 
 fn docvault(root: &Path) -> Command {
     let mut command = Command::cargo_bin("docvault").unwrap();
-    command
-        .env("DOCVAULT_ROOT_DIR", root)
-        .env("DOCVAULT_BACKUP_BACKEND", "local-copy");
+    // Config comes from the vault's config.toml + explicit flags (no env vars).
+    // --root-dir points the CLI at the test vault; the default backend is
+    // local-copy, so no restic binary is needed.
+    command.args(["--root-dir", root.to_str().unwrap()]);
     command
 }
 

@@ -8,8 +8,7 @@ use docvault_types::{Document, Version};
 use tracing::{debug, info, warn};
 
 use crate::{
-    BackupBackend, ResticError, StorageError, StorageResult, VaultStorage,
-    ARCHIVE_STATUS_PENDING,
+    ARCHIVE_STATUS_PENDING, BackupBackend, ResticError, StorageError, StorageResult, VaultStorage,
 };
 
 #[derive(Debug, Clone)]
@@ -28,8 +27,12 @@ impl VaultStorage {
         cancel: &AtomicBool,
     ) -> StorageResult<ArchiveReference> {
         match self.settings.backend {
-            BackupBackend::LocalCopy => self.archive_local_copy(document_id, version_id, source_path),
-            BackupBackend::Restic => self.archive_restic(document_id, version_id, source_path, cancel),
+            BackupBackend::LocalCopy => {
+                self.archive_local_copy(document_id, version_id, source_path)
+            }
+            BackupBackend::Restic => {
+                self.archive_restic(document_id, version_id, source_path, cancel)
+            }
         }
     }
 
@@ -48,11 +51,7 @@ impl VaultStorage {
         let source_name = source_path
             .file_name()
             .ok_or_else(|| StorageError::InvalidFileName(source_path.to_path_buf()))?;
-        let version_dir = self
-            .paths
-            .versions_dir
-            .join(document_id)
-            .join(version_id);
+        let version_dir = self.paths.versions_dir.join(document_id).join(version_id);
         fs::create_dir_all(&version_dir)?;
         let archive_path = version_dir.join(source_name);
         fs::copy(source_path, &archive_path)?;
@@ -91,7 +90,9 @@ impl VaultStorage {
         if let Some(existing) = self.restic_snapshot_id_for_tag(&tag, cancel)? {
             info!(
                 document_id,
-                version_id, snapshot_id = existing.as_str(), "restic snapshot already exists for version; reusing"
+                version_id,
+                snapshot_id = existing.as_str(),
+                "restic snapshot already exists for version; reusing"
             );
             return Ok(ArchiveReference {
                 backend: BackupBackend::Restic,
@@ -211,7 +212,11 @@ impl VaultStorage {
         self.restic_restore(snapshot_id, &restore_root, cancel)?;
 
         let restored_package = restore_root.join("package");
-        Self::materialize_restored_package(&restored_package, &version.original_filename, destination)?;
+        Self::materialize_restored_package(
+            &restored_package,
+            &version.original_filename,
+            destination,
+        )?;
         // The restored package was only needed to re-zip into the destination;
         // drop it so staging doesn't leak across exports/checkouts.
         clean_dir_best_effort(&restore_root);
@@ -295,21 +300,20 @@ impl VaultStorage {
 
     /// Phase B of the async commit: archive a `pending` version from its
     /// durable intake copy, then finalize the DB row (`archive_reference` +
-    /// `snapshot_id`, status -> `archived`) and reclaim the intake. Idempotent
-    /// - restic reuses an existing snapshot for the tag, and the local-copy
-    /// copy overwrites - so re-running after a crash never duplicates work.
-    /// The intake copy is the source of truth until the archive is finalized;
-    /// it is deleted only after the DB row is flipped to `archived`, so a crash
-    /// between archiving and the DB update leaves the intake in place for the
-    /// next recovery.
+    /// `snapshot_id`, status -> `archived`) and reclaim the intake. It is
+    /// idempotent: restic reuses an existing snapshot for the tag, and the
+    /// local-copy copy overwrites, so re-running after a crash never duplicates
+    /// work. The intake copy is the source of truth until the archive is
+    /// finalized; it is deleted only after the DB row is flipped to `archived`,
+    /// so a crash between archiving and the DB update leaves the intake in
+    /// place for the next recovery.
     pub fn archive_pending_version(
         &self,
         version: &Version,
         cancel: &AtomicBool,
     ) -> StorageResult<()> {
         let document_id = version.document_id.as_str();
-        let intake =
-            self.intake_path(document_id, &version.id, &version.original_filename);
+        let intake = self.intake_path(document_id, &version.id, &version.original_filename);
         if !intake.exists() {
             return Err(StorageError::IntakeMissing {
                 document_id: document_id.to_owned(),
@@ -369,14 +373,12 @@ impl VaultStorage {
                 let still_pending = self
                     .is_version_pending(&doc_id, &version_id)
                     .unwrap_or(false);
-                if !still_pending {
-                    if let Err(error) = fs::remove_dir_all(version_dir.path()) {
-                        warn!(
-                            path = %version_dir.path().display(),
-                            error = %error,
-                            "failed to remove orphan intake directory"
-                        );
-                    }
+                if !still_pending && let Err(error) = fs::remove_dir_all(version_dir.path()) {
+                    warn!(
+                        path = %version_dir.path().display(),
+                        error = %error,
+                        "failed to remove orphan intake directory"
+                    );
                 }
             }
             // Drop the per-document intake dir once it is empty.

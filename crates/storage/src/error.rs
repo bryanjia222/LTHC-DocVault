@@ -60,6 +60,12 @@ pub enum StorageError {
     InvalidFileName(PathBuf),
     #[error("invalid backup backend: {0}")]
     InvalidBackend(String),
+    /// The restic backend was selected but no password was supplied. Restic
+    /// requires a repository password; `write_initial_config` rejects an empty
+    /// one so the failure surfaces at config time rather than as a cryptic
+    /// restic error later.
+    #[error("restic backend requires a non-empty restic_password")]
+    ResticPasswordRequired,
     /// A `pending` version row exists but its durable intake copy is gone, so
     /// the archive cannot be (re)completed. This violates the WAL invariant
     /// (intake fsynced before the DB row) and should be unreachable unless the

@@ -12,33 +12,14 @@ use std::path::{Path, PathBuf};
 use state::AppState;
 use tauri::Manager;
 
-/// `DOCVAULT_*` environment variables that the storage layer lets override the
-/// on-disk `config.toml`. The desktop app clears them at startup so the config
-/// file (and the user's Settings choices) is the single source of truth - stale
-/// vars from a dev shell would otherwise silently force restic mode. The CLI
-/// binary is separate and keeps env support.
-const DOCVAULT_ENV_VARS: &[&str] = &[
-    "DOCVAULT_ROOT_DIR",
-    "DOCVAULT_DATA_DIR",
-    "DOCVAULT_DB_PATH",
-    "DOCVAULT_BACKUP_BACKEND",
-    "DOCVAULT_RESTIC_PATH",
-    "DOCVAULT_RESTIC_PASSWORD",
-];
-
-fn clear_docvault_env() {
-    for key in DOCVAULT_ENV_VARS {
-        std::env::remove_var(key);
-    }
-}
-
 /// Resolve the bundled restic binary: the packaged Tauri resource in a built
 /// app, falling back to the `third_party` asset at its repo-relative location in
 /// a dev build. Returns `None` when neither is present (the storage layer then
-/// falls back to the system PATH). The storage layer reads `DOCVAULT_RESTIC_PATH`
-/// ahead of `config.toml`, so setting this env var at startup makes every vault
-/// connection use the bundled binary regardless of where the vault lives -
-/// fixing dev with a non-repo vault and packaged installs with no system restic.
+/// falls back to the system PATH). The result is stashed in [`AppState`] at
+/// startup and injected into every vault open/init as an explicit
+/// [`docvault_storage::StorageOverrides`] `restic_path` - so the bundled binary
+/// is used regardless of where the vault lives, replacing the former
+/// `DOCVAULT_RESTIC_PATH` env var.
 fn bundled_restic_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::path::BaseDirectory;
     let resource = format!("resources/{}", restic_binary_name());
@@ -93,7 +74,6 @@ fn dev_restic_asset() -> Option<PathBuf> {
 }
 
 pub fn run() {
-    clear_docvault_env();
     tauri::Builder::default()
         // Registered first so a second launch focuses the existing main window
         // instead of starting a duplicate instance. Must precede all other
@@ -108,13 +88,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
-            // Point the storage layer at the bundled restic binary before any
-            // vault is opened. Cleared above by `clear_docvault_env`, so this is
-            // the only source. `None` -> storage falls back to its own
-            // auto-discovery (exe dir / third_party beside the vault / PATH).
-            if let Some(path) = bundled_restic_path(app.handle()) {
-                std::env::set_var("DOCVAULT_RESTIC_PATH", &path);
-            }
+            // Resolve the bundled restic binary once and stash it in app state;
+            // every vault open/init injects it as an explicit override. `None`
+            // -> the storage layer falls back to its own auto-discovery (exe dir
+            // / third_party beside the vault / PATH).
+            let restic_path = bundled_restic_path(app.handle());
+            *app.state::<AppState>().inner().restic_path.lock().unwrap() = restic_path;
             state::open_if_initialized(app.handle(), app.state::<AppState>().inner());
             Ok(())
         })
@@ -156,7 +135,11 @@ mod tests {
     fn restic_binary_name_matches_platform() {
         assert_eq!(
             restic_binary_name(),
-            if cfg!(windows) { "restic.exe" } else { "restic" }
+            if cfg!(windows) {
+                "restic.exe"
+            } else {
+                "restic"
+            }
         );
     }
 
@@ -189,8 +172,10 @@ mod tests {
         if let Some(path) = dev_restic_asset() {
             let triple = host_target_triple()
                 .expect("host_target_triple must be Some when dev_restic_asset is Some");
-            let expected =
-                format!("third_party/restic/0.19.1/{triple}/{}", restic_binary_name());
+            let expected = format!(
+                "third_party/restic/0.19.1/{triple}/{}",
+                restic_binary_name()
+            );
             assert!(path.ends_with(&expected), "unexpected path: {path:?}");
             assert!(path.exists(), "asset should exist: {path:?}");
         }

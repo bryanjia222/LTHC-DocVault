@@ -516,15 +516,18 @@ The system runs in:
 
 ---
 
-## 5.2 Required Environment Variables
+## 5.2 Configuration Sources
 
-```text
-DOCVAULT_DATA_DIR
-DOCVAULT_DB_PATH
-DOCVAULT_LOG_LEVEL
-```
+The vault reads configuration only from:
 
-Defaults are loaded from config.toml.
+* the on-disk `config.toml` (written at `init`), and
+* explicit parameters supplied by the caller (CLI flags such as
+  `--root-dir` / `--restic-path`, or the desktop's in-process
+  bundled-restic path).
+
+No `DOCVAULT_*` environment variables are read. The process environment
+is not a configuration channel; this avoids silent, easily-overlooked
+overrides.
 
 ---
 
@@ -552,8 +555,8 @@ Rules:
 
 Lookup order:
 
-1. configured restic_path
-2. DOCVAULT_RESTIC_PATH
+1. explicit parameter (CLI `--restic-path`, or the desktop's bundled-restic injection)
+2. configured `restic_path` in config.toml
 3. packaged application sidecar
 4. third_party/restic asset
 5. system PATH
