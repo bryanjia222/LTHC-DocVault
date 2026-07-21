@@ -139,21 +139,15 @@ fn default_root_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        env, fs,
-        path::{Path, PathBuf},
-        sync::Mutex,
-    };
+    use std::{env, fs, path::{Path, PathBuf}};
 
     use crate::{BackupBackend, config::read_settings};
 
     use super::*;
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     #[test]
     fn docvault_root_dir_overrides_default_root() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         set_env("DOCVAULT_ROOT_DIR", temp_dir.path());
         remove_env("DOCVAULT_DATA_DIR");
@@ -169,7 +163,7 @@ mod tests {
 
     #[test]
     fn config_file_paths_are_used_by_from_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path().join("vault");
         let data_dir = temp_dir.path().join("configured-data");
@@ -200,7 +194,7 @@ mod tests {
 
     #[test]
     fn env_overrides_config_backend_and_restic_path() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::test_support::ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path().join("vault");
         let config_restic = temp_dir.path().join("config-restic");

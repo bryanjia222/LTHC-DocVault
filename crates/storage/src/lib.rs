@@ -5,6 +5,22 @@ mod paths;
 mod restic;
 mod sqlite;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    //! Test-only helpers shared across the crate's test modules.
+    use std::sync::Mutex;
+
+    /// Serializes tests that pollute process-global `DOCVAULT_*` env vars with
+    /// tests that read config. [`crate::config::read_settings`] honors env
+    /// overrides, so a test that sets `DOCVAULT_BACKUP_BACKEND` (etc.) can flip
+    /// another test's backend mid-run when tests execute in parallel. Any test
+    /// that reads config (directly or via `VaultStorage::init`) acquires this
+    /// lock so it never observes another test's transient env pollution, and
+    /// the env-polluting tests in `paths` acquire it so they don't clobber a
+    /// concurrent reader.
+    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
+}
+
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -291,7 +307,7 @@ impl VaultStorage {
 
         let number = self.next_version_number(document.id.as_str())?;
         let version_id = format!("v{number}");
-        let manifest = docvault_ooxml::package_manifest(source_path)?;
+        let manifest = docvault_ooxml::manifest_for(source_path)?;
         let original_filename = source_path
             .file_name()
             .and_then(|value| value.to_str())
@@ -491,7 +507,7 @@ impl VaultStorage {
             version_id = version_id.as_str(),
             "archiving source for document version"
         );
-        let manifest = docvault_ooxml::package_manifest(source_path)?;
+        let manifest = docvault_ooxml::manifest_for(source_path)?;
         let archive = self.archive_source(document.id.as_str(), &version_id, source_path, cancel)?;
         let original_filename = source_path
             .file_name()
@@ -1182,5 +1198,73 @@ mod tests {
         // orphans; B's intake must survive.
         storage.gc_intake();
         assert!(intake_b.exists(), "gc_intake preserves pending version intake");
+    }
+
+    #[test]
+    fn commits_and_exports_raw_binary_with_local_copy() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = paths.root_dir.join("notes.txt");
+        fs::write(&source, b"plain text, not Office").unwrap();
+
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+        let (_, version) = storage
+            .add_document_version(
+                DocumentRef::Name("notes".to_owned()),
+                &source,
+                CommitMetadata::default(),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+
+        // Non-OOXML: a single-entry whole-file manifest (not per-package-part).
+        assert_eq!(version.manifest.entries.len(), 1);
+        assert_eq!(version.manifest.entries[0].path, "notes.txt");
+        assert_eq!(
+            version.manifest.entries[0].size,
+            b"plain text, not Office".len() as u64
+        );
+
+        // Bytes round-trip unchanged through the local-copy backend.
+        let restored = storage
+            .export_version(
+                &DocumentRef::Name("notes".to_owned()),
+                "latest",
+                &paths.root_dir.join("restored"),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+        assert_eq!(fs::read(&restored).unwrap(), b"plain text, not Office");
+    }
+
+    #[test]
+    fn ooxml_kingsoft_wps_archived_like_office() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        // A `.wps` that is really an OOXML package (Kingsoft saving as docx):
+        // content, not extension, decides it archives like Office.
+        let source = write_source(&paths.root_dir, "kingsoft.wps", b"wps-as-docx");
+        let storage = VaultStorage::init(paths.clone()).unwrap();
+        let (_, version) = storage
+            .add_document_version(
+                DocumentRef::Name("kingsoft".to_owned()),
+                &source,
+                CommitMetadata::default(),
+                &NEVER_CANCELLED,
+            )
+            .unwrap();
+
+        // OOXML -> per-entry package manifest (not a single whole-file entry).
+        assert!(
+            version
+                .manifest
+                .entries
+                .iter()
+                .any(|entry| entry.path == "word/document.xml"),
+            "OOXML .wps gets a per-part manifest, archived like Office"
+        );
+        assert_eq!(version.original_filename, "kingsoft.wps");
     }
 }

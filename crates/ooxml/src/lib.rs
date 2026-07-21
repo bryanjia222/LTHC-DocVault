@@ -36,6 +36,33 @@ pub fn is_supported_ooxml(path: impl AsRef<Path>) -> bool {
         .unwrap_or(false)
 }
 
+/// Content-based OOXML detection: true when `path` is a ZIP archive containing
+/// a `[Content_Types].xml` entry (the OOXML package marker). Unlike
+/// [`is_supported_ooxml`], this looks at the file's bytes rather than its
+/// extension, so a Kingsoft `.wps`/`.et`/`.dps` that is really an OOXML
+/// package (WPS can save in the OOXML format) is recognized as such, while a
+/// legacy Kingsoft-binary or any non-ZIP file is not. Returns `false` for a
+/// missing file or a non-ZIP file rather than erroring, so it can drive a
+/// simple unpack-vs-raw-copy branch at archive time.
+pub fn is_ooxml_package(path: impl AsRef<Path>) -> bool {
+    let path = path.as_ref();
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let Ok(mut archive) = ZipArchive::new(file) else {
+        return false;
+    };
+    for index in 0..archive.len() {
+        let Ok(entry) = archive.by_index(index) else {
+            continue;
+        };
+        if entry.name() == "[Content_Types].xml" {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn unpack_package(
     source_path: impl AsRef<Path>,
     destination_dir: impl AsRef<Path>,
@@ -126,6 +153,45 @@ pub fn package_manifest(source_path: impl AsRef<Path>) -> OoxmlResult<OoxmlManif
     Ok(OoxmlManifest { entries })
 }
 
+/// Single-entry manifest for a non-OOXML file (pdf, md, txt, a legacy
+/// Kingsoft-binary `.wps`/`.et`/`.dps`, ...): the whole file is one logical
+/// "part" with its size and sha256. Mirrors the per-entry shape of
+/// [`package_manifest`] so the rest of the pipeline (which stores a manifest on
+/// every version) works uniformly for OOXML and raw-binary documents.
+pub fn file_manifest(path: impl AsRef<Path>) -> OoxmlResult<OoxmlManifest> {
+    let path = path.as_ref();
+    info!(source = %path.display(), "generating single-file manifest for non-OOXML document");
+    let basename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document")
+        .to_owned();
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let size = io::copy(&mut file, &mut hasher)?;
+    Ok(OoxmlManifest {
+        entries: vec![OoxmlManifestEntry {
+            path: basename,
+            size,
+            sha256: format!("{:x}", hasher.finalize()),
+            content_type: None,
+        }],
+    })
+}
+
+/// Content-aware manifest: the per-entry package manifest for an OOXML file,
+/// or a single-entry whole-file manifest for anything else. Use this at commit
+/// time so manifest computation never fails merely because the source is not an
+/// OOXML package.
+pub fn manifest_for(path: impl AsRef<Path>) -> OoxmlResult<OoxmlManifest> {
+    let path = path.as_ref();
+    if is_ooxml_package(path) {
+        package_manifest(path)
+    } else {
+        file_manifest(path)
+    }
+}
+
 fn add_directory_to_zip<W: Write + Seek>(
     base_dir: &Path,
     current_dir: &Path,
@@ -208,6 +274,73 @@ mod tests {
         assert!(is_supported_ooxml("sheet.XLSX"));
         assert!(is_supported_ooxml("deck.pptx"));
         assert!(!is_supported_ooxml("notes.txt"));
+    }
+
+    #[test]
+    fn is_ooxml_package_reads_content_not_extension() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // A real OOXML package: detected regardless of extension (a .wps that
+        // is really OOXML must be recognized so it archives like Office).
+        let source = root.join("source");
+        fs::create_dir_all(source.join("word")).unwrap();
+        fs::write(source.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(source.join("word").join("document.xml"), b"doc").unwrap();
+        let ooxml_as_wps = root.join("kingsoft.wps");
+        pack_package(&source, &ooxml_as_wps).unwrap();
+        assert!(is_ooxml_package(&ooxml_as_wps));
+
+        // A plain non-ZIP file and a missing path are not OOXML.
+        let txt = root.join("notes.txt");
+        fs::write(&txt, b"not a zip").unwrap();
+        assert!(!is_ooxml_package(&txt));
+        assert!(!is_ooxml_package(root.join("missing")));
+
+        // A ZIP without [Content_Types].xml is not an OOXML package.
+        let bare_zip = root.join("bare.zip");
+        write_zip_entry(&bare_zip, "readme.txt", b"hello");
+        assert!(!is_ooxml_package(&bare_zip));
+    }
+
+    #[test]
+    fn file_manifest_hashes_whole_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("notes.txt");
+        fs::write(&path, b"hello world").unwrap();
+
+        let manifest = file_manifest(&path).unwrap();
+        assert_eq!(manifest.entries.len(), 1);
+        let entry = &manifest.entries[0];
+        assert_eq!(entry.path, "notes.txt");
+        assert_eq!(entry.size, "hello world".len() as u64);
+        assert_eq!(entry.sha256.len(), 64);
+    }
+
+    #[test]
+    fn manifest_for_dispatches_by_content() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // OOXML -> per-entry package manifest.
+        let source = root.join("source");
+        fs::create_dir_all(source.join("word")).unwrap();
+        fs::write(source.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(source.join("word").join("document.xml"), b"doc").unwrap();
+        let docx = root.join("report.docx");
+        pack_package(&source, &docx).unwrap();
+        let ooxml_manifest = manifest_for(&docx).unwrap();
+        assert!(
+            ooxml_manifest.entries.iter().any(|e| e.path == "word/document.xml"),
+            "OOXML manifest lists package parts"
+        );
+
+        // Non-OOXML -> single-entry whole-file manifest.
+        let txt = root.join("notes.txt");
+        fs::write(&txt, b"plain text").unwrap();
+        let raw_manifest = manifest_for(&txt).unwrap();
+        assert_eq!(raw_manifest.entries.len(), 1);
+        assert_eq!(raw_manifest.entries[0].path, "notes.txt");
     }
 
     #[test]

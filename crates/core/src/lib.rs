@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use docvault_storage::{DocumentRef, StorageError, StorageResult, VaultStorage};
 use docvault_types::{CommitMetadata, Document, DocumentId, Version};
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -44,10 +44,6 @@ impl DocVault {
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
         info!(path = %source_path.display(), "starting document commit");
-        if !docvault_ooxml::is_supported_ooxml(source_path) {
-            error!(path = %source_path.display(), "unsupported Office document");
-            return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
-        }
 
         let result =
             self.storage
@@ -60,12 +56,13 @@ impl DocVault {
         Ok(result)
     }
 
-    /// Phase A of the async commit: validate the source is a supported Office
-    /// document, write a durable intake copy, and atomically insert the version
-    /// row as `pending` + repoint the current-version pointer. Returns the new
-    /// document + version so the caller can materialize the library copy and
-    /// spawn the Phase B archive ([`Self::archive_pending_version`]). No archive
-    /// work happens here, so this is fast and synchronous.
+    /// Phase A of the async commit: write a durable intake copy of the source
+    /// (any document the picker admits — OOXML or raw binary — is accepted here),
+    /// and atomically insert the version row as `pending` + repoint the
+    /// current-version pointer. Returns the new document + version so the caller
+    /// can materialize the library copy and spawn the Phase B archive
+    /// ([`Self::archive_pending_version`]). No archive work happens here, so this
+    /// is fast and synchronous.
     pub fn begin_commit(
         &self,
         source_path: impl AsRef<Path>,
@@ -74,10 +71,6 @@ impl DocVault {
     ) -> CoreResult<(Document, Version)> {
         let source_path = source_path.as_ref();
         info!(path = %source_path.display(), "starting document commit (phase A)");
-        if !docvault_ooxml::is_supported_ooxml(source_path) {
-            error!(path = %source_path.display(), "unsupported Office document");
-            return Err(CoreError::UnsupportedDocument(source_path.to_path_buf()));
-        }
         let result = self
             .storage
             .begin_commit(document_ref, source_path, metadata)?;
@@ -217,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_documents() {
+    fn commits_raw_binary_documents() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();
         let paths =
@@ -236,15 +229,33 @@ mod tests {
         let storage = VaultStorage::init(paths).unwrap();
         let vault = DocVault::new(storage);
 
-        let error = vault
+        // A plain text file is not an OOXML package: it must commit as raw
+        // binary (no Office-only rejection) and round-trip byte-for-byte.
+        let source = root.join("notes.txt");
+        std::fs::write(&source, b"plain text, not Office").unwrap();
+
+        let (document, version) = vault
             .commit_document(
-                "notes.txt",
+                &source,
                 DocumentRef::Name("notes".to_owned()),
                 CommitMetadata::default(),
                 &docvault_storage::NEVER_CANCELLED,
             )
-            .expect_err("txt files should be rejected");
+            .expect("non-Office files should commit as raw binary");
 
-        assert!(matches!(error, CoreError::UnsupportedDocument(_)));
+        let restored = root.join("restored.txt");
+        vault
+            .export_version(
+                &DocumentRef::Name("notes".to_owned()),
+                version.id.as_str(),
+                &restored,
+                &docvault_storage::NEVER_CANCELLED,
+            )
+            .expect("export should succeed");
+        assert_eq!(
+            std::fs::read(&restored).unwrap(),
+            b"plain text, not Office"
+        );
+        assert_eq!(document.current_version_id, Some(version.id));
     }
 }

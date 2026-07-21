@@ -101,7 +101,20 @@ impl VaultStorage {
         }
         let package_dir = self.restic_package_dir(document_id, version_id);
         reset_dir(&package_dir)?;
-        docvault_ooxml::unpack_package(source_path, &package_dir)?;
+        if docvault_ooxml::is_ooxml_package(source_path) {
+            docvault_ooxml::unpack_package(source_path, &package_dir)?;
+        } else {
+            // Non-OOXML file (pdf, md, txt, a legacy Kingsoft `.wps`/`.et`/`.dps`
+            // binary, ...): store the whole file verbatim as the lone entry under
+            // the package dir so restic captures it exactly as it captures an
+            // unzipped Office package. Restore detects this via the absence of
+            // `[Content_Types].xml` and copies the file back out instead of
+            // re-zipping.
+            let source_name = source_path
+                .file_name()
+                .ok_or_else(|| StorageError::InvalidFileName(source_path.to_path_buf()))?;
+            fs::copy(source_path, package_dir.join(source_name))?;
+        }
 
         let snapshot_id = self.restic_backup(document_id, version_id, &package_dir, cancel)?;
         // The unzipped package existed only so restic could capture it. Drop it
@@ -198,7 +211,7 @@ impl VaultStorage {
         self.restic_restore(snapshot_id, &restore_root, cancel)?;
 
         let restored_package = restore_root.join("package");
-        docvault_ooxml::pack_package(restored_package, destination)?;
+        Self::materialize_restored_package(&restored_package, &version.original_filename, destination)?;
         // The restored package was only needed to re-zip into the destination;
         // drop it so staging doesn't leak across exports/checkouts.
         clean_dir_best_effort(&restore_root);
@@ -212,6 +225,26 @@ impl VaultStorage {
             .join(document_id)
             .join(version_id)
             .join("package")
+    }
+
+    /// Turn a restic-restored `package` directory back into a single destination
+    /// file. An OOXML archive was stored unzipped (its parts, including
+    /// `[Content_Types].xml`, are the dir's contents) and is re-zipped; a
+    /// raw-binary archive was stored verbatim as one file and is copied straight
+    /// out. The presence of `[Content_Types].xml` is the content-based signal
+    /// (no DB schema change needed) that distinguishes the two.
+    pub(crate) fn materialize_restored_package(
+        restored_package: &Path,
+        original_filename: &str,
+        destination: &Path,
+    ) -> StorageResult<()> {
+        if restored_package.join("[Content_Types].xml").exists() {
+            docvault_ooxml::pack_package(restored_package, destination)?;
+        } else {
+            let restored_file = restored_package.join(original_filename);
+            fs::copy(&restored_file, destination)?;
+        }
+        Ok(())
     }
 
     /// Reclaim orphan staging left behind by crashed or interrupted
@@ -377,6 +410,48 @@ fn clean_dir_best_effort(path: &Path) {
             path = %path.display(),
             error = %error,
             "failed to clean up staging directory"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn materialize_restored_package_copies_raw_binary_verbatim() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        // A restic-restored raw-binary "package" dir: the single committed file
+        // stored verbatim, no [Content_Types].xml.
+        let restored_package = root.join("package");
+        fs::create_dir_all(&restored_package).unwrap();
+        fs::write(restored_package.join("notes.txt"), b"raw bytes").unwrap();
+
+        let destination = root.join("out").join("notes.txt");
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        VaultStorage::materialize_restored_package(&restored_package, "notes.txt", &destination)
+            .unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"raw bytes");
+    }
+
+    #[test]
+    fn materialize_restored_package_rezips_ooxml_package() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        // A restic-restored OOXML package dir: unzipped parts including
+        // [Content_Types].xml at the root.
+        let restored_package = root.join("package");
+        fs::create_dir_all(restored_package.join("word")).unwrap();
+        fs::write(restored_package.join("[Content_Types].xml"), b"types").unwrap();
+        fs::write(restored_package.join("word").join("document.xml"), b"doc").unwrap();
+
+        let destination = root.join("out.docx");
+        VaultStorage::materialize_restored_package(&restored_package, "report.docx", &destination)
+            .unwrap();
+        assert!(
+            docvault_ooxml::is_ooxml_package(&destination),
+            "OOXML package re-zipped on restore"
         );
     }
 }
