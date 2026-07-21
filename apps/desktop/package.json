@@ -18,11 +18,18 @@
     "postinstall": "node scripts/fetch-restic.mjs --host --best-effort"
   },
   "dependencies": {
+    "@aiden0z/pptx-renderer": "^1.2.4",
     "@lucide/vue": "^1.24.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "docx-preview": "^0.4.0",
+    "dompurify": "^3.4.12",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.6",
+    "pdfjs-dist": "^6.1.200",
     "vue": "^3.5.0",
-    "vue-i18n": "^11.0.0"
+    "vue-i18n": "^11.0.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

@@ -7,7 +7,27 @@
  * useVault's mapping layer: plain display strings, not i18n keys.
  */
 
-export type DocumentType = "docx" | "xlsx" | "pptx";
+/**
+ * A document's type, derived from its latest version's filename extension.
+ * Previewable: docx/xlsx/pptx/pdf/md/txt (and wps/et/dps when their content is
+ * OOXML). Managed but not previewable: doc/ppt/xls (legacy Office binaries) and
+ * wps/et/dps when legacy Kingsoft binaries. `other` covers anything outside the
+ * managed set - still archived as a raw binary, never previewed.
+ */
+export type DocumentType =
+  | "docx"
+  | "doc"
+  | "xlsx"
+  | "xls"
+  | "pptx"
+  | "ppt"
+  | "pdf"
+  | "md"
+  | "txt"
+  | "wps"
+  | "et"
+  | "dps"
+  | "other";
 export type Backend = "restic" | "local-copy";
 export type HealthStatus = "synced" | "needsReview";
 export type VersionStatus = "current" | "archived";

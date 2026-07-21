@@ -231,6 +231,23 @@ async function openLibraryCopy(params: {
 }
 
 /**
+ * Fetch a version's bytes for in-app preview as an ArrayBuffer. The backend
+ * exports the resolved version to a temp file and returns it as a binary
+ * `ipc::Response` (no asset-protocol / CSP change needed). `version` is the
+ * frontend `label` (version id); pass "current" for the current version. The
+ * command is async + spawn_blocking, so a slow restic restore never freezes the
+ * UI. Outside Tauri there is no backend to read from - returns null so the
+ * caller can show "not supported" rather than crash in browser dev.
+ */
+async function previewVersion(params: {
+  document_id: string;
+  version: string;
+}): Promise<ArrayBuffer | null> {
+  if (!isTauri()) return null;
+  return invoke<ArrayBuffer>("preview_version", params);
+}
+
+/**
  * Remove the library copy for a document (the tool-owned working file). Used on
  * delete so the working copy does not outlive its document. Missing file/dir is
  * a no-op. Synchronous.
@@ -413,6 +430,7 @@ export function useVault() {
     renameDocument,
     libraryPath,
     openLibraryCopy,
+    previewVersion,
     removeLibraryCopy,
     ensureLibraryCopies,
     cancelJob,

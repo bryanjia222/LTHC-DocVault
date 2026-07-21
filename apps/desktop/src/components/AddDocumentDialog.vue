@@ -6,7 +6,7 @@ import { useDialogs } from "../composables/useDialogs";
 import { useVault } from "../composables/useVault";
 import { useDesktopState } from "../composables/useDesktopState";
 import { useActivityLog } from "../composables/useActivityLog";
-import { deriveNameFromPath, pickOfficeFile } from "../utils/file";
+import { deriveNameFromPath, pickDocumentFile } from "../utils/file";
 
 /*
  * Add-document dialog. Replaces the old flow that picked a file and immediately
@@ -51,7 +51,7 @@ watch(addDocumentOpen, (open) => {
 
 async function browse() {
   if (!isTauri()) return;
-  const picked = await pickOfficeFile();
+  const picked = await pickDocumentFile();
   if (!picked) return;
   path.value = picked;
   // Auto-fill the name from the file stem; the user can still edit it below.

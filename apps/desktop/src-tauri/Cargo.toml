@@ -23,6 +23,8 @@ tracing = "0.1"
 # Launch the OS default editor (Word/WPS) on a library working copy. Pure Rust
 # call from a command, so no Tauri plugin / capability is needed.
 open = "5"
+# Scratch dir for preview_version's export-then-read-bytes dance (auto-cleaned).
+tempfile = "3"
 docvault-core = { path = "../../../crates/core" }
 docvault-storage = { path = "../../../crates/storage" }
 docvault-types = { path = "../../../shared/types" }

@@ -472,10 +472,13 @@ mod tests {
         );
     }
 
-    /// The failure path surfaces the backend's error verbatim: an unsupported
-    /// non-Office file is rejected by Phase A (no job is ever spawned).
+    /// A non-Office file (txt) commits through the async path just like an
+    /// Office document: Phase A writes the pending version + materializes the
+    /// library copy, then the Phase B Archive job reaches `Succeeded` and
+    /// finalizes it. Document management works for every managed type, not just
+    /// Office - the content-aware archive stores raw binaries verbatim.
     #[test]
-    fn commit_job_fails_on_unsupported_file() {
+    fn commit_job_succeeds_for_raw_binary_file() {
         let temp = tempfile::tempdir().unwrap();
         let paths = temp_paths(temp.path());
         write_local_copy_config(&paths);
@@ -484,23 +487,32 @@ mod tests {
             Arc::new(Mutex::new(Some(DocVault::new(storage))));
 
         let txt = temp.path().join("notes.txt");
-        fs::write(&txt, b"not office").unwrap();
-        let path = txt.to_string_lossy().to_string();
+        fs::write(&txt, b"plain text, not Office").unwrap();
 
         let registry = JobRegistry::new();
-        let result = phase_a_commit(
-            &vault,
-            &PathBuf::from(&path),
+        let (job_id, terminal, doc_id) = commit_and_spawn_archive(
+            &registry,
+            Arc::clone(&vault),
+            txt.to_string_lossy().to_string(),
             DocumentRef::NewName("notes".to_owned()),
-            CommitMetadata::default(),
         );
-        let err = result.expect_err("unsupported file should fail Phase A");
-        assert!(
-            err.contains("unsupported"),
-            "unexpected error: {err}"
-        );
-        // No job was spawned: the registry is empty.
-        assert!(registry.list().is_empty(), "no job spawned on Phase A failure");
+
+        wait_for_terminal(&terminal);
+        let record = registry.get(&job_id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Succeeded, "raw-binary commit archives");
+        assert!(record.error.is_none(), "unexpected error: {:?}", record.error);
+
+        let vault = vault.lock().unwrap();
+        let vault = vault.as_ref().unwrap();
+        let versions = vault
+            .list_versions(&DocumentRef::IdPrefix(doc_id))
+            .unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].archive_status, "archived");
+        assert_eq!(versions[0].original_filename, "notes.txt");
+        // Raw binary -> single-entry whole-file manifest.
+        assert_eq!(versions[0].manifest.entries.len(), 1);
+        assert_eq!(versions[0].manifest.entries[0].path, "notes.txt");
     }
 
     /// Run Phase A synchronously, then spawn the Phase B Archive job. Returns

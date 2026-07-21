@@ -1,6 +1,6 @@
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, ipc::Response, Manager, State};
 
-use docvault_storage::{DocumentRef, VaultPaths};
+use docvault_storage::{DocumentRef, VaultPaths, NEVER_CANCELLED};
 use docvault_types::VaultConfig;
 
 use crate::dto::{
@@ -124,4 +124,36 @@ pub fn repo_size(state: State<AppState>) -> Result<u64, String> {
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     vault.repo_size().map_err(|e| e.to_string())
+}
+
+/// Return a version's bytes for in-app preview. Exports the resolved version to
+/// a temp file, reads it back, and returns it as a binary `ipc::Response` (no
+/// CSP / asset-protocol change needed). Async + `spawn_blocking` so a slow
+/// restic restore never freezes the UI: non-async commands run on the main
+/// thread, but this one runs the vault lock + I/O on a blocking thread and
+/// `await`s the result.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn preview_version(
+    state: State<'_, AppState>,
+    document_id: String,
+    version: String,
+) -> Result<Response, String> {
+    let vault = state.vault.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Response, String> {
+        let guard = state::lock_vault(&vault);
+        let vault = guard.as_ref().ok_or("vault not initialized")?;
+        let document_ref = DocumentRef::IdPrefix(document_id);
+        let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        // No extension => export writes `temp_dir/original_filename` and returns
+        // that path, so read the path export reports (not `preview` itself).
+        let exported = vault
+            .export_version(&document_ref, &version, &temp_dir.path().join("preview"), &NEVER_CANCELLED)
+            .map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&exported).map_err(|e| e.to_string())?;
+        // Drop the temp dir (and its file) now that bytes are in memory.
+        drop(temp_dir);
+        Ok(Response::new(bytes))
+    })
+    .await
+    .map_err(|e| format!("preview task failed: {e}"))?
 }

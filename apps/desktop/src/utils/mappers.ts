@@ -10,6 +10,7 @@ import type {
   VaultConfigPreview,
   Version,
 } from "../data/mock";
+import { DOCUMENT_EXTENSIONS } from "./documentTypes";
 
 /*
  * Pure mappers that translate raw `docvault_types` / `docvault_jobs` payloads
@@ -145,10 +146,15 @@ export function formatEpoch(epoch: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const EXTENSION_SET: ReadonlySet<string> = new Set(DOCUMENT_EXTENSIONS);
+
 export function deriveType(filename: string): DocumentType {
   const ext = filename.slice(filename.lastIndexOf(".") + 1).toLowerCase();
-  if (ext === "docx" || ext === "xlsx" || ext === "pptx") return ext;
-  return "docx";
+  // Each managed extension maps to its own type so the type filter + preview
+  // dispatcher can distinguish docx from doc, xlsx from xls, etc. Anything
+  // outside the managed set collapses to "other" (still archived, never
+  // previewed).
+  return (EXTENSION_SET.has(ext) ? ext : "other") as DocumentType;
 }
 
 // --- payload -> view-model mappers ---

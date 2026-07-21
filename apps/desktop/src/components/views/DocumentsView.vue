@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ArrowRightLeft,
   ChartNetwork,
   Download,
+  Eye,
   ExternalLink,
   Info,
   List,
@@ -37,6 +38,12 @@ import type {
   Version,
 } from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
+// Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
+// pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
+// app's initial bundle - they are only fetched when a preview is opened.
+const DocumentPreview = defineAsyncComponent(
+  () => import("../DocumentPreview.vue"),
+);
 
 const { t } = useI18n();
 const {
@@ -66,7 +73,21 @@ const { log } = useActivityLog();
 const { runAction, openDocument, refreshAll, deleteDocument } =
   useVaultActions();
 
-const typeOptions: DocumentType[] = ["docx", "xlsx", "pptx"];
+const typeOptions: DocumentType[] = [
+  "docx",
+  "doc",
+  "xlsx",
+  "xls",
+  "pptx",
+  "ppt",
+  "pdf",
+  "md",
+  "txt",
+  "wps",
+  "et",
+  "dps",
+  "other",
+];
 const healthOptions: HealthStatus[] = ["synced", "needsReview"];
 
 const versionViewMode = ref<"list" | "tree">("list");
@@ -79,6 +100,7 @@ const docMenuOpen = ref(false);
 const docMenuPos = ref({ x: 0, y: 0 });
 const versionMenuOpen = ref(false);
 const versionMenuPos = ref({ x: 0, y: 0 });
+const previewOpen = ref(false);
 
 const versions = computed(() => selectedDocument.value?.versions ?? []);
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
@@ -105,6 +127,27 @@ function chooseVersion(version: Version) {
       version: version.label,
     }),
   );
+}
+
+/**
+ * Open the in-app preview overlay for the selected document. Previews the
+ * selected version when one is chosen, otherwise the current version. No-op
+ * (with a log line) when no document is selected.
+ */
+function openPreview() {
+  const doc = selectedDocument.value;
+  log(
+    t("log.actionRequested", {
+      action: t("actionLogs.preview"),
+      name: doc?.name ?? t("log.noDocument"),
+      version: selectedVersion.value?.label ?? t("log.latest"),
+    }),
+  );
+  if (!doc) {
+    log(t("log.noSelection", { action: t("actionLogs.preview") }));
+    return;
+  }
+  previewOpen.value = true;
 }
 
 function setViewMode(mode: "list" | "tree") {
@@ -442,6 +485,16 @@ onBeforeUnmount(() => {
           <button
             class="icon-action-button"
             type="button"
+            :disabled="!selectedDocument"
+            :title="t('actions.preview')"
+            :aria-label="t('actions.preview')"
+            @click="openPreview()"
+          >
+            <Eye aria-hidden="true" />
+          </button>
+          <button
+            class="icon-action-button"
+            type="button"
             :title="t('actions.open')"
             :aria-label="t('actions.open')"
             @click="runAction('actionLogs.open')"
@@ -720,6 +773,16 @@ onBeforeUnmount(() => {
             <button
               class="icon-action-button"
               type="button"
+              :disabled="!selectedDocument"
+              :title="t('actions.preview')"
+              :aria-label="t('actions.preview')"
+              @click="openPreview()"
+            >
+              <Eye aria-hidden="true" />
+            </button>
+            <button
+              class="icon-action-button"
+              type="button"
               :disabled="modificationStatus !== 'modified'"
               :title="t('source.commitModified')"
               :aria-label="t('source.commitModified')"
@@ -903,6 +966,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </Teleport>
+
+  <DocumentPreview
+    v-if="previewOpen && selectedDocument"
+    :document="selectedDocument!"
+    :version="selectedVersion ?? null"
+    @close="previewOpen = false"
+  />
 </template>
 
 <style scoped>

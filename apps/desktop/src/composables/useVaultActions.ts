@@ -7,7 +7,7 @@ import { useDocuments } from "./useDocuments";
 import { useDesktopState } from "./useDesktopState";
 import { useVault, type ResetStage, type ResetBackend } from "./useVault";
 import { useTheme } from "../theme";
-import { extOf, pickOfficeFile } from "../utils/file";
+import { extOf, pickDocumentFile } from "../utils/file";
 
 /*
  * Centralized action handlers. Every UI action (commit, export, checkout,
@@ -104,7 +104,7 @@ export function useVaultActions() {
       return;
     }
     if (!isTauri()) return;
-    const path = await pickOfficeFile();
+    const path = await pickDocumentFile();
     if (!path) {
       log(t("log.actionCancelled", { action: t("actionLogs.commit") }));
       return;
@@ -151,7 +151,7 @@ export function useVaultActions() {
     const ext = extOf(doc.originalFilename) ?? "docx";
     const out = await save({
       defaultPath: `${doc.name}_${ver.label}.${ext}`,
-      filters: [{ name: "Office", extensions: [ext] }],
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
     });
     if (!out) {
       log(t("log.actionCancelled", { action: t(actionKey) }));

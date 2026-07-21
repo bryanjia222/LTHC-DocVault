@@ -7,7 +7,8 @@ import { useVault } from "./useVault";
  * L2 command-contract tests. The frontend's `invoke(cmd, args)` calls must
  * match the backend `#[tauri::command]` signatures in:
  *   - src-tauri/src/commands.rs  (vault_status,
- *     list_documents_with_versions, get_config, connect_vault)
+ *     list_documents_with_versions, get_config, connect_vault,
+ *     preview_version)
  *   - src-tauri/src/jobs.rs      (commit_document, export_version,
  *     checkout_version, delete_document, rename_document, list_jobs,
  *     cancel_job)
@@ -257,5 +258,15 @@ describe("useVault - library model contracts", () => {
   it("ensureLibraryCopies invokes ensure_library_copies with no args", async () => {
     await vault.ensureLibraryCopies();
     expect(invoke).toHaveBeenCalledWith("ensure_library_copies");
+  });
+});
+
+describe("useVault - preview_version contract", () => {
+  it("sends document_id and version (snake_case)", async () => {
+    await vault.previewVersion({ document_id: "docA", version: "v1" });
+    expect(invokeArgs("preview_version")).toStrictEqual({
+      document_id: "docA",
+      version: "v1",
+    });
   });
 });

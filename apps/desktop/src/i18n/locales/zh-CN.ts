@@ -35,6 +35,7 @@ export const zhCN = {
     export: "导出",
     checkout: "切换版本",
     open: "打开",
+    preview: "预览",
     history: "历史",
     viewAll: "查看全部",
     clear: "清空",
@@ -50,7 +51,7 @@ export const zhCN = {
   },
   addDocument: {
     title: "添加文档",
-    subtitle: "选择一个 Office 文件以归档为新文档。",
+    subtitle: "选择一个文档文件以归档为新文档。",
     fileLabel: "文件",
     filePlaceholder: "选择文件…",
     browse: "浏览…",
@@ -91,6 +92,7 @@ export const zhCN = {
     open: "打开文档",
     rename: "重命名文档",
     delete: "删除文档",
+    preview: "预览文档",
     history: "打开版本历史",
     jobCenter: "打开任务中心",
     navigate: "切换视图：{section}",
@@ -180,6 +182,16 @@ export const zhCN = {
     noteEditHint: "备注可在提交修改时填写（编辑功能即将上线）",
     documentId: "文档 ID",
     backend: "备份后端",
+  },
+  preview: {
+    title: "预览",
+    subtitle: "{name} · {version}",
+    loading: "正在加载预览…",
+    error: "无法加载预览：{error}",
+    notSupported:
+      "此文件类型暂不支持应用内预览。可使用「打开」在系统默认程序中查看。",
+    unsupportedTitle: "暂不支持预览",
+    close: "关闭预览",
   },
   jobs: {
     title: "任务",

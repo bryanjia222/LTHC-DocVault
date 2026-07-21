@@ -133,19 +133,32 @@ describe("formatEpoch", () => {
 });
 
 describe("deriveType", () => {
-  it("maps docx/xlsx/pptx extensions", () => {
+  it("maps each previewable extension to its own type", () => {
     expect(deriveType("report.docx")).toBe("docx");
     expect(deriveType("sheet.xlsx")).toBe("xlsx");
     expect(deriveType("deck.pptx")).toBe("pptx");
+    expect(deriveType("paper.pdf")).toBe("pdf");
+    expect(deriveType("readme.md")).toBe("md");
+    expect(deriveType("notes.txt")).toBe("txt");
+  });
+
+  it("maps legacy Office and Kingsoft extensions distinctly", () => {
+    expect(deriveType("old.doc")).toBe("doc");
+    expect(deriveType("legacy.xls")).toBe("xls");
+    expect(deriveType("slides.ppt")).toBe("ppt");
+    expect(deriveType("kingsoft.wps")).toBe("wps");
+    expect(deriveType("kingsoft.et")).toBe("et");
+    expect(deriveType("kingsoft.dps")).toBe("dps");
   });
 
   it("is case-insensitive on the extension", () => {
     expect(deriveType("SHEET.XLSX")).toBe("xlsx");
   });
 
-  it("falls back to docx for unknown or missing extensions", () => {
-    expect(deriveType("archive.tar.gz")).toBe("docx");
-    expect(deriveType("noext")).toBe("docx");
+  it("falls back to other for unknown or missing extensions", () => {
+    expect(deriveType("archive.tar.gz")).toBe("other");
+    expect(deriveType("noext")).toBe("other");
+    expect(deriveType("image.png")).toBe("other");
   });
 });
 
@@ -308,7 +321,7 @@ describe("mapDocument", () => {
       }),
     );
     expect(doc.originalFilename).toBe("Lonely");
-    expect(doc.type).toBe("docx");
+    expect(doc.type).toBe("other");
     expect(doc.owner).toBe("");
     expect(doc.health).toBe("needsReview");
     expect(doc.versions).toEqual([]);

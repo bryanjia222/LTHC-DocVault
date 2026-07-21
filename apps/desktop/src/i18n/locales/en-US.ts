@@ -36,6 +36,7 @@ export const enUS = {
     export: "Export",
     checkout: "Checkout",
     open: "Open",
+    preview: "Preview",
     history: "History",
     viewAll: "View all",
     clear: "Clear",
@@ -51,7 +52,7 @@ export const enUS = {
   },
   addDocument: {
     title: "Add document",
-    subtitle: "Pick an Office file to archive as a new document.",
+    subtitle: "Pick a document file to archive as a new document.",
     fileLabel: "File",
     filePlaceholder: "Select a file…",
     browse: "Browse…",
@@ -92,6 +93,7 @@ export const enUS = {
     open: "Open document",
     rename: "Rename document",
     delete: "Delete document",
+    preview: "Preview document",
     history: "Open versions",
     jobCenter: "Open job center",
     navigate: "Switch view: {section}",
@@ -181,6 +183,16 @@ export const enUS = {
     noteEditHint: "Notes can be entered when committing a modification (editing coming soon)",
     documentId: "Document ID",
     backend: "Backup backend",
+  },
+  preview: {
+    title: "Preview",
+    subtitle: "{name} · {version}",
+    loading: "Loading preview…",
+    error: "Could not load preview: {error}",
+    notSupported:
+      "In-app preview is not supported for this file type. Use Open to launch it in the system editor.",
+    unsupportedTitle: "Preview not supported",
+    close: "Close preview",
   },
   jobs: {
     title: "Jobs",

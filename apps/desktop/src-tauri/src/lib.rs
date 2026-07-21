@@ -126,6 +126,7 @@ pub fn run() {
             commands::probe_vault,
             commands::open_devtools,
             commands::repo_size,
+            commands::preview_version,
             jobs::commit_document,
             jobs::export_version,
             jobs::checkout_version,

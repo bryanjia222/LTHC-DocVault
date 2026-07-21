@@ -1,15 +1,28 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { describe, expect, it, vi } from "vitest";
 import {
-  OFFICE_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
   deriveNameFromPath,
   extOf,
-  pickOfficeFile,
+  pickDocumentFile,
 } from "./file";
 
-describe("OFFICE_EXTENSIONS", () => {
-  it("lists the supported Office extensions", () => {
-    expect(OFFICE_EXTENSIONS).toEqual(["docx", "xlsx", "pptx"]);
+describe("DOCUMENT_EXTENSIONS", () => {
+  it("lists every managed document extension", () => {
+    expect(DOCUMENT_EXTENSIONS).toEqual([
+      "docx",
+      "doc",
+      "xlsx",
+      "xls",
+      "pptx",
+      "ppt",
+      "pdf",
+      "md",
+      "txt",
+      "wps",
+      "et",
+      "dps",
+    ]);
   });
 });
 
@@ -50,19 +63,19 @@ describe("deriveNameFromPath", () => {
  * Exercises the mocked `@tauri-apps/plugin-dialog` boundary so the scaffold is
  * proven end-to-end, not just the pure helpers.
  */
-describe("pickOfficeFile", () => {
+describe("pickDocumentFile", () => {
   it("returns null when the user cancels", async () => {
     vi.mocked(open).mockResolvedValueOnce(null);
-    expect(await pickOfficeFile()).toBeNull();
+    expect(await pickDocumentFile()).toBeNull();
   });
 
   it("returns the selected path", async () => {
     vi.mocked(open).mockResolvedValueOnce("C:/docs/report.docx");
-    expect(await pickOfficeFile()).toBe("C:/docs/report.docx");
+    expect(await pickDocumentFile()).toBe("C:/docs/report.docx");
   });
 
   it("returns the first path when the dialog yields an array", async () => {
     vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx", "C:/docs/b.docx"]);
-    expect(await pickOfficeFile()).toBe("C:/docs/a.docx");
+    expect(await pickDocumentFile()).toBe("C:/docs/a.docx");
   });
 });

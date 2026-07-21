@@ -1,18 +1,20 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
+import { DOCUMENT_EXTENSIONS } from "./documentTypes";
+
 /*
  * File-picker + path helpers shared by the vault action handlers and the
- * add-document dialog. Centralized so both use the same Office-extension filter
- * and name derivation, and never drift out of sync.
+ * add-document dialog. Centralized so both use the same document-extension
+ * filter and name derivation, and never drift out of sync.
  */
 
-export const OFFICE_EXTENSIONS = ["docx", "xlsx", "pptx"] as const;
+export { DOCUMENT_EXTENSIONS };
 
-/** Native single-select dialog for an Office file. Returns the path or null. */
-export async function pickOfficeFile(): Promise<string | null> {
+/** Native single-select dialog for a managed document file. Returns the path or null. */
+export async function pickDocumentFile(): Promise<string | null> {
   const result = await open({
     multiple: false,
-    filters: [{ name: "Office", extensions: [...OFFICE_EXTENSIONS] }],
+    filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
   });
   if (!result) return null;
   return Array.isArray(result) ? (result[0] ?? null) : result;
