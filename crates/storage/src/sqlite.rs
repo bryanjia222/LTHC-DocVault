@@ -274,6 +274,24 @@ impl VaultStorage {
         Ok(())
     }
 
+    /// Update a version's `note` (its commit message). `None` clears it (sets
+    /// the column to NULL). Callers verify the version exists first (via
+    /// [`find_version`]) so a missing version surfaces as
+    /// [`StorageError::VersionNotFound`] instead of a silent no-op; this helper
+    /// is a plain `UPDATE` and affects zero rows for a missing version.
+    pub(crate) fn update_version_note(
+        &self,
+        document_id: &str,
+        version_id: &str,
+        note: Option<&str>,
+    ) -> StorageResult<()> {
+        self.connection.execute(
+            "UPDATE versions SET note = ?1 WHERE document_id = ?2 AND id = ?3",
+            params![note, document_id, version_id],
+        )?;
+        Ok(())
+    }
+
     /// `true` when the version row exists and is still `pending` (archive not
     /// finalized). Used by [`VaultStorage::gc_intake`] to decide whether an
     /// intake copy is still in flight (keep) or an orphan (reclaim). A missing

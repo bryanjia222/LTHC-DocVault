@@ -501,6 +501,34 @@ impl VaultStorage {
         Ok(())
     }
 
+    /// Update a version's note (its commit message). `None` clears it. The
+    /// archive and every other version field are untouched. A missing version
+    /// (or one that does not belong to the resolved document) is surfaced as
+    /// [`StorageError::VersionNotFound`] rather than a silent no-op.
+    pub fn set_version_note(
+        &self,
+        document_ref: &DocumentRef,
+        version_id: &str,
+        note: Option<&str>,
+    ) -> StorageResult<()> {
+        let document = self.resolve_document_ref(document_ref)?;
+        if self
+            .find_version(document.id.as_str(), version_id)?
+            .is_none()
+        {
+            return Err(StorageError::VersionNotFound {
+                document_name: document.name,
+                version: version_id.to_owned(),
+            });
+        }
+        self.update_version_note(document.id.as_str(), version_id, note)?;
+        info!(
+            document_id = document.id.as_str(),
+            version_id, "version note updated"
+        );
+        Ok(())
+    }
+
     pub(crate) fn add_version_to_document(
         &self,
         document: Document,
@@ -999,6 +1027,39 @@ mod tests {
         assert_eq!(versions[0].id, version.id);
         assert_eq!(versions[0].archive_reference, version.archive_reference);
         assert_eq!(versions[0].original_filename, version.original_filename);
+    }
+
+    #[test]
+    fn set_version_note_updates_and_clears() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp_dir.path());
+        write_local_copy_config(&paths);
+        let source = write_source(&paths.root_dir, "report.docx", b"version one");
+        let storage = VaultStorage::init(paths).unwrap();
+        let (document, version) = commit(&storage, DocumentRef::Name("report".to_owned()), &source);
+
+        let document_ref = DocumentRef::IdPrefix(document.id.as_str().to_owned());
+
+        // The `commit` helper uses default metadata, so the note starts as None.
+        storage
+            .set_version_note(&document_ref, &version.id, Some("updated note"))
+            .unwrap();
+        let versions = storage.list_versions(&document_ref).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].note.as_deref(), Some("updated note"));
+
+        // `None` clears the note (column back to NULL).
+        storage
+            .set_version_note(&document_ref, &version.id, None)
+            .unwrap();
+        let versions = storage.list_versions(&document_ref).unwrap();
+        assert!(versions[0].note.is_none());
+
+        // A missing version surfaces as VersionNotFound, not a silent no-op.
+        let err = storage
+            .set_version_note(&document_ref, "v999", Some("nope"))
+            .unwrap_err();
+        assert!(matches!(err, StorageError::VersionNotFound { .. }));
     }
 
     fn config_path(path: &Path) -> String {

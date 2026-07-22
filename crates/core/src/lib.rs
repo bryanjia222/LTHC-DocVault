@@ -164,6 +164,17 @@ impl DocVault {
         self.storage.rename_document(document_ref, new_name)
     }
 
+    /// Update a version's note (commit message). `None` clears it.
+    pub fn set_version_note(
+        &self,
+        document_ref: &DocumentRef,
+        version_id: &str,
+        note: Option<&str>,
+    ) -> StorageResult<()> {
+        self.storage
+            .set_version_note(document_ref, version_id, note)
+    }
+
     pub fn paths(&self) -> &docvault_storage::VaultPaths {
         self.storage.paths()
     }
