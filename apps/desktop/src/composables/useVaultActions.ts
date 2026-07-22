@@ -5,7 +5,7 @@ import { useDialogs } from "./useDialogs";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
 import { useDesktopState } from "./useDesktopState";
-import { useVault, type ResetStage, type ResetBackend } from "./useVault";
+import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "./useVault";
 import { useTheme } from "../theme";
 import { extOf, pickDocumentFile } from "../utils/file";
 
@@ -33,6 +33,7 @@ export function useVaultActions() {
   const {
     commit,
     exportVersion,
+    exportWorkingCopy,
     checkoutVersion,
     deleteDocument: sendDelete,
     renameDocument: sendRename,
@@ -44,7 +45,7 @@ export function useVaultActions() {
     removeLibraryCopy,
   } = useVault();
   const desktop = useDesktopState();
-  const { openAddDocument, openExportCommitPrompt } = useDialogs();
+  const { openAddDocument } = useDialogs();
 
   function runAction(actionKey: string) {
     if (actionKey === "actionLogs.addDocument") {
@@ -141,48 +142,40 @@ export function useVaultActions() {
   async function exportAction() {
     const actionKey = "actionLogs.export" as const;
     const doc = selectedDocument.value;
-    const ver = selectedVersion.value;
     log(
       t("log.actionRequested", {
         action: t(actionKey),
         name: doc?.name ?? t("log.noDocument"),
-        version: ver?.label ?? t("log.latest"),
+        version: t("log.latest"),
       }),
     );
-    if (!doc || !ver) {
+    if (!doc) {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
-    // Export writes the selected (committed) version, NOT the working copy. When
-    // the tracker reports the source as "modified", the user's latest edits are
-    // not in any committed version - so exporting would silently skip them. Prompt
-    // so the user can commit first (capturing the edits) or export the committed
-    // version as-is. `performExport` runs the actual save + job after the choice.
-    if (doc.modification === "modified") {
-      openExportCommitPrompt();
-      return;
-    }
+    // Export the document's working copy - the library file that mirrors the
+    // current version and holds the user's uncommitted edits - NOT the last
+    // committed version. So an uncommitted document exports its uncommitted
+    // state. `performExport` runs the save + file copy.
     await performExport();
   }
 
   /**
-   * Run the actual export: native save dialog, then the export job. Split out of
-   * `exportAction` so the export-commit prompt's "export directly" path can
-   * bypass the modification check (the user explicitly chose to export the
-   * committed version).
+   * Run the actual working-copy export: native save dialog, then the
+   * `export_working_copy` file copy. No version is involved - the working copy
+   * is a single live file, so the default file name is just the doc name.
    */
   async function performExport() {
     const actionKey = "actionLogs.export" as const;
     const doc = selectedDocument.value;
-    const ver = selectedVersion.value;
-    if (!doc || !ver) {
+    if (!doc) {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
     const ext = extOf(doc.originalFilename) ?? "docx";
     const out = await save({
-      defaultPath: `${doc.name}_${ver.label}.${ext}`,
+      defaultPath: `${doc.name}.${ext}`,
       filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
     });
     if (!out) {
@@ -190,11 +183,47 @@ export function useVaultActions() {
       return;
     }
     try {
-      // Export writes the selected version to a file; it does not change which
-      // version is current.
+      await exportWorkingCopy({ document_id: doc.id, output_path: out });
+      log(t("log.exported", { target: doc.name }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /**
+   * Export a specific committed version (version-history right-click). Unlike
+   * `performExport` (the working copy), this serves the archived snapshot for the
+   * given version label via the `export_version` job - so it does not capture
+   * uncommitted edits. The default file name includes the version label.
+   */
+  async function exportVersionAction(versionLabel: string) {
+    const actionKey = "actionLogs.export" as const;
+    const doc = selectedDocument.value;
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: versionLabel,
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    const ext = extOf(doc.originalFilename) ?? "docx";
+    const out = await save({
+      defaultPath: `${doc.name}_${versionLabel}.${ext}`,
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+    });
+    if (!out) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    try {
       const id = await exportVersion({
         document_id: doc.id,
-        version: ver.label,
+        version: versionLabel,
         output_path: out,
       });
       log(t("log.jobStarted", { action: t(actionKey), id }));
@@ -260,7 +289,7 @@ export function useVaultActions() {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
-    if (!window.confirm(t("confirm.moveToTrash", { name: doc.name }))) {
+    if (!(await confirmDialog(t("confirm.moveToTrash", { name: doc.name })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -312,11 +341,11 @@ export function useVaultActions() {
       return;
     }
     if (!isTauri()) return;
-    if (!window.confirm(t("confirm.permanentDelete", { name: doc.name }))) {
+    if (!(await confirmDialog(t("confirm.permanentDelete", { name: doc.name })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    if (!window.confirm(t("confirm.permanentDeleteAgain", { name: doc.name }))) {
+    if (!(await confirmDialog(t("confirm.permanentDeleteAgain", { name: doc.name })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -357,11 +386,11 @@ export function useVaultActions() {
       return;
     }
     if (!isTauri()) return;
-    if (!window.confirm(t("confirm.emptyTrash", { count: ids.length }))) {
+    if (!(await confirmDialog(t("confirm.emptyTrash", { count: ids.length })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    if (!window.confirm(t("confirm.emptyTrashAgain", { count: ids.length }))) {
+    if (!(await confirmDialog(t("confirm.emptyTrashAgain", { count: ids.length })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -521,11 +550,11 @@ export function useVaultActions() {
    * (destructive) and reloads desktop state so tags/tracked refresh immediately.
    * No-op outside Tauri.
    */
-  function resetToStageAction(
+  async function resetToStageAction(
     stage: ResetStage,
     backend: ResetBackend,
     resticPassword?: string,
-  ): void {
+  ): Promise<void> {
     const stageLabel = t("dev.stageLabel", { n: stageNumber(stage) });
     const actionKey = t("actionLogs.resetToStage", { stage: stageLabel });
     log(
@@ -535,7 +564,7 @@ export function useVaultActions() {
         version: t("log.latest"),
       }),
     );
-    if (!window.confirm(t(`dev.stages.${stage}.confirm`))) {
+    if (!(await confirmDialog(t(`dev.stages.${stage}.confirm`)))) {
       log(t("log.actionCancelled", { action: actionKey }));
       return;
     }
@@ -597,7 +626,7 @@ export function useVaultActions() {
     restoreDocument,
     permanentlyDeleteDocument,
     emptyTrash,
-    performExport,
+    exportVersionAction,
     renameDocument,
   };
 }

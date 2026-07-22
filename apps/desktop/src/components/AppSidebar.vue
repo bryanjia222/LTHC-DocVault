@@ -13,6 +13,7 @@ import { useNavigation } from "../composables/useNavigation";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
 import { useDesktopState } from "../composables/useDesktopState";
+import { confirmDialog } from "../composables/useVault";
 
 const { t } = useI18n();
 const { activeSection, setSection } = useNavigation();
@@ -107,13 +108,13 @@ function ctxRename() {
   if (id && proj) startRename(id, proj.name);
 }
 
-function ctxDelete() {
+async function ctxDelete() {
   const id = ctx.value?.projectId;
   closeCtx();
   if (!id) return;
   const proj = projects.value.find((p) => p.id === id);
   if (!proj) return;
-  if (!window.confirm(t("sidebar.confirmDeleteProject", { name: proj.name }))) {
+  if (!(await confirmDialog(t("sidebar.confirmDeleteProject", { name: proj.name })))) {
     return;
   }
   desktop.deleteProject(id);
@@ -518,11 +519,8 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   gap: 2px;
 }
 
-.settings-row {
-  margin-top: auto;
-}
-
 .trash-row {
+  margin-top: auto;
   justify-content: flex-start;
 }
 

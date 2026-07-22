@@ -321,6 +321,28 @@ fn open_version_readonly(vault: &DocVault, doc_id: &str, version_id: &str) -> Re
         .map_err(|e| format!("failed to open editor: {e}"))
 }
 
+/// Copy the document's library working copy - the file that mirrors the current
+/// version and holds the user's uncommitted edits - to `output_path`. Unlike
+/// `export_version` (which serves a committed archive snapshot), this is a plain
+/// file copy of the live working file, so an uncommitted document exports its
+/// uncommitted state, not the last committed version. Materializes the copy from
+/// the current version first if it is missing (no edits to lose, so the current
+/// version is the correct fallback). Pure of `State`, so it is unit-testable;
+/// the command wrapper resolves the vault + library path.
+fn export_working_copy_at(
+    vault: &DocVault,
+    doc_id: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    let lib_path = library_path_for_doc(vault, doc_id)?;
+    if !lib_path.exists() {
+        materialize_at(vault, doc_id, &lib_path, &NEVER_CANCELLED)?;
+    }
+    fs::copy(&lib_path, output_path)
+        .map(|_| ())
+        .map_err(|e| format!("failed to export working copy: {e}"))
+}
+
 // --- AppHandle-bound commands ---
 
 /// The deterministic library path for a document, as a display string. The
@@ -368,6 +390,21 @@ pub fn remove_library_copy(document_id: String, state: State<AppState>) -> Resul
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     remove_library_copy_at(&library_dir(vault), &document_id)
+}
+
+/// Export the document's working copy (the library file that mirrors the current
+/// version and holds the user's uncommitted edits) to `output_path` by copying
+/// it. Captures the live working file - so an uncommitted document exports its
+/// uncommitted state, not the last committed version. Synchronous (a file copy).
+#[tauri::command(rename_all = "snake_case")]
+pub fn export_working_copy(
+    document_id: String,
+    output_path: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let vault = state::lock_vault(&state.vault);
+    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    export_working_copy_at(vault, &document_id, Path::new(&output_path))
 }
 
 /// Ensure every document has a library copy and a tracked entry pointing at it.
@@ -501,6 +538,47 @@ mod tests {
             lib_path.metadata().unwrap().len() > 0,
             "library copy non-empty"
         );
+    }
+
+    /// `export_working_copy_at` copies the live library file - including the
+    /// user's uncommitted edits - not the archived original. Overwriting the
+    /// library copy after materialize is reflected in the export, proving it is a
+    /// file copy of the working file rather than a re-export of the committed
+    /// version (which would rebuild the archive snapshot).
+    #[test]
+    fn export_working_copy_copies_live_library_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = vault_at(temp.path());
+        let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
+
+        // Materialize the library copy (mirrors the committed v1), then simulate
+        // the user's uncommitted edits by overwriting it with different bytes.
+        let lib_path = library_path_for_doc(&vault, &doc_id).unwrap();
+        materialize_at(&vault, &doc_id, &lib_path, &NEVER_CANCELLED).unwrap();
+        fs::write(&lib_path, b"uncommitted-edits").unwrap();
+
+        let out = temp.path().join("export.docx");
+        export_working_copy_at(&vault, &doc_id, &out).unwrap();
+        assert_eq!(fs::read(&out).unwrap(), b"uncommitted-edits");
+    }
+
+    /// When the library copy is missing, `export_working_copy_at` materializes it
+    /// from the current version first, then copies that - so the export still
+    /// succeeds (and the library copy is rebuilt as a side effect).
+    #[test]
+    fn export_working_copy_materializes_missing_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = vault_at(temp.path());
+        let doc_id = commit_docx(&vault, temp.path(), "report", b"v1");
+
+        let lib_path = library_path_for_doc(&vault, &doc_id).unwrap();
+        assert!(!lib_path.exists());
+
+        let out = temp.path().join("export.docx");
+        export_working_copy_at(&vault, &doc_id, &out).unwrap();
+        assert!(out.exists(), "export file written");
+        assert!(out.metadata().unwrap().len() > 0, "export non-empty");
+        assert!(lib_path.exists(), "library copy materialized");
     }
 
     /// `ensure_library_copies_for` on a fresh slice materializes the copy and

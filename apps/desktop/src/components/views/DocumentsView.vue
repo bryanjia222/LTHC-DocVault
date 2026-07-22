@@ -6,6 +6,7 @@ import {
   Download,
   Eye,
   ExternalLink,
+  FolderMinus,
   Info,
   List,
   Maximize2,
@@ -56,6 +57,7 @@ const {
   activeFilterCount,
   sortKey,
   sortDirection,
+  activeProjectId,
   selectDocument,
   selectVersion,
   toggleType,
@@ -65,7 +67,7 @@ const {
 const desktop = useDesktopState();
 const { openCommitModified, openDocumentStatus, openRename } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, openDocument, refreshAll, deleteDocument } =
+const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction } =
   useVaultActions();
 
 /** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
@@ -81,6 +83,13 @@ const docMenuPos = ref({ x: 0, y: 0 });
 const versionMenuOpen = ref(false);
 const versionMenuPos = ref({ x: 0, y: 0 });
 const previewOpen = ref(false);
+/**
+ * The version the preview overlay targets. The toolbar preview button clears it
+ * (null -> the latest/current version); the version-history right-click sets it
+ * to the right-clicked historical version. Decoupled from `selectedVersion` so
+ * previewing an old version does not require it to also be the table selection.
+ */
+const previewVersionRef = ref<Version | null>(null);
 
 const versions = computed(() => selectedDocument.value?.versions ?? []);
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
@@ -110,17 +119,21 @@ function chooseVersion(version: Version) {
 }
 
 /**
- * Open the in-app preview overlay for the selected document. Previews the
- * selected version when one is chosen, otherwise the current version. No-op
- * (with a log line) when no document is selected.
+ * Open the in-app preview overlay. With no argument (the toolbar button) it
+ * previews the latest (current) version; passing a version (from the version-
+ * history right-click) previews that historical version. No-op (with a log
+ * line) when no document is selected.
  */
-function openPreview() {
+function openPreview(version?: Version | null) {
   const doc = selectedDocument.value;
+  // null -> DocumentPreview resolves "current" (the latest version); an explicit
+  // version previews that historical version.
+  previewVersionRef.value = version === undefined ? null : version;
   log(
     t("log.actionRequested", {
       action: t("actionLogs.preview"),
       name: doc?.name ?? t("log.noDocument"),
-      version: selectedVersion.value?.label ?? t("log.latest"),
+      version: previewVersionRef.value?.label ?? t("log.latest"),
     }),
   );
   if (!doc) {
@@ -188,7 +201,8 @@ function onScopeChange(value: string) {
 }
 
 /** Resolve a project id to its display name (falls back to the raw id). */
-function projectName(id: string): string {
+function projectName(id: string | null | undefined): string {
+  if (!id) return "";
   return desktop.projects.value.find((p) => p.id === id)?.name ?? id;
 }
 
@@ -273,9 +287,35 @@ function docMenuDelete() {
   void deleteDocument();
 }
 
+/**
+ * Remove the right-clicked document from the active project (keeps other
+ * memberships + the document itself; only meaningful when scoped to a project).
+ */
+function docMenuRemoveFromProject() {
+  const doc = selectedDocument.value;
+  const pid = activeProjectId.value;
+  closeDocMenu();
+  if (!doc || !pid) return;
+  desktop.unassignDocumentFromProject(doc.id, pid);
+}
+
 function versionMenuCheckout() {
   closeVersionMenu();
   runAction("actionLogs.checkout");
+}
+
+/** Preview the right-clicked version in-app (read-only - no checkout). */
+function versionMenuPreview() {
+  const version = selectedVersion.value;
+  closeVersionMenu();
+  if (version) openPreview(version);
+}
+
+/** Export the right-clicked committed version to a file (archive snapshot). */
+function versionMenuExport() {
+  const version = selectedVersion.value;
+  closeVersionMenu();
+  if (version) void exportVersionAction(version.label);
 }
 
 function versionMenuRefresh() {
@@ -357,6 +397,19 @@ onBeforeUnmount(() => {
             :aria-label="t('actions.search')"
           />
         </div>
+      </div>
+
+      <div class="preview-bar">
+        <button
+          class="preview-btn"
+          type="button"
+          :disabled="!selectedDocument"
+          :title="t('actions.preview')"
+          @click="openPreview()"
+        >
+          <Eye aria-hidden="true" />
+          {{ t("actions.preview") }}
+        </button>
       </div>
 
       <div class="filter-bar">
@@ -521,16 +574,6 @@ onBeforeUnmount(() => {
           <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
         </div>
         <div class="action-row">
-          <button
-            class="icon-action-button"
-            type="button"
-            :disabled="!selectedDocument"
-            :title="t('actions.preview')"
-            :aria-label="t('actions.preview')"
-            @click="openPreview()"
-          >
-            <Eye aria-hidden="true" />
-          </button>
           <button
             class="icon-action-button"
             type="button"
@@ -810,16 +853,6 @@ onBeforeUnmount(() => {
             <button
               class="icon-action-button"
               type="button"
-              :disabled="!selectedDocument"
-              :title="t('actions.preview')"
-              :aria-label="t('actions.preview')"
-              @click="openPreview()"
-            >
-              <Eye aria-hidden="true" />
-            </button>
-            <button
-              class="icon-action-button"
-              type="button"
               :disabled="!selectedVersion"
               :title="t('actions.checkout')"
               :aria-label="t('actions.checkout')"
@@ -921,7 +954,7 @@ onBeforeUnmount(() => {
           @click="docMenuStatus"
         >
           <Info aria-hidden="true" />
-          {{ t("source.documentStatus") }}
+          {{ t("source.properties") }}
         </button>
         <button
           type="button"
@@ -943,6 +976,16 @@ onBeforeUnmount(() => {
           {{ t("actions.refresh") }}
         </button>
         <div class="ctx-divider"></div>
+        <button
+          v-if="activeProjectId"
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuRemoveFromProject"
+        >
+          <FolderMinus aria-hidden="true" />
+          {{ t("source.removeFromProject", { project: projectName(activeProjectId) }) }}
+        </button>
         <button
           type="button"
           class="ctx-item danger"
@@ -973,6 +1016,25 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
+          @click="versionMenuPreview"
+        >
+          <Eye aria-hidden="true" />
+          {{ t("versionMenu.preview", { label: selectedVersion?.label ?? "" }) }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="versionMenuExport"
+        >
+          <Download aria-hidden="true" />
+          {{ t("versionMenu.export", { label: selectedVersion?.label ?? "" }) }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
           @click="versionMenuCheckout"
         >
           <ArrowRightLeft aria-hidden="true" />
@@ -995,7 +1057,7 @@ onBeforeUnmount(() => {
   <DocumentPreview
     v-if="previewOpen && selectedDocument"
     :document="selectedDocument!"
-    :version="selectedVersion ?? null"
+    :version="previewVersionRef"
     @close="previewOpen = false"
   />
 </template>
@@ -1285,9 +1347,46 @@ tbody tr.selected {
 
 .action-row {
   display: grid;
-  grid-template-columns: repeat(2, 34px);
+  grid-template-columns: 34px;
   justify-content: start;
   gap: 8px;
+}
+
+.preview-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.preview-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.preview-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.preview-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 
 .graph-maximized {

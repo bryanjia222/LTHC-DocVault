@@ -20,4 +20,5 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(async () => null),
   save: vi.fn(async () => null),
   message: vi.fn(async () => undefined),
+  confirm: vi.fn(async () => false),
 }));

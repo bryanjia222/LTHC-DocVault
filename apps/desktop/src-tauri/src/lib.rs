@@ -121,6 +121,7 @@ pub fn run() {
             library::open_library_copy,
             library::remove_library_copy,
             library::ensure_library_copies,
+            library::export_working_copy,
             devtools::reset_to_stage,
         ])
         .run(tauri::generate_context!())

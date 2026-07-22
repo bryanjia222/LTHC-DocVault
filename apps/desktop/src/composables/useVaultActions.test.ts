@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { message, open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 
 import { useVaultActions } from "./useVaultActions";
 import { useVault } from "./useVault";
@@ -73,6 +73,11 @@ beforeEach(() => {
   vi.mocked(invoke).mockClear();
   vi.mocked(open).mockClear();
   vi.mocked(save).mockClear();
+  // Native confirm defaults to false (cancel); tests opt into "confirm" with
+  // mockResolvedValueOnce. mockReset clears any leftover once-queue, then the
+  // default is re-established. Outside-Tauri tests use window.confirm (spied).
+  vi.mocked(confirm).mockReset();
+  vi.mocked(confirm).mockResolvedValue(false);
   vi.spyOn(console, "info").mockImplementation(() => {});
   actions = withI18nContext(() => useVaultActions());
 });
@@ -152,21 +157,48 @@ describe("useVaultActions - checkout", () => {
 });
 
 describe("useVaultActions - export", () => {
-  it("writes the selected version to the chosen file path", async () => {
+  it("writes the working copy (uncommitted state) to the chosen file path", async () => {
     asTauri();
-    vi.mocked(save).mockResolvedValueOnce("/out/Alpha_a1.docx");
-    vi.mocked(invoke).mockResolvedValue("job-2");
+    vi.mocked(save).mockResolvedValueOnce("/out/Alpha.docx");
+    vi.mocked(invoke).mockResolvedValue(undefined);
     actions.runAction("actionLogs.export");
     await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith("export_version", {
+      // Export targets the working copy, not a committed version: no `version`
+      // is sent, and the command is export_working_copy (a file copy of the
+      // live library file holding the user's edits).
+      expect(invoke).toHaveBeenCalledWith("export_working_copy", {
         document_id: docA.id,
-        version: docA.versions[0].label,
-        output_path: "/out/Alpha_a1.docx",
+        output_path: "/out/Alpha.docx",
       });
     });
     expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({ defaultPath: "Alpha_a1.docx" }),
+      expect.objectContaining({ defaultPath: "Alpha.docx" }),
     );
+    // A committed-version export is NOT used for the working copy.
+    expect(invoke).not.toHaveBeenCalledWith("export_version", expect.anything());
+  });
+
+  it("exports the uncommitted state even when the document is modified", async () => {
+    asTauri();
+    // `modification` is derived from desktop tracked + probe; stage a modified
+    // source so the doc reports "modified". The working-copy export must still
+    // proceed (it copies the live edits) rather than prompting or skipping.
+    desktop.tracked.value = [
+      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
+    ];
+    desktop.probes.value = {
+      [docA.id]: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
+    };
+    vi.mocked(save).mockResolvedValueOnce("/out/Alpha.docx");
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    actions.runAction("actionLogs.export");
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("export_working_copy", {
+        document_id: docA.id,
+        output_path: "/out/Alpha.docx",
+      });
+    });
   });
 
   it("does not invoke when the save dialog is cancelled", async () => {
@@ -177,30 +209,21 @@ describe("useVaultActions - export", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("prompts to commit first when the selected document is modified (no export)", async () => {
+  it("exportVersionAction writes the chosen committed version to a file", async () => {
     asTauri();
-    // `modification` is derived by useDocuments from desktop tracked + probe,
-    // not carried on the vault doc - so stage a tracked source whose probe
-    // differs (stat + sha) to make the selected document report "modified".
-    desktop.tracked.value = [
-      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
-    ];
-    desktop.probes.value = {
-      [docA.id]: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
-    };
-    vi.mocked(save).mockClear();
-    vi.mocked(invoke).mockClear();
-
-    actions.runAction("actionLogs.export");
-    await flush();
-
-    // Modified docs open the commit-or-export prompt instead of exporting the
-    // stale committed version behind the user's back.
-    expect(dialogs.exportCommitPromptOpen.value).toBe(true);
-    expect(save).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalledWith(
-      "export_version",
-      expect.anything(),
+    vi.mocked(save).mockResolvedValueOnce("/out/Alpha_a1.docx");
+    vi.mocked(invoke).mockResolvedValue("job-exp");
+    await actions.exportVersionAction(docA.versions[0].label);
+    await vi.waitFor(() => {
+      // A version-history export serves the archived snapshot for that label.
+      expect(invoke).toHaveBeenCalledWith("export_version", {
+        document_id: docA.id,
+        version: docA.versions[0].label,
+        output_path: "/out/Alpha_a1.docx",
+      });
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: "Alpha_a1.docx" }),
     );
   });
 });
@@ -421,7 +444,9 @@ describe("useVaultActions - stage reset (dev)", () => {
 
   it("invokes reset_to_stage with the chosen stage + backend after confirming", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Under Tauri, confirmDialog routes to the native dialog (the plugin
+    // `confirm` mock); a persistent "true" lets the single confirmation pass.
+    vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
     actions.resetToStageAction("initial", "local-copy");
@@ -437,7 +462,7 @@ describe("useVaultActions - stage reset (dev)", () => {
 
   it("passes the restic password through for restic stages", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
     actions.resetToStageAction("seeded", "restic", "hunter2");
@@ -453,7 +478,9 @@ describe("useVaultActions - stage reset (dev)", () => {
 
   it("does not invoke when the confirm dialog is cancelled", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // Native confirm defaults to false (cancel) in beforeEach; confirm it stays
+    // cancelled so neither reset proceeds to the backend.
+    vi.mocked(confirm).mockResolvedValue(false);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
     actions.resetToStageAction("fresh", "local-copy");
@@ -464,6 +491,7 @@ describe("useVaultActions - stage reset (dev)", () => {
   });
 
   it("does not invoke when not running under Tauri", async () => {
+    // Outside Tauri, confirmDialog falls back to window.confirm (spied here).
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue(undefined);
 
@@ -499,7 +527,8 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
 
   it("confirms once and moves the selected document to the recycle bin (no backend delete)", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Soft-delete needs a single confirmation (native `confirm` under Tauri).
+    vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.deleteDocument();
@@ -516,7 +545,7 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
 
   it("does not trash when the confirm dialog is cancelled", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(confirm).mockResolvedValue(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.deleteDocument();
@@ -528,7 +557,7 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
 
   it("does not trash when no document is selected", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
     documents.value = [];
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -540,6 +569,8 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
   });
 
   it("still soft-deletes outside Tauri (the hide is desktop-local, needs no backend)", async () => {
+    // Outside Tauri, confirmDialog falls back to window.confirm (spied here);
+    // the soft-delete hide is desktop-local so it proceeds without a backend.
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -581,7 +612,9 @@ describe("useVaultActions - permanently delete document", () => {
 
   it("double-confirms, then spawns the delete job and clears desktop annotations", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Irreversible delete requires BOTH confirms to pass; a persistent "true"
+    // satisfies the two native confirm() calls in sequence.
+    vi.mocked(confirm).mockResolvedValue(true);
     desktop.tags.value = { [docA.id]: ["t1"] };
     desktop.tracked.value = [
       { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
@@ -604,7 +637,8 @@ describe("useVaultActions - permanently delete document", () => {
 
   it("requires both confirms - cancels on the first with no backend call", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // First confirm cancelled (default false) -> abort before the second.
+    vi.mocked(confirm).mockResolvedValue(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.permanentlyDeleteDocument(docA.id);
@@ -615,10 +649,10 @@ describe("useVaultActions - permanently delete document", () => {
 
   it("requires both confirms - cancels on the second with no backend call", async () => {
     asTauri();
-    confirmSpy = vi
-      .spyOn(window, "confirm")
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false);
+    // First passes, second is cancelled -> abort before the backend delete.
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.permanentlyDeleteDocument(docA.id);
@@ -629,7 +663,7 @@ describe("useVaultActions - permanently delete document", () => {
 
   it("does not invoke when the document id is unknown", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.permanentlyDeleteDocument("nope");
@@ -639,6 +673,8 @@ describe("useVaultActions - permanently delete document", () => {
   });
 
   it("does not invoke when not running under Tauri", async () => {
+    // Outside Tauri the action returns at the isTauri gate before any confirm;
+    // window.confirm is spied defensively but never reached.
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -657,7 +693,8 @@ describe("useVaultActions - empty recycle bin", () => {
 
   it("double-confirms, then permanently deletes every trashed document", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    // Emptying the bin is irreversible; BOTH native confirms must pass.
+    vi.mocked(confirm).mockResolvedValue(true);
     const docB: Document = { ...docA, id: "docB" };
     documents.value = [docA, docB];
     desktop.trashDoc(docA.id);
@@ -684,7 +721,7 @@ describe("useVaultActions - empty recycle bin", () => {
 
   it("no-ops when the bin is already empty (no backend call)", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(confirm).mockResolvedValue(true);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.emptyTrash();
@@ -695,7 +732,8 @@ describe("useVaultActions - empty recycle bin", () => {
 
   it("requires both confirms - cancels on the first with no backend call", async () => {
     asTauri();
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // First confirm cancelled -> the bin is left untouched.
+    vi.mocked(confirm).mockResolvedValue(false);
     desktop.trashDoc(docA.id);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -709,10 +747,10 @@ describe("useVaultActions - empty recycle bin", () => {
 
   it("requires both confirms - cancels on the second with no backend call", async () => {
     asTauri();
-    confirmSpy = vi
-      .spyOn(window, "confirm")
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false);
+    // First passes, second cancelled -> abort before deleting anything.
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
     desktop.trashDoc(docA.id);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -724,6 +762,8 @@ describe("useVaultActions - empty recycle bin", () => {
   });
 
   it("does not invoke when not running under Tauri", async () => {
+    // Outside Tauri the action returns at the isTauri gate before any confirm;
+    // window.confirm is spied defensively but never reached.
     confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     desktop.trashDoc(docA.id);
     vi.mocked(invoke).mockResolvedValue("job-del");

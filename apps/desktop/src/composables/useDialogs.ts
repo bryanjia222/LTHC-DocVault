@@ -12,10 +12,6 @@ const switchBackendOpen = ref(false);
 const commitModifiedOpen = ref(false);
 const documentStatusOpen = ref(false);
 const renameOpen = ref(false);
-/** Export-commit prompt: shown when exporting a doc with uncommitted edits, so
- *  the user can commit first (exports only commit the last committed version) or
- *  export the committed version directly. */
-const exportCommitPromptOpen = ref(false);
 
 export function useDialogs() {
   function openAddDocument() {
@@ -48,12 +44,6 @@ export function useDialogs() {
   function closeRename() {
     renameOpen.value = false;
   }
-  function openExportCommitPrompt() {
-    exportCommitPromptOpen.value = true;
-  }
-  function closeExportCommitPrompt() {
-    exportCommitPromptOpen.value = false;
-  }
 
   return {
     addDocumentOpen,
@@ -61,7 +51,6 @@ export function useDialogs() {
     commitModifiedOpen,
     documentStatusOpen,
     renameOpen,
-    exportCommitPromptOpen,
     openAddDocument,
     closeAddDocument,
     openSwitchBackend,
@@ -72,7 +61,5 @@ export function useDialogs() {
     closeDocumentStatus,
     openRename,
     closeRename,
-    openExportCommitPrompt,
-    closeExportCommitPrompt,
   };
 }

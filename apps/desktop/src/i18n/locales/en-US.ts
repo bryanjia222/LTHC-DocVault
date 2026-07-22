@@ -163,6 +163,8 @@ export const enUS = {
     label: "Projects",
     title: "Project membership",
     empty: "Not in any project - drag it onto a sidebar project to add it.",
+    addPlaceholder: "Add to project…",
+    noneAvailable: "No projects available to join",
   },
   filters: {
     title: "Filters",
@@ -194,13 +196,15 @@ export const enUS = {
     commitModified: "Commit modified",
     commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
-    documentStatus: "Document status",
+    properties: "Properties",
+    removeFromProject: "Remove from {project}",
     rename: "Rename",
     delete: "Delete",
     refresh: "Refresh detection",
     missingHint: "The source file is missing. Re-specify it before committing.",
   },
   versionMenu: {
+    preview: "Preview version {label}",
     checkout: "Switch to version {label}",
     export: "Export version {label}",
   },
@@ -214,15 +218,6 @@ export const enUS = {
     emptyTrash: "Empty recycle bin",
     permanentDeleteHint:
       "Permanent deletion removes all of the document's versions and backup snapshots, and cannot be undone.",
-  },
-  exportCommit: {
-    title: "Export uncommitted document",
-    subtitle:
-      "This document has uncommitted changes. Exporting only includes the last committed version, not your current edits.",
-    hint: "Commit first to save your current edits, or export the committed version as-is.",
-    commit: "Commit first",
-    exportDirect: "Export directly",
-    cancel: "Cancel",
   },
   modification: {
     none: "Not tracked",
@@ -308,6 +303,7 @@ export const enUS = {
     openNoDefaultApp: "DocVault could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
     renamed: "Renamed document: {name} -> {newName}",
     latest: "latest",
+    exported: "Exported {target}",
     cleared: "Activity log cleared",
     movedToTrash: "Moved \"{target}\" to the recycle bin",
     restored: "Restored \"{target}\" from the recycle bin",

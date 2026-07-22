@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { confirm as confirmNative } from "@tauri-apps/plugin-dialog";
 import { ref, type Ref } from "vue";
 
 import {
@@ -43,6 +44,25 @@ const TERMINAL_STATUSES: ReadonlySet<RawJob["status"]> = new Set([
 /** True when running inside a Tauri window (IPC available). */
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/**
+ * Reliable confirmation dialog. Under Tauri uses the native OS dialog
+ * (`@tauri-apps/plugin-dialog`'s `confirm`) - `window.confirm` is suppressed /
+ * unreliable in the Tauri v2 webview, so the destructive recycle-bin actions
+ * (permanent delete, empty trash) must route through this to actually prompt.
+ * Outside Tauri (browser dev) falls back to `window.confirm` so the flow still
+ * works without a backend. Returns false if the native dialog fails to open.
+ */
+export async function confirmDialog(message: string): Promise<boolean> {
+  if (isTauri()) {
+    try {
+      return await confirmNative(message);
+    } catch {
+      return false;
+    }
+  }
+  return window.confirm(message);
 }
 
 // --- shared reactive state (module-level singletons) ---
@@ -198,6 +218,22 @@ async function exportVersion(params: {
   output_path: string;
 }): Promise<string> {
   return invoke<string>("export_version", params);
+}
+
+/**
+ * Export the document's working copy (the library file that mirrors the current
+ * version and holds the user's uncommitted edits) to a file by copying it.
+ * Synchronous. Unlike `exportVersion` (which serves a committed archive
+ * snapshot), this captures the live working file - so an uncommitted document
+ * exports its uncommitted state, not the last committed version. Outside Tauri
+ * it is a no-op (browser dev has no library file to copy).
+ */
+async function exportWorkingCopy(params: {
+  document_id: string;
+  output_path: string;
+}): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("export_working_copy", params);
 }
 
 async function checkoutVersion(params: {
@@ -453,6 +489,7 @@ export function useVault() {
     loadRepoSize,
     commit,
     exportVersion,
+    exportWorkingCopy,
     checkoutVersion,
     deleteDocument,
     renameDocument,
