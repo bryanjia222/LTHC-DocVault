@@ -1,3 +1,5 @@
+mod blank_templates;
+
 use std::{
     fs::{self, File},
     io::{self, Seek, Write},
@@ -20,6 +22,8 @@ pub enum OoxmlError {
     Zip(#[from] zip::result::ZipError),
     #[error("unsafe OOXML package entry: {0}")]
     UnsafeEntry(String),
+    #[error("unsupported OOXML format: {0} (expected docx, xlsx, or pptx)")]
+    UnsupportedFormat(String),
 }
 
 pub type OoxmlResult<T> = Result<T, OoxmlError>;
@@ -190,6 +194,55 @@ pub fn manifest_for(path: impl AsRef<Path>) -> OoxmlResult<OoxmlManifest> {
     } else {
         file_manifest(path)
     }
+}
+
+/// Write a minimal but valid OOXML package for `format` (`"docx"`, `"xlsx"`, or
+/// `"pptx"`, case-insensitive) to `destination_path`. The package contains just
+/// enough parts for Word/Excel/PowerPoint to open it as an empty document and
+/// no `docProps`, so no author/timestamp metadata is baked in. Used by the
+/// desktop layer's "new blank document" flow. Returns
+/// [`OoxmlError::UnsupportedFormat`] for any other format (plain-text formats
+/// like txt/md are created by the caller with an empty write, not here).
+pub fn create_empty_package(
+    format: &str,
+    destination_path: impl AsRef<Path>,
+) -> OoxmlResult<()> {
+    let parts = match format.to_ascii_lowercase().as_str() {
+        "docx" => blank_templates::DOCX,
+        "xlsx" => blank_templates::XLSX,
+        "pptx" => blank_templates::PPTX,
+        other => return Err(OoxmlError::UnsupportedFormat(other.to_owned())),
+    };
+    let destination_path = destination_path.as_ref();
+    info!(
+        format,
+        destination = %destination_path.display(),
+        "creating blank OOXML package"
+    );
+    if let Some(parent) = destination_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file = File::create(destination_path)?;
+    let mut writer = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    write_package_from_parts(&mut writer, parts, options)?;
+    writer.finish()?;
+    debug!(format, "blank OOXML package written");
+    Ok(())
+}
+
+fn write_package_from_parts<W: Write + Seek>(
+    writer: &mut ZipWriter<W>,
+    parts: &[blank_templates::Part],
+    options: SimpleFileOptions,
+) -> OoxmlResult<()> {
+    for (relative, contents) in parts {
+        let zip_name = relative.replace('\\', "/");
+        writer.start_file(zip_name, options)?;
+        writer.write_all(contents.as_bytes())?;
+    }
+    Ok(())
 }
 
 fn add_directory_to_zip<W: Write + Seek>(
@@ -465,5 +518,39 @@ mod tests {
             fs::read(unpacked.join("docProps").join("core.xml")).unwrap(),
             b"core"
         );
+    }
+
+    #[test]
+    fn create_empty_package_writes_valid_packages() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        for (format, ext) in [("docx", "docx"), ("xlsx", "xlsx"), ("pptx", "pptx")] {
+            let path = temp_dir.path().join(format!("blank.{ext}"));
+            create_empty_package(format, &path).unwrap();
+
+            // Structurally a valid OOXML package (ZIP + [Content_Types].xml).
+            assert!(is_ooxml_package(&path), "{format} should be an OOXML package");
+
+            // Contains the content-types marker and the format's root part.
+            let manifest = package_manifest(&path).unwrap();
+            let paths: Vec<&str> = manifest.entries.iter().map(|e| e.path.as_str()).collect();
+            assert!(paths.contains(&"[Content_Types].xml"), "{format} lists [Content_Types].xml");
+            let root = match format {
+                "docx" => "word/document.xml",
+                "xlsx" => "xl/workbook.xml",
+                "pptx" => "ppt/presentation.xml",
+                _ => unreachable!(),
+            };
+            assert!(paths.contains(&root), "{format} lists its root part {root}");
+        }
+
+        // Case-insensitive format match.
+        let upper = temp_dir.path().join("blank.DOCX");
+        create_empty_package("DOCX", &upper).unwrap();
+        assert!(is_ooxml_package(&upper));
+
+        // Unknown format -> UnsupportedFormat (plain-text formats are the
+        // caller's responsibility, not this function).
+        let err = create_empty_package("txt", temp_dir.path().join("blank.txt")).unwrap_err();
+        assert!(matches!(err, OoxmlError::UnsupportedFormat(f) if f == "txt"));
     }
 }
