@@ -3,6 +3,8 @@ import { computed, nextTick, ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   FilePlus,
   FileText,
   Folder,
@@ -42,6 +44,20 @@ function toggleExpand(id: string) {
 }
 function expand(id: string) {
   if (!isExpanded(id)) expanded.value[id] = true;
+}
+/** Expand every project in the tree. Setting each id to `true` overrides the
+ *  "absent key = expanded" default explicitly (no-op for nodes already open). */
+function expandAll() {
+  const next = { ...expanded.value };
+  for (const p of projects.value) next[p.id] = true;
+  expanded.value = next;
+}
+/** Collapse every project that has children. Must write `false` explicitly,
+ *  since an absent key reads as expanded (so deleting keys would re-expand). */
+function collapseAll() {
+  const next = { ...expanded.value };
+  for (const p of projects.value) next[p.id] = false;
+  expanded.value = next;
 }
 
 // --- flattened tree rows (projects + the inline create row, with depth) ---
@@ -349,6 +365,28 @@ function indentFor(depth: number): string {
           @click.stop.prevent="openKebab($event, { kind: 'all' })"
         >
           <MoreVertical class="nav-icon" aria-hidden="true" />
+        </button>
+      </div>
+
+      <!-- expand-all / collapse-all controls for the project tree -->
+      <div v-if="projects.length" class="tree-toolbar">
+        <button
+          class="icon-btn tree-action"
+          type="button"
+          :title="t('sidebar.expandAll')"
+          :aria-label="t('sidebar.expandAll')"
+          @click="expandAll"
+        >
+          <ChevronsUpDown class="nav-icon" aria-hidden="true" />
+        </button>
+        <button
+          class="icon-btn tree-action"
+          type="button"
+          :title="t('sidebar.collapseAll')"
+          :aria-label="t('sidebar.collapseAll')"
+          @click="collapseAll"
+        >
+          <ChevronsDownUp class="nav-icon" aria-hidden="true" />
         </button>
       </div>
 
@@ -742,6 +780,19 @@ function indentFor(depth: number): string {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
+}
+
+/* Expand-all / collapse-all controls, sitting above the project tree. */
+.tree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 6px 2px;
+}
+
+.tree-action .nav-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .trash-row {

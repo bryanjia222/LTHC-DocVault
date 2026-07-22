@@ -81,7 +81,7 @@ export interface VaultStatus {
 /** Raw `docvault_jobs::JobRecord` as serialized by serde (snake_case). */
 export interface RawJob {
   id: string;
-  kind: "commit" | "export" | "checkout" | "delete" | "archive";
+  kind: "commit" | "export" | "checkout" | "delete" | "archive" | "create_blank";
   status: "running" | "succeeded" | "failed" | "cancelled";
   progress: number | null;
   error: string | null;

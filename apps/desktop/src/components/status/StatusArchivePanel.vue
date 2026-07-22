@@ -74,6 +74,9 @@ const repoSizeLabel = computed(() =>
   flex-direction: column;
   gap: 18px;
   min-height: 0;
+  /* Defense-in-depth: if a future layout change lets this flex item shrink
+     below its grid content, clip instead of spilling onto siblings below. */
+  overflow: hidden;
 }
 
 .archive-grid {

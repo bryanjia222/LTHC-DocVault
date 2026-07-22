@@ -288,7 +288,8 @@ function unassignDocumentFromProject(docId: string, projectId: string): void {
 
 /** True when `ancestorId` is `id` itself or an ancestor of `id` (walking the
  *  parent chain). Used to forbid reparenting a project under its own
- *  descendant, which would create a cycle. */
+ *  descendant, which would create a cycle, and to test project-subtree
+ *  membership when scoping/grouping the document list. */
 function isAncestorOrSelf(id: string, ancestorId: string): boolean {
   let cursor: string | null = id;
   // Bound the walk by the project count so a malformed cycle can't loop forever.
@@ -298,6 +299,22 @@ function isAncestorOrSelf(id: string, ancestorId: string): boolean {
     cursor = node?.parentId ?? null;
   }
   return false;
+}
+
+/** The full display path of a project from the root, names joined by " / "
+ *  (e.g. "Work / ProjectA / Sub"). Used as the group-header label when the
+ *  documents table is grouped by project. Walks the parent chain upward
+ *  (bounded like `isAncestorOrSelf`); a root project yields just its name. */
+function projectPath(id: string): string {
+  const names: string[] = [];
+  let cursor: string | null = id;
+  for (let i = 0; i <= projects.value.length && cursor; i++) {
+    const node = projects.value.find((p) => p.id === cursor);
+    if (!node) break;
+    names.unshift(node.name);
+    cursor = node.parentId;
+  }
+  return names.join(" / ");
 }
 
 /**
@@ -579,6 +596,8 @@ export function useDesktopState() {
     projectsFor,
     assignDocumentToProject,
     unassignDocumentFromProject,
+    isAncestorOrSelf,
+    projectPath,
     // sort prefs
     getSortPref,
     setSortPref,

@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 import { RotateCcw, Trash2 } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useVaultActions } from "../../composables/useVaultActions";
-import { typeCategory } from "../../utils/typeCategory";
+import { extOf } from "../../utils/file";
 import type { Document } from "../../data/mock";
 
 /*
@@ -75,7 +75,7 @@ function onEmptyTrash() {
               <td>
                 <div class="name-cell">
                   <span class="file-type">{{
-                    t(`filters.category.${typeCategory(document.type)}`)
+                    extOf(document.originalFilename) ?? ""
                   }}</span>
                   <strong>{{ document.name }}</strong>
                 </div>

@@ -20,6 +20,8 @@ export const zhCN = {
     newFile: "新建文件",
     moreActions: "更多操作",
     toggleExpand: "展开 / 折叠",
+    expandAll: "展开全部",
+    collapseAll: "折叠全部",
     projectPlaceholder: "项目名称…",
     renameProject: "重命名",
     deleteProject: "删除",
@@ -107,6 +109,7 @@ export const zhCN = {
     title: "新建文档",
     subtitle: "使用内置空白模板创建一个新文档。",
     formatLabel: "格式",
+    aspectRatioLabel: "幻灯片比例",
     nameLabel: "文档名称",
     namePlaceholder: "文档名称",
     submit: "创建",
@@ -169,6 +172,7 @@ export const zhCN = {
     searchPlaceholder: "搜索文档…",
     empty: "未匹配到文档，试试调整搜索条件。",
     emptyNoDocs: "还没有文档，添加第一个文档吧。",
+    unassigned: "未分组",
     columns: {
       name: "名称",
       owner: "所有者",
@@ -293,6 +297,7 @@ export const zhCN = {
     checkout: "切换版本",
     delete: "删除",
     archive: "压缩归档",
+    create_blank: "正在创建",
   },
   toast: {
     running: "进行中…",

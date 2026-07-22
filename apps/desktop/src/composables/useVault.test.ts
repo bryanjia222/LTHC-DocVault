@@ -176,6 +176,19 @@ describe("useVault - create_blank_document contract", () => {
       format: "XLSX",
     });
   });
+
+  it("forwards aspect_ratio for pptx (slide-size option)", async () => {
+    await vault.createBlankDocument({
+      name: "Deck",
+      format: "pptx",
+      aspect_ratio: "16:9",
+    });
+    expect(invokeArgs("create_blank_document")).toStrictEqual({
+      name: "Deck",
+      format: "pptx",
+      aspect_ratio: "16:9",
+    });
+  });
 });
 
 describe("useVault - export_version contract", () => {

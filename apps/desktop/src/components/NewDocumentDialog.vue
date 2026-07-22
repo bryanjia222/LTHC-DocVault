@@ -30,6 +30,11 @@ type BlankFormat = (typeof FORMATS)[number];
 
 const name = ref("");
 const format = ref<BlankFormat>("docx");
+/** Slide aspect ratio for a blank pptx; ignored for the other formats. 16:9 is
+ * the modern default. Surfaced only when `format` is pptx. */
+const ASPECT_RATIOS = ["16:9", "4:3"] as const;
+type AspectRatio = (typeof ASPECT_RATIOS)[number];
+const aspectRatio = ref<AspectRatio>("16:9");
 const error = ref("");
 const submitting = ref(false);
 // Tracks whether the dialog is closing because the work was submitted, so a
@@ -41,6 +46,7 @@ watch(newDocumentOpen, (open) => {
   if (!open) return;
   name.value = "";
   format.value = "docx";
+  aspectRatio.value = "16:9";
   error.value = "";
   submitting.value = false;
   submitted.value = false;
@@ -65,9 +71,13 @@ async function submit() {
     // Phase A runs synchronously inside createBlankDocument(): the new document
     // + its library copy (materialized from the embedded blank template) exist
     // once this resolves, so reload and baseline the working copy immediately.
-    // The returned id is the Phase B archive job (compress), which surfaces in
-    // the task bubble.
-    await createBlankDocument({ name: resolvedName, format: format.value });
+    // The returned id is the Phase B CreateBlank job (compress), which surfaces
+    // in the task bubble. `aspect_ratio` only matters for pptx.
+    await createBlankDocument({
+      name: resolvedName,
+      format: format.value,
+      ...(format.value === "pptx" ? { aspect_ratio: aspectRatio.value } : {}),
+    });
     await loadDocuments();
     const created =
       documents.value.find(
@@ -118,6 +128,15 @@ function close() {
         <select v-model="format" class="text-input">
           <option v-for="f in FORMATS" :key="f" :value="f">
             {{ t(`newDocument.formats.${f}`) }}
+          </option>
+        </select>
+      </label>
+
+      <label v-if="format === 'pptx'" class="field">
+        <span>{{ t("newDocument.aspectRatioLabel") }}</span>
+        <select v-model="aspectRatio" class="text-input">
+          <option v-for="r in ASPECT_RATIOS" :key="r" :value="r">
+            {{ r }}
           </option>
         </select>
       </label>

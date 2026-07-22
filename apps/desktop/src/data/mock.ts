@@ -128,7 +128,13 @@ export interface Document {
   projects?: string[];
 }
 
-export type JobKind = "commit" | "export" | "checkout" | "delete" | "archive";
+export type JobKind =
+  | "commit"
+  | "export"
+  | "checkout"
+  | "delete"
+  | "archive"
+  | "create_blank";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Job {

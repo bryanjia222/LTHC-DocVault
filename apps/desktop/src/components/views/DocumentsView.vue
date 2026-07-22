@@ -32,7 +32,9 @@ import {
   getParentLabel,
   shouldShowBaseVersion,
 } from "../../utils/versionTree";
-import { TYPE_CATEGORIES, typeCategory } from "../../utils/typeCategory";
+import { TYPE_CATEGORIES } from "../../utils/typeCategory";
+import { extOf } from "../../utils/file";
+import { groupDocumentsByProject } from "../../utils/projectGrouping";
 import type { SortKey } from "../../utils/sort";
 import type { SearchScope } from "../../utils/filter";
 import type { Document, ModificationStatus, Version } from "../../data/mock";
@@ -237,6 +239,24 @@ function projectName(id: string | null | undefined): string {
   if (!id) return "";
   return desktop.projects.value.find((p) => p.id === id)?.name ?? id;
 }
+
+/** Documents bucketed by their project's full path, for the per-group divider
+ *  headers. Multi-membership docs appear under each of their (in-scope) projects;
+ *  unassigned docs (all-documents view only) land in a trailing bucket. */
+const groupedDocuments = computed(() =>
+  groupDocumentsByProject({
+    docs: filteredDocuments.value,
+    projects: desktop.projects.value,
+    activeProjectId: activeProjectId.value,
+    isAncestorOrSelf: desktop.isAncestorOrSelf,
+    projectPath: desktop.projectPath,
+    unassignedLabel: t("documents.unassigned"),
+  }),
+);
+/** Show divider headers only when there's more than one group, so a single
+ *  project (or leaf) view stays clean while all-docs / parent-with-children
+ *  views get the per-path separators. */
+const showGroupHeaders = computed(() => groupedDocuments.value.length > 1);
 
 /** Remove the selected document from one project (keeps other memberships). */
 function removeProjectFromSelected(projectId: string) {
@@ -503,10 +523,18 @@ onBeforeUnmount(() => {
               </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody v-for="group in groupedDocuments" :key="group.key">
+            <tr v-if="showGroupHeaders" class="group-header">
+              <td colspan="6">
+                <div class="group-divider">
+                  <span class="group-label">{{ group.label }}</span>
+                  <span class="group-line" />
+                </div>
+              </td>
+            </tr>
             <tr
-              v-for="document in filteredDocuments"
-              :key="document.id"
+              v-for="document in group.docs"
+              :key="`${group.key}::${document.id}`"
               :class="{ selected: selectedDocumentId === document.id }"
               tabindex="0"
               role="button"
@@ -521,11 +549,14 @@ onBeforeUnmount(() => {
               <td>
                 <div class="name-cell">
                   <span class="file-type">{{
-                    t(`filters.category.${typeCategory(document.type)}`)
+                    extOf(document.originalFilename) ?? ""
                   }}</span>
                   <strong>{{ document.name }}</strong>
                 </div>
-                <div v-if="document.tags?.length" class="row-tags">
+                <div
+                  v-if="selectedDocumentId === document.id && document.tags?.length"
+                  class="row-tags"
+                >
                   <span v-for="tag in document.tags" :key="tag" class="row-tag">{{
                     tag
                   }}</span>
@@ -546,7 +577,9 @@ onBeforeUnmount(() => {
               </td>
               <td>{{ document.updatedAt }}</td>
             </tr>
-            <tr v-if="filteredDocuments.length === 0">
+          </tbody>
+          <tbody v-if="filteredDocuments.length === 0">
+            <tr>
               <td colspan="6" class="empty-state">
                 <div v-if="documents.length === 0" class="empty-cta">
                   <p>{{ t("documents.emptyNoDocs") }}</p>
@@ -1206,6 +1239,32 @@ tbody tr.selected {
   font-style: italic;
   text-align: center;
   white-space: normal;
+}
+
+/* Per-project group divider: the project's full path on a hairline, separating
+ * a parent's own docs from each child project's (and, in all-documents, one
+ * project's docs from the next). */
+.group-header td {
+  padding: 12px 10px 6px;
+}
+
+.group-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.group-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-soft);
 }
 
 .empty-cta {

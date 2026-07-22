@@ -234,11 +234,11 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
   display: flex;
   flex-direction: column;
   gap: 18px;
-}
-
-.status-pane {
-  /* The tasks panel manages its own min-height; let the tab scroll. */
-  min-height: 0;
+  /* Keep each pane at its natural height so .settings-view (overflow:auto)
+     scrolls instead of letting a flex child shrink below its content - which
+     previously caused the archive cards to spill out and overlap the
+     database/logging card below. */
+  flex-shrink: 0;
 }
 
 .settings-grid {

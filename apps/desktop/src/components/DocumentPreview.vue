@@ -27,7 +27,7 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 const props = defineProps<{ document: Document; version: Version | null }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
-const { previewVersion } = useVault();
+const { previewVersion, previewWorkingCopy } = useVault();
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -53,10 +53,18 @@ async function load() {
   notSupported.value = false;
   if (container.value) container.value.innerHTML = "";
   try {
-    const bytes = await previewVersion({
-      document_id: props.document.id,
-      version: props.version?.label ?? "current",
-    });
+    // When previewing the toolbar "current" view of a document with uncommitted
+    // edits, fetch the live working copy (the library file) so the preview
+    // reflects those edits - not the last committed version. A specific
+    // historical version (props.version set) is always the committed snapshot.
+    const wantsWorkingCopy =
+      props.document.modification === "modified" && props.version == null;
+    const bytes = wantsWorkingCopy
+      ? await previewWorkingCopy({ document_id: props.document.id })
+      : await previewVersion({
+          document_id: props.document.id,
+          version: props.version?.label ?? "current",
+        });
     if (cancelled) return;
     if (!bytes) {
       // No backend (browser dev) - nothing to preview.

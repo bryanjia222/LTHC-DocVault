@@ -20,6 +20,8 @@ export const enUS = {
     newFile: "New file",
     moreActions: "More actions",
     toggleExpand: "Expand / collapse",
+    expandAll: "Expand all",
+    collapseAll: "Collapse all",
     projectPlaceholder: "Project name…",
     renameProject: "Rename",
     deleteProject: "Delete",
@@ -108,6 +110,7 @@ export const enUS = {
     title: "New document",
     subtitle: "Create a blank document from a built-in empty template.",
     formatLabel: "Format",
+    aspectRatioLabel: "Slide ratio",
     nameLabel: "Document name",
     namePlaceholder: "Document name",
     submit: "Create",
@@ -170,6 +173,7 @@ export const enUS = {
     searchPlaceholder: "Search documents…",
     empty: "No documents match your search. Try adjusting the filters.",
     emptyNoDocs: "No documents yet. Add your first document.",
+    unassigned: "Unassigned",
     columns: {
       name: "Name",
       owner: "Owner",
@@ -295,6 +299,7 @@ export const enUS = {
     checkout: "Checkout",
     delete: "Delete",
     archive: "Archive",
+    create_blank: "Creating",
   },
   toast: {
     running: "Running…",

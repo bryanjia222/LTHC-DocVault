@@ -107,10 +107,15 @@ export function useDocuments() {
     // still in `documents` (enriched) so the bin view can show them.
     const visible = matched.filter((d) => !desktop.isTrashed(d.id));
     // Scope by the sidebar's active project AFTER the filter, so search + type
-    // filters compose with project grouping. null (the 文档 node) shows all.
+    // filters compose with project grouping. A selected project shows its own
+    // docs plus every descendant project's docs: a document is in scope when any
+    // of its memberships is the selected project or below it in the tree. `null`
+    // (the 文档 node) shows all.
     const pid = activeProjectId.value;
     const scoped = pid
-      ? visible.filter((d) => (d.projects ?? []).includes(pid))
+      ? visible.filter((d) =>
+          (d.projects ?? []).some((mp) => desktop.isAncestorOrSelf(mp, pid)),
+        )
       : visible;
     return sortDocuments(
       scoped,
