@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import {
+  ChevronDown,
+  ChevronRight,
+  FilePlus,
   FileText,
   Folder,
   FolderPlus,
+  MoreVertical,
   Pencil,
   Settings,
   Trash2,
@@ -13,32 +17,91 @@ import { useNavigation } from "../composables/useNavigation";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
 import { useDesktopState } from "../composables/useDesktopState";
+import { useDialogs } from "../composables/useDialogs";
 import { confirmDialog } from "../composables/useVault";
 import { useContextMenu } from "../composables/useContextMenu";
+import type { ProjectDef } from "../data/mock";
 
 const { t } = useI18n();
 const { activeSection, setSection } = useNavigation();
 const { navigate } = useVaultActions();
 const { activeProjectId, selectAll, selectProject } = useDocuments();
 const desktop = useDesktopState();
+const { openNewDocument } = useDialogs();
 
 const projects = computed(() => desktop.projects.value);
 
-// --- new project inline input ---
+/** A project is visible in the tree only while every ancestor is expanded.
+ *  Projects default to expanded (an absent key reads as expanded). */
+const expanded = ref<Record<string, boolean>>({});
+function isExpanded(id: string): boolean {
+  return expanded.value[id] !== false;
+}
+function toggleExpand(id: string) {
+  expanded.value[id] = !isExpanded(id);
+}
+function expand(id: string) {
+  if (!isExpanded(id)) expanded.value[id] = true;
+}
+
+// --- flattened tree rows (projects + the inline create row, with depth) ---
+interface FlatRow {
+  key: string;
+  kind: "project" | "create";
+  project?: ProjectDef;
+  depth: number;
+  hasChildren?: boolean;
+}
+
+/** Visible rows in tree order. The inline create-input row is inserted right
+ *  after its parent (or at the top for a root project) at the right depth. */
+const flatRows = computed<FlatRow[]>(() => {
+  const rows: FlatRow[] = [];
+  if (creating.value && createParentId.value === null) {
+    rows.push({ key: "__create__", kind: "create", depth: 0 });
+  }
+  const walk = (parentId: string | null, depth: number) => {
+    const children = projects.value.filter((p) => p.parentId === parentId);
+    for (const child of children) {
+      const hasChildren = projects.value.some((p) => p.parentId === child.id);
+      rows.push({
+        key: child.id,
+        kind: "project",
+        project: child,
+        depth,
+        hasChildren,
+      });
+      if (creating.value && createParentId.value === child.id) {
+        rows.push({ key: "__create__", kind: "create", depth: depth + 1 });
+      }
+      if (hasChildren && isExpanded(child.id)) {
+        walk(child.id, depth + 1);
+      }
+    }
+  };
+  walk(null, 0);
+  return rows;
+});
+
+// --- new project / sub-project inline input ---
 const creating = ref(false);
+const createParentId = ref<string | null>(null);
 const newName = ref("");
 const createError = ref("");
 const createInputEl = ref<HTMLInputElement | null>(null);
 
-function startCreate() {
+/** Start the inline create-input. `parentId` null = a root project. */
+function startCreate(parentId: string | null) {
+  createParentId.value = parentId;
   newName.value = "";
   createError.value = "";
   creating.value = true;
+  if (parentId) expand(parentId);
   nextTick(() => createInputEl.value?.focus());
 }
 
 function commitCreate() {
-  const id = desktop.createProject(newName.value);
+  const id = desktop.createProject(createParentId.value, newName.value);
   if (!id) {
     createError.value = newName.value.trim()
       ? t("sidebar.projectNameTaken")
@@ -46,6 +109,7 @@ function commitCreate() {
     return;
   }
   creating.value = false;
+  createParentId.value = null;
   newName.value = "";
   createError.value = "";
   selectProject(id);
@@ -54,6 +118,7 @@ function commitCreate() {
 
 function cancelCreate() {
   creating.value = false;
+  createParentId.value = null;
   newName.value = "";
   createError.value = "";
 }
@@ -91,42 +156,63 @@ function cancelRename() {
   editError.value = "";
 }
 
-// --- project context menu (rename / delete) ---
-// Positioning shares useContextMenu so a menu opened near the window's right or
-// bottom edge flips on-screen instead of being clipped. The target project id is
-// tracked separately - the composable only owns open + position.
+// --- kebab / right-click menu (shared) ---
+// One menu instance serves both the hover kebab button and the right-click on a
+// project row. Positioning shares useContextMenu so a menu near a window edge
+// flips on-screen. The target ({ all } | { project, id }) decides the items.
+type MenuTarget = { kind: "all" } | { kind: "project"; id: string };
 const {
-  open: ctxOpen,
-  pos: ctxPos,
-  menuRef: ctxMenuRef,
-  openAt: openCtxAt,
-  close: closeCtxMenu,
+  open: menuOpen,
+  pos: menuPos,
+  menuRef,
+  openAt: openMenuAt,
+  close: closeMenuRaw,
 } = useContextMenu();
-const ctxProjectId = ref<string | null>(null);
+const menuTarget = ref<MenuTarget | null>(null);
 
-function openCtx(event: MouseEvent, id: string) {
-  ctxProjectId.value = id;
-  openCtxAt(event);
+function openKebab(event: MouseEvent, target: MenuTarget) {
+  menuTarget.value = target;
+  openMenuAt(event);
 }
 
-function closeCtx() {
-  ctxProjectId.value = null;
-  closeCtxMenu();
+function closeMenu() {
+  menuTarget.value = null;
+  closeMenuRaw();
 }
 
-function ctxRename() {
-  const id = ctxProjectId.value;
+function actNewProject() {
+  closeMenu();
+  startCreate(null);
+}
+
+function actNewFile() {
+  const id =
+    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  closeMenu();
+  openNewDocument(id);
+}
+
+function actAddSubproject() {
+  const id =
+    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  closeMenu();
+  if (id) startCreate(id);
+}
+
+function actRename() {
+  const id =
+    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
   const proj = id ? projects.value.find((p) => p.id === id) : undefined;
-  closeCtx();
+  closeMenu();
   if (id && proj) startRename(id, proj.name);
 }
 
-async function ctxDelete() {
-  const id = ctxProjectId.value;
-  closeCtx();
-  if (!id) return;
-  const proj = projects.value.find((p) => p.id === id);
-  if (!proj) return;
+async function actDelete() {
+  const id =
+    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  const proj = id ? projects.value.find((p) => p.id === id) : undefined;
+  closeMenu();
+  if (!id || !proj) return;
   if (!(await confirmDialog(t("sidebar.confirmDeleteProject", { name: proj.name })))) {
     return;
   }
@@ -145,11 +231,13 @@ function onProjectClick(id: string) {
   setSection("documents");
 }
 
-// --- drag-and-drop: assign documents to projects + reorder projects ---
+// --- drag-and-drop: assign documents to projects; reparent projects ---
 /** Project id currently under the drag cursor, for the drop-target highlight. */
 const dragOverProjectId = ref<string | null>(null);
+const dragOverAll = ref(false);
 
-/** A project row is draggable to reorder it within the sidebar. */
+/** A project's main button is draggable to reparent it (drop on a project =
+ *  child, drop on all-documents = root). */
 function onProjectDragStart(event: DragEvent, id: string) {
   if (!event.dataTransfer) return;
   event.dataTransfer.setData("application/x-docvault-project", id);
@@ -171,11 +259,8 @@ function onProjectDragLeave(id: string) {
   if (dragOverProjectId.value === id) dragOverProjectId.value = null;
 }
 
-/**
- * Drop handler for a project row. A dropped document is assigned to the project
- * (multi-membership); a dropped project is reordered to the target's slot
- * (adjusted for the source's own removal so it lands on the target, not past it).
- */
+/** Drop on a project row: a dropped document is assigned (multi-membership);
+ *  a dropped project is reparented as a child of the target. */
 function onProjectDrop(event: DragEvent, targetId: string) {
   event.preventDefault();
   dragOverProjectId.value = null;
@@ -187,14 +272,37 @@ function onProjectDrop(event: DragEvent, targetId: string) {
     return;
   }
   const projId = dt.getData("application/x-docvault-project");
-  if (!projId || projId === targetId) return;
-  const from = projects.value.findIndex((p) => p.id === projId);
-  const targetIndex = projects.value.findIndex((p) => p.id === targetId);
-  if (from === -1 || targetIndex === -1) return;
-  desktop.moveProject(
-    projId,
-    from < targetIndex ? targetIndex - 1 : targetIndex,
-  );
+  if (projId && projId !== targetId) {
+    // reparentProject refuses cycles (dropping a project onto its own
+    // descendant) and unknown ids, returning false.
+    desktop.reparentProject(projId, targetId);
+  }
+}
+
+function onAllDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes("application/x-docvault-project")) {
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  dragOverAll.value = true;
+}
+
+function onAllDragLeave() {
+  dragOverAll.value = false;
+}
+
+/** Drop on the all-documents row reparents a dragged project to the root. */
+function onAllDrop(event: DragEvent) {
+  event.preventDefault();
+  dragOverAll.value = false;
+  const projId = event.dataTransfer?.getData("application/x-docvault-project");
+  if (projId) desktop.reparentProject(projId, null);
+}
+
+/** Indent (px) for a row at `depth`. */
+function indentFor(depth: number): string {
+  return `${12 + depth * 14}px`;
 }
 </script>
 
@@ -209,12 +317,16 @@ function onProjectDrop(event: DragEvent, targetId: string) {
     </div>
 
     <div class="nav-section" :aria-label="t('nav.primary')">
-      <!-- 文档 (all documents) row + add-project button -->
+      <!-- 文档 (all documents) row + kebab (replaces the old + button) -->
       <div
         class="nav-row"
         :class="{
           active: activeSection === 'documents' && !activeProjectId,
+          'drag-target': dragOverAll,
         }"
+        @dragover="onAllDragOver"
+        @dragleave="onAllDragLeave"
+        @drop="onAllDrop"
       >
         <button
           class="nav-main"
@@ -230,40 +342,47 @@ function onProjectDrop(event: DragEvent, targetId: string) {
           <span>{{ t("nav.allDocuments") }}</span>
         </button>
         <button
-          class="icon-btn"
+          class="icon-btn kebab-btn"
           type="button"
-          :title="t('sidebar.addProject')"
-          :aria-label="t('sidebar.addProject')"
-          @click="startCreate"
+          :title="t('sidebar.moreActions')"
+          :aria-label="t('sidebar.moreActions')"
+          @click.stop.prevent="openKebab($event, { kind: 'all' })"
         >
-          <FolderPlus class="nav-icon" aria-hidden="true" />
+          <MoreVertical class="nav-icon" aria-hidden="true" />
         </button>
       </div>
 
-      <!-- new project inline input -->
-      <div v-if="creating" class="project-input-row">
-        <Folder class="nav-icon sub-icon" aria-hidden="true" />
-        <input
-          ref="createInputEl"
-          v-model="newName"
-          type="text"
-          class="project-input"
-          :placeholder="t('sidebar.projectPlaceholder')"
-          @input="createError = ''"
-          @keydown.enter="commitCreate"
-          @keydown.escape="cancelCreate"
-          @blur="cancelCreate"
-        />
-      </div>
-      <p v-if="createError" class="field-error">{{ createError }}</p>
-
-      <!-- project sub-items -->
+      <!-- tree: projects (+ inline create/rename rows), flattened with depth -->
       <div class="project-list">
-        <template v-for="proj in projects" :key="proj.id">
+        <template v-for="row in flatRows" :key="row.key">
+          <!-- inline create-input row -->
           <div
-            v-if="editingId === proj.id"
+            v-if="row.kind === 'create'"
             class="project-input-row"
+            :style="{ paddingLeft: indentFor(row.depth) }"
           >
+            <span class="caret-spacer" />
+            <Folder class="nav-icon sub-icon" aria-hidden="true" />
+            <input
+              ref="createInputEl"
+              v-model="newName"
+              type="text"
+              class="project-input"
+              :placeholder="t('sidebar.projectPlaceholder')"
+              @input="createError = ''"
+              @keydown.enter="commitCreate"
+              @keydown.escape="cancelCreate"
+              @blur="cancelCreate"
+            />
+          </div>
+
+          <!-- rename-input row (replaces the project button while editing) -->
+          <div
+            v-else-if="editingId === row.project?.id"
+            class="project-input-row"
+            :style="{ paddingLeft: indentFor(row.depth) }"
+          >
+            <span class="caret-spacer" />
             <Folder class="nav-icon sub-icon" aria-hidden="true" />
             <input
               ref="editInputEl"
@@ -276,36 +395,74 @@ function onProjectDrop(event: DragEvent, targetId: string) {
               @blur="cancelRename"
             />
           </div>
-          <button
+
+          <!-- project row -->
+          <div
             v-else
             class="nav-row project-row"
             :class="{
               active:
-                activeSection === 'documents' && activeProjectId === proj.id,
-              'drag-target': dragOverProjectId === proj.id,
+                activeSection === 'documents' &&
+                activeProjectId === row.project?.id,
+              'drag-target': dragOverProjectId === row.project?.id,
             }"
-            type="button"
-            draggable="true"
-            :aria-current="
-              activeSection === 'documents' && activeProjectId === proj.id
-                ? 'page'
-                : undefined
-            "
+            :style="{ paddingLeft: indentFor(row.depth) }"
             :title="t('sidebar.projectDropHint')"
-            @click="onProjectClick(proj.id)"
-            @contextmenu.prevent.stop="openCtx($event, proj.id)"
-            @dragstart="onProjectDragStart($event, proj.id)"
-            @dragover.prevent="onProjectDragOver($event, proj.id)"
-            @dragleave="onProjectDragLeave(proj.id)"
-            @drop.prevent="onProjectDrop($event, proj.id)"
+            @dragover="onProjectDragOver($event, row.project!.id)"
+            @dragleave="onProjectDragLeave(row.project!.id)"
+            @drop="onProjectDrop($event, row.project!.id)"
           >
-            <Folder class="nav-icon sub-icon" aria-hidden="true" />
-            <span class="project-name">{{ proj.name }}</span>
-          </button>
+            <button
+              v-if="row.hasChildren"
+              class="icon-btn caret-btn"
+              type="button"
+              :aria-label="t('sidebar.toggleExpand')"
+              :aria-expanded="isExpanded(row.project!.id)"
+              @click.stop="toggleExpand(row.project!.id)"
+            >
+              <ChevronDown
+                v-if="isExpanded(row.project!.id)"
+                class="nav-icon"
+                aria-hidden="true"
+              />
+              <ChevronRight v-else class="nav-icon" aria-hidden="true" />
+            </button>
+            <span v-else class="caret-spacer" />
+            <button
+              class="nav-main project-main"
+              type="button"
+              :aria-current="
+                activeSection === 'documents' && activeProjectId === row.project?.id
+                  ? 'page'
+                  : undefined
+              "
+              draggable="true"
+              @click="onProjectClick(row.project!.id)"
+              @contextmenu.prevent.stop="
+                openKebab($event, { kind: 'project', id: row.project!.id })
+              "
+              @dragstart="onProjectDragStart($event, row.project!.id)"
+            >
+              <Folder class="nav-icon sub-icon" aria-hidden="true" />
+              <span class="project-name">{{ row.project!.name }}</span>
+            </button>
+            <button
+              class="icon-btn kebab-btn"
+              type="button"
+              :title="t('sidebar.moreActions')"
+              :aria-label="t('sidebar.moreActions')"
+              @click.stop.prevent="
+                openKebab($event, { kind: 'project', id: row.project!.id })
+              "
+            >
+              <MoreVertical class="nav-icon" aria-hidden="true" />
+            </button>
+          </div>
         </template>
         <p v-if="projects.length === 0 && !creating" class="empty-hint">
           {{ t("sidebar.noProjects") }}
         </p>
+        <p v-if="createError" class="field-error">{{ createError }}</p>
         <p v-if="editError" class="field-error">{{ editError }}</p>
       </div>
     </div>
@@ -335,32 +492,61 @@ function onProjectDrop(event: DragEvent, targetId: string) {
       <span>{{ t("nav.settings") }}</span>
     </button>
 
-    <!-- project context menu -->
+    <!-- kebab / right-click menu -->
     <Teleport to="body">
       <div
-        v-if="ctxOpen"
+        v-if="menuOpen"
         class="ctx-backdrop"
-        @click="closeCtx"
-        @contextmenu.prevent="closeCtx"
+        @click="closeMenu"
+        @contextmenu.prevent="closeMenu"
       >
         <ul
-          ref="ctxMenuRef"
+          ref="menuRef"
           class="ctx-menu"
-          :style="{ top: `${ctxPos.y}px`, left: `${ctxPos.x}px` }"
+          :style="{ top: `${menuPos.y}px`, left: `${menuPos.x}px` }"
           @click.stop
         >
-          <li>
-            <button type="button" @click="ctxRename">
-              <Pencil class="nav-icon" aria-hidden="true" />
-              {{ t("sidebar.renameProject") }}
-            </button>
-          </li>
-          <li>
-            <button type="button" class="danger" @click="ctxDelete">
-              <Trash2 class="nav-icon" aria-hidden="true" />
-              {{ t("sidebar.deleteProject") }}
-            </button>
-          </li>
+          <template v-if="menuTarget?.kind === 'all'">
+            <li>
+              <button type="button" @click="actNewProject">
+                <FolderPlus class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.addProject") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actNewFile">
+                <FilePlus class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.newFile") }}
+              </button>
+            </li>
+          </template>
+          <template v-else>
+            <li>
+              <button type="button" @click="actAddSubproject">
+                <FolderPlus class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.addSubProject") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actNewFile">
+                <FilePlus class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.newFile") }}
+              </button>
+            </li>
+            <li class="ctx-divider" />
+            <li>
+              <button type="button" @click="actRename">
+                <Pencil class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.renameProject") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" class="danger" @click="actDelete">
+                <Trash2 class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.deleteProject") }}
+              </button>
+            </li>
+          </template>
         </ul>
       </div>
     </Teleport>
@@ -412,7 +598,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 .nav-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
   height: 38px;
@@ -434,7 +620,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   font-weight: 650;
 }
 
-/* Drop target while dragging a document (assign) or project (reorder) onto it. */
+/* Drop target while dragging a document (assign) or project (reparent) onto it. */
 .nav-row.drag-target {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -444,7 +630,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   height: 100%;
   padding: 0;
@@ -453,19 +639,21 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   color: inherit;
   text-align: left;
   font: inherit;
+  cursor: pointer;
 }
 
 .icon-btn {
   display: grid;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
+  cursor: pointer;
 }
 
 .icon-btn:hover {
@@ -473,8 +661,31 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   color: var(--text-primary);
 }
 
+/* Kebab (more-actions) button: hidden by default, revealed on hover/focus so
+ * the row stays clean. Also shown for the active row + while focused within. */
+.kebab-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.nav-row:hover .kebab-btn,
+.nav-row:focus-within .kebab-btn,
+.nav-row.active .kebab-btn {
+  opacity: 1;
+}
+
+.caret-btn .nav-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.caret-spacer {
+  width: 24px;
+  flex-shrink: 0;
+}
+
 .project-row {
-  padding-left: 28px;
+  gap: 2px;
 }
 
 .project-name {
@@ -486,10 +697,10 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 .project-input-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   height: 38px;
-  padding: 0 12px 0 28px;
+  padding-right: 12px;
 }
 
 .project-input {
@@ -516,13 +727,13 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 }
 
 .field-error {
-  margin: 2px 0 0 28px;
+  margin: 2px 0 0 12px;
   color: var(--danger-text);
   font-size: 11px;
 }
 
 .empty-hint {
-  margin: 4px 0 0 28px;
+  margin: 4px 0 0 12px;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -574,7 +785,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 
 .ctx-menu {
   position: fixed;
-  min-width: 160px;
+  min-width: 180px;
   margin: 0;
   padding: 4px;
   list-style: none;
@@ -596,6 +807,7 @@ function onProjectDrop(event: DragEvent, targetId: string) {
   color: var(--text-primary);
   text-align: left;
   font: inherit;
+  cursor: pointer;
 }
 
 .ctx-menu button:hover {
@@ -604,5 +816,11 @@ function onProjectDrop(event: DragEvent, targetId: string) {
 
 .ctx-menu button.danger {
   color: var(--danger-text);
+}
+
+.ctx-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-soft);
 }
 </style>

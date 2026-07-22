@@ -26,11 +26,15 @@ import { useDesktopState } from "../composables/useDesktopState";
 
 const { t } = useI18n();
 const { switchBackendOpen, closeSwitchBackend } = useDialogs();
-const { config, connect, isTauri, recommendedRoot, probeVault } = useVault();
+const { connect, isTauri, recommendedRoot, probeVault } = useVault();
 const desktop = useDesktopState();
 
 const dir = ref("");
-const backend = ref<"local-copy" | "restic">("local-copy");
+// New vaults default to restic - the local-copy backend is hidden from the
+// selector (it is a dev/simple backend, not the recommended one). An existing
+// vault whose backend is local-copy is still opened correctly: the dir watcher
+// restores its real backend and the locked control shows it read-only.
+const backend = ref<"local-copy" | "restic">("restic");
 const password = ref("");
 const status = ref("");
 const error = ref("");
@@ -45,7 +49,9 @@ watch(switchBackendOpen, (open) => {
   // Pre-fill the recommended location: submitting as-is creates a new vault
   // there (empty dir); browsing lets the user pick an existing vault to open.
   dir.value = recommendedRoot.value;
-  backend.value = config.value.backend === "restic" ? "restic" : "local-copy";
+  // New vaults always default to restic (local-copy is hidden). An existing
+  // vault's real backend is restored by the `dir` watcher once probed.
+  backend.value = "restic";
   password.value = "";
   status.value = "";
   error.value = "";
@@ -152,18 +158,20 @@ function close() {
 
       <label class="field">
         <span>{{ t("connect.backend") }}</span>
-        <select
-          v-model="backend"
-          class="text-input"
-          :disabled="backendLocked"
-          :title="backendLocked ? t('connect.backendLocked') : ''"
-        >
-          <option value="local-copy">{{ t("backend.local-copy") }}</option>
+        <!-- An existing vault's backend is fixed by its config.toml; show it
+             read-only (this includes local-copy vaults - they are opened, just
+             not offered as a choice for new vaults). -->
+        <p v-if="backendLocked" class="backend-readonly">
+          {{ t(`backend.${backend}`) }}
+        </p>
+        <!-- A new vault: only restic is offered (local-copy is hidden). -->
+        <select v-else v-model="backend" class="text-input">
           <option value="restic">{{ t("backend.restic") }}</option>
         </select>
       </label>
 
       <p v-if="backendLocked" class="dialog-hint">{{ t("connect.backendLocked") }}</p>
+      <p v-else class="dialog-hint">{{ t("connect.backendResticOnly") }}</p>
 
       <label v-if="backend === 'restic' && !backendLocked" class="field">
         <span>{{ t("connect.password") }}</span>
@@ -235,6 +243,19 @@ function close() {
 
 select.text-input {
   padding-right: 28px;
+}
+
+.backend-readonly {
+  margin: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: 13px;
 }
 
 .file-row {

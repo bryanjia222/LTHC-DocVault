@@ -40,6 +40,10 @@ const repoSizeLabel = computed(() =>
             <dt>{{ t("archive.bundledBinary") }}</dt>
             <dd class="mono break">{{ config.resticPath }}</dd>
           </div>
+          <div>
+            <dt>{{ t("archive.resticPassword") }}</dt>
+            <dd>{{ t("archive.hidden") }}</dd>
+          </div>
         </dl>
       </div>
 

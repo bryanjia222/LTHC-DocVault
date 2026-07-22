@@ -84,10 +84,15 @@ pub enum ConnectError {
 /// DocVault backend has no folder concept, so projects are desktop-local
 /// annotations (like tags): each vault root owns its own project list. `id` is a
 /// client-generated stable identifier (UUID); `name` is the display label.
+/// `parent_id` (None for a root project) supports nesting - a sub-project hangs
+/// off its parent. Older state files that predate nesting omit `parent_id` and
+/// deserialize as root projects (None), so no migration is needed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectDef {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 /// Desktop-local annotations for one vault, stored in `desktop-state.json`

@@ -63,6 +63,63 @@ pub fn commit_document(
     Ok(job_id)
 }
 
+/// Create a brand-new blank document of the given format (`txt`/`md`/`docx`/
+/// `xlsx`/`pptx`) and commit its first version through the same two-phase
+/// pipeline as [`commit_document`]. Phase A (here, synchronous) writes a
+/// durable intake copy of a freshly generated blank file + the `pending` DB
+/// row + materializes the library copy; the Phase B Archive job then finalizes
+/// it. Returns the archive job id.
+///
+/// The blank source is generated, not supplied: txt/md are empty files, the
+/// Office formats are minimal valid OOXML packages from
+/// `docvault_ooxml::create_empty_package`. The new document's membership in a
+/// project (if any) is the frontend's concern - it owns desktop-state and sets
+/// it after the job reaches a terminal state, so `project_id` is not taken here.
+#[tauri::command(rename_all = "snake_case")]
+pub fn create_blank_document(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    format: String,
+) -> Result<String, String> {
+    let format = format.to_ascii_lowercase();
+    let (source_path, _temp_dir) = write_blank_source(&format)?;
+    let document_ref = DocumentRef::NewName(name.clone());
+    let metadata = CommitMetadata::default();
+    let (_document, version) = phase_a_commit(&state.vault, &source_path, document_ref, metadata)?;
+    let vault = state.vault.clone();
+    let version_for_job = version.clone();
+    let on_event = make_emitter(app);
+    let job_id = state.jobs.spawn(
+        JobKind::Archive,
+        name,
+        on_event,
+        move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+            execute_archive(&vault, &version_for_job, cancel)
+        },
+    );
+    Ok(job_id)
+}
+
+/// Write a blank source file for `format` to a fresh temp dir and return its
+/// path together with the dir handle. txt/md get an empty file; docx/xlsx/pptx
+/// get a minimal valid OOXML package from `docvault_ooxml::create_empty_package`.
+/// The caller must hold the returned `TempDir` until after [`phase_a_commit`],
+/// which durably copies the source into the vault's intake (so the temp file is
+/// unneeded once that returns).
+fn write_blank_source(format: &str) -> Result<(PathBuf, tempfile::TempDir), String> {
+    let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let source_path = temp_dir.path().join(format!("blank.{format}"));
+    match format {
+        "txt" | "md" => std::fs::write(&source_path, b"").map_err(|e| e.to_string())?,
+        "docx" | "xlsx" | "pptx" => {
+            docvault_ooxml::create_empty_package(format, &source_path).map_err(|e| e.to_string())?
+        }
+        other => return Err(format!("unsupported document format: {other}")),
+    }
+    Ok((source_path, temp_dir))
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub fn export_version(
     app: AppHandle,
@@ -552,6 +609,85 @@ mod tests {
         // Raw binary -> single-entry whole-file manifest.
         assert_eq!(versions[0].manifest.entries.len(), 1);
         assert_eq!(versions[0].manifest.entries[0].path, "notes.txt");
+    }
+
+    /// `write_blank_source` produces a valid blank file for every supported
+    /// format: an empty file for txt/md, a minimal valid OOXML package for
+    /// docx/xlsx/pptx (recognized by content, not extension).
+    #[test]
+    fn write_blank_source_produces_valid_files() {
+        for format in ["txt", "md", "docx", "xlsx", "pptx"] {
+            let (path, _temp) = write_blank_source(format).expect("blank source written");
+            assert!(path.exists(), "{format} source exists");
+            match format {
+                "txt" | "md" => {
+                    assert_eq!(
+                        path.metadata().unwrap().len(),
+                        0,
+                        "{format} is empty"
+                    );
+                }
+                "docx" | "xlsx" | "pptx" => {
+                    assert!(
+                        docvault_ooxml::is_ooxml_package(&path),
+                        "{format} is a valid OOXML package"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+        // Unknown format is rejected.
+        assert!(
+            write_blank_source("pdf").is_err(),
+            "unsupported format rejected"
+        );
+    }
+
+    /// A blank docx (from `write_blank_source`) flows through the full Phase A +
+    /// Phase B pipeline: the document + version appear, the library copy is
+    /// materialized, and the Archive job finalizes the version. Mirrors the
+    /// `create_blank_document` command path (Phase A + an Archive job).
+    #[test]
+    fn blank_document_archives_through_commit_pipeline() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(temp.path());
+        write_local_copy_config(&paths);
+        let storage = VaultStorage::init(paths).unwrap();
+        let vault: Arc<Mutex<Option<DocVault>>> =
+            Arc::new(Mutex::new(Some(DocVault::new(storage))));
+
+        let (source, _blank_temp) = write_blank_source("docx").unwrap();
+        let path = source.to_string_lossy().to_string();
+
+        let registry = JobRegistry::new();
+        let (job_id, terminal, doc_id) = commit_and_spawn_archive(
+            &registry,
+            Arc::clone(&vault),
+            path,
+            DocumentRef::NewName("blank doc".to_owned()),
+        );
+        wait_for_terminal(&terminal);
+
+        let record = registry.get(&job_id).expect("job recorded");
+        assert_eq!(record.status, JobStatus::Succeeded);
+        assert!(record.error.is_none(), "unexpected error: {:?}", record.error);
+
+        let vault = vault.lock().unwrap();
+        let vault = vault.as_ref().unwrap();
+        let versions = vault.list_versions(&DocumentRef::IdPrefix(doc_id.clone())).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].archive_status, "archived");
+        // The blank source is `blank.docx`, so the version's original filename
+        // carries the .docx extension (drives type/extension derivation).
+        assert_eq!(versions[0].original_filename, "blank.docx");
+        // OOXML -> multi-entry package manifest (not a single raw entry).
+        assert!(
+            versions[0].manifest.entries.len() > 1,
+            "blank docx archived as an OOXML package"
+        );
+        // Phase A materialized the library copy.
+        let lib_path = crate::library::library_path_for_doc(vault, &doc_id).unwrap();
+        assert!(lib_path.exists(), "library copy materialized");
     }
 
     /// Run Phase A synchronously, then spawn the Phase B Archive job. Returns

@@ -41,6 +41,15 @@ const docA: Document = {
       createdAt: "",
       status: "current",
     },
+    {
+      id: "a0",
+      label: "a0",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "archived",
+    },
   ],
 };
 
@@ -105,6 +114,9 @@ describe("useVaultActions - runAction routing", () => {
 
 describe("useVaultActions - checkout", () => {
   it("does not invoke when not running under Tauri", async () => {
+    // Select an archived version so the only gate exercised is `isTauri()` -
+    // otherwise the current-version guard would short-circuit first.
+    docs.selectedVersionId.value = "a0";
     actions.runAction("actionLogs.checkout");
     await flush();
     expect(invoke).not.toHaveBeenCalled();
@@ -112,6 +124,8 @@ describe("useVaultActions - checkout", () => {
 
   it("derives the library path and writes it via output_path (no save dialog)", async () => {
     asTauri();
+    // Checkout switches an archived version to current; select the archived a0.
+    docs.selectedVersionId.value = "a0";
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "library_path") return "/vault/library/docA.docx";
       return "job-1";
@@ -123,7 +137,7 @@ describe("useVaultActions - checkout", () => {
       });
       expect(invoke).toHaveBeenCalledWith("checkout_version", {
         document_id: docA.id,
-        version: docA.versions[0].label,
+        version: "a0",
         output_path: "/vault/library/docA.docx",
       });
     });
@@ -135,6 +149,20 @@ describe("useVaultActions - checkout", () => {
       docId: docA.id,
       path: "/vault/library/docA.docx",
     });
+  });
+
+  it("does not invoke when the selected version is already current", async () => {
+    asTauri();
+    // docA's default-selected version (a1) is current -> switching to it is a
+    // no-op, so checkout bails before any backend call.
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "library_path") return "/vault/library/docA.docx";
+      return "job-1";
+    });
+    actions.runAction("actionLogs.checkout");
+    await flush();
+    expect(invoke).not.toHaveBeenCalledWith("checkout_version", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("library_path", expect.anything());
   });
 
   it("does not invoke when no document is selected", async () => {

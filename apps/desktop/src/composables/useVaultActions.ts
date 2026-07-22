@@ -248,6 +248,13 @@ export function useVaultActions() {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
+    // Checkout switches the current-version pointer. Switching to the version
+    // that is already current is a no-op (and would just rewrite the library
+    // copy with identical bytes), so refuse it up front with a clear log line.
+    if (ver.status === "current") {
+      log(t("log.alreadyCurrent", { name: doc.name, version: ver.label }));
+      return;
+    }
     if (!isTauri()) return;
     try {
       // Checkout switches the current version pointer AND overwrites the

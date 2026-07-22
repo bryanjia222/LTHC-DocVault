@@ -12,6 +12,7 @@ import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
 import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
 import NoteEditDialog from "./components/NoteEditDialog.vue";
+import NewDocumentDialog from "./components/NewDocumentDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
@@ -187,6 +188,7 @@ onBeforeUnmount(() => {
     <DocumentStatusDialog />
     <RenameDialog />
     <NoteEditDialog />
+    <NewDocumentDialog />
     <AppContextMenu />
     <ToastHost />
   </div>

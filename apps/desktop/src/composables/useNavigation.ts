@@ -10,7 +10,7 @@ import { ref } from "vue";
  */
 
 export type NavigationId = "documents" | "settings" | "trash";
-export type SettingsTab = "status" | "storage" | "appearance";
+export type SettingsTab = "status" | "appearance";
 
 const activeSection = ref<NavigationId>("documents");
 const settingsTab = ref<SettingsTab>("status");
@@ -20,7 +20,7 @@ export function useNavigation() {
     activeSection.value = id;
   }
 
-  /** Switch to Settings and open the requested tab (status/storage/appearance).
+  /** Switch to Settings and open the requested tab (status/appearance).
    * Used by the sidebar, command palette, and the "状态" quick command. */
   function openSettingsTab(tab: SettingsTab) {
     settingsTab.value = tab;

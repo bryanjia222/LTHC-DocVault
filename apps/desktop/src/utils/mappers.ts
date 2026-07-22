@@ -6,6 +6,7 @@ import type {
   FileProbe,
   FileStat,
   Job,
+  ProjectDef,
   TrackedFile,
   VaultConfigPreview,
   Version,
@@ -103,6 +104,7 @@ export interface RawTrackedFile {
 export interface RawProjectDef {
   id: string;
   name: string;
+  parent_id?: string | null;
 }
 
 export interface RawSortPref {
@@ -261,10 +263,20 @@ export function mapDesktopState(raw: RawDesktopState): DesktopState {
     // `projects`/`assignments`/`sort_prefs`/`trashed` are newer fields; default
     // to empty so older state files (and test fixtures) that omit them don't
     // leak `undefined`.
-    projects: raw.projects ?? [],
+    projects: (raw.projects ?? []).map(mapProject),
     assignments: raw.assignments ?? {},
     sortPrefs: raw.sort_prefs ?? {},
     trashed: raw.trashed ?? [],
+  };
+}
+
+/** Map a raw (snake_case wire) project to the view-model. `parent_id` becomes
+ *  `parentId` (null when absent, marking a root project). */
+export function mapProject(raw: RawProjectDef): ProjectDef {
+  return {
+    id: raw.id,
+    name: raw.name,
+    parentId: raw.parent_id ?? null,
   };
 }
 

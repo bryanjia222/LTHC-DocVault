@@ -19,6 +19,7 @@ import {
   type RawDesktopState,
   type RawFileProbe,
   type RawFileStat,
+  type RawProjectDef,
   type RawTrackedFile,
 } from "../utils/mappers";
 import {
@@ -119,13 +120,22 @@ function toRawTrackedFile(file: TrackedFile): RawTrackedFile {
   return raw;
 }
 
+/** View-model ProjectDef -> the snake_case payload (parent_id) the Rust
+ *  `ProjectDef` deserializes. `parent_id` is omitted when null so root projects
+ *  serialize cleanly (serde defaults it to None on the other side). */
+function toRawProject(project: ProjectDef): RawProjectDef {
+  const raw: RawProjectDef = { id: project.id, name: project.name };
+  if (project.parentId !== null) raw.parent_id = project.parentId;
+  return raw;
+}
+
 async function saveDesktopState(): Promise<void> {
   if (!isTauri()) return;
   try {
     await invoke("set_desktop_state", {
       tags: tags.value,
       tracked: tracked.value.map(toRawTrackedFile),
-      projects: projects.value,
+      projects: projects.value.map(toRawProject),
       assignments: assignments.value,
       sort_prefs: sortPrefs.value,
       trashed: trashed.value,
@@ -173,43 +183,65 @@ function makeProjectId(): string {
 }
 
 /**
- * Create a project folder and persist it, returning the new id. Rejects empty /
- * whitespace names and names already in use (case-insensitive) by returning
- * null, so the caller can surface a validation error.
+ * Create a project folder under `parentId` (null for a root project) and
+ * persist it, returning the new id. Rejects empty/whitespace names and names
+ * already in use among the project's *siblings* (same parent, case-insensitive)
+ * by returning null, so the caller can surface a validation error. Sibling-level
+ * uniqueness (not global) lets two sub-projects under different parents share a
+ * name.
  */
-function createProject(name: string): string | null {
+function createProject(parentId: string | null, name: string): string | null {
   const clean = name.trim();
   if (!clean) return null;
+  const parent = parentId ?? null;
   const lower = clean.toLowerCase();
-  if (projects.value.some((p) => p.name.toLowerCase() === lower)) return null;
+  const isSibling = (p: ProjectDef) => (p.parentId ?? null) === parent;
+  if (projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)) {
+    return null;
+  }
   const id = makeProjectId();
-  projects.value = [...projects.value, { id, name: clean }];
+  projects.value = [...projects.value, { id, name: clean, parentId: parent }];
   void saveDesktopState();
   return id;
 }
 
-/** Rename a project. Returns false (no-op) on empty name, a name taken by
- * another project, or an unknown id. */
+/** Rename a project. Returns false (no-op) on empty name, a name taken by a
+ * sibling (same parent), or an unknown id. */
 function renameProject(id: string, name: string): boolean {
   const clean = name.trim();
   if (!clean) return false;
+  const target = projects.value.find((p) => p.id === id);
+  if (!target) return false;
+  const parent = target.parentId ?? null;
   const lower = clean.toLowerCase();
-  if (projects.value.some((p) => p.id !== id && p.name.toLowerCase() === lower)) {
+  const isSibling = (p: ProjectDef) =>
+    p.id !== id && (p.parentId ?? null) === parent;
+  if (projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)) {
     return false;
   }
-  if (!projects.value.some((p) => p.id === id)) return false;
   projects.value = projects.value.map((p) => (p.id === id ? { ...p, name: clean } : p));
   void saveDesktopState();
   return true;
 }
 
 /**
- * Delete a project folder. Documents assigned to it are not deleted - the
- * project id is simply dropped from each document's membership list, so the doc
- * remains in the vault (and any other projects it belongs to).
+ * Delete a project folder. Its direct children are re-parented to the deleted
+ * project's parent (so a deleted sub-project's sub-projects move up rather than
+ * becoming orphaned). Documents assigned to it are not deleted - the project id
+ * is simply dropped from each document's membership list, so the doc remains in
+ * the vault (and any other projects it belongs to).
  */
 function deleteProject(id: string): void {
-  if (!projects.value.some((p) => p.id === id)) return;
+  const target = projects.value.find((p) => p.id === id);
+  if (!target) return;
+  const newParent = target.parentId ?? null;
+  projects.value = projects.value.map((p) =>
+    p.id === id
+      ? p // removed below
+      : (p.parentId ?? null) === id
+        ? { ...p, parentId: newParent }
+        : p,
+  );
   projects.value = projects.value.filter((p) => p.id !== id);
   const next: Record<string, string[]> = {};
   for (const [docId, pids] of Object.entries(assignments.value)) {
@@ -254,17 +286,40 @@ function unassignDocumentFromProject(docId: string, projectId: string): void {
   void saveDesktopState();
 }
 
-/** Move a project to a new index in the sidebar order (drag-to-reorder). Clamps
- *  the target index into range and no-ops on unknown id. Persisted. */
-function moveProject(id: string, newIndex: number): void {
-  const from = projects.value.findIndex((p) => p.id === id);
-  if (from === -1) return;
-  const list = [...projects.value];
-  const [moved] = list.splice(from, 1);
-  const clamped = Math.max(0, Math.min(newIndex, list.length));
-  list.splice(clamped, 0, moved);
-  projects.value = list;
+/** True when `ancestorId` is `id` itself or an ancestor of `id` (walking the
+ *  parent chain). Used to forbid reparenting a project under its own
+ *  descendant, which would create a cycle. */
+function isAncestorOrSelf(id: string, ancestorId: string): boolean {
+  let cursor: string | null = id;
+  // Bound the walk by the project count so a malformed cycle can't loop forever.
+  for (let i = 0; i <= projects.value.length && cursor; i++) {
+    if (cursor === ancestorId) return true;
+    const node = projects.value.find((p) => p.id === cursor);
+    cursor = node?.parentId ?? null;
+  }
+  return false;
+}
+
+/**
+ * Move a project under a new parent (`newParentId` null = root). Refuses to
+ * reparent a project under itself or one of its own descendants (would create a
+ * cycle) and returns false; unknown ids return false. Persisted.
+ */
+function reparentProject(id: string, newParentId: string | null): boolean {
+  if (!projects.value.some((p) => p.id === id)) return false;
+  const parent = newParentId ?? null;
+  if (parent !== null) {
+    if (parent === id) return false;
+    if (!projects.value.some((p) => p.id === parent)) return false;
+    // A cycle would form if `id` is already an ancestor-or-self of the new
+    // parent (moving `id` under its own descendant).
+    if (isAncestorOrSelf(parent, id)) return false;
+  }
+  projects.value = projects.value.map((p) =>
+    p.id === id ? { ...p, parentId: parent } : p,
+  );
   void saveDesktopState();
+  return true;
 }
 
 /** The persisted table sort for a view (project id or "__all__"), or null. */
@@ -520,7 +575,7 @@ export function useDesktopState() {
     createProject,
     renameProject,
     deleteProject,
-    moveProject,
+    reparentProject,
     projectsFor,
     assignDocumentToProject,
     unassignDocumentFromProject,

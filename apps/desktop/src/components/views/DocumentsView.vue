@@ -578,8 +578,8 @@ onBeforeUnmount(() => {
           <button
             class="icon-action-button"
             type="button"
-            :disabled="!selectedVersion"
-            :title="t('actions.checkout')"
+            :disabled="!selectedVersion || selectedVersion.status === 'current'"
+            :title="selectedVersion?.status === 'current' ? t('actions.checkoutAlreadyCurrent') : t('actions.checkout')"
             :aria-label="t('actions.checkout')"
             @click="runAction('actionLogs.checkout')"
           >
@@ -855,8 +855,8 @@ onBeforeUnmount(() => {
             <button
               class="icon-action-button"
               type="button"
-              :disabled="!selectedVersion"
-              :title="t('actions.checkout')"
+              :disabled="!selectedVersion || selectedVersion.status === 'current'"
+              :title="selectedVersion?.status === 'current' ? t('actions.checkoutAlreadyCurrent') : t('actions.checkout')"
               :aria-label="t('actions.checkout')"
               @click="runAction('actionLogs.checkout')"
             >
@@ -1040,6 +1040,7 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
+          :disabled="selectedVersion?.status === 'current'"
           @click="versionMenuCheckout"
         >
           <ArrowRightLeft aria-hidden="true" />

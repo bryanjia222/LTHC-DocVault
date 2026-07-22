@@ -81,7 +81,7 @@ describe("useDesktopState - get_desktop_state contract", () => {
     expect(ds.tracked.value).toEqual([
       { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
     ]);
-    expect(ds.projects.value).toEqual([{ id: "p1", name: "Legal" }]);
+    expect(ds.projects.value).toEqual([{ id: "p1", name: "Legal", parentId: null }]);
     expect(ds.assignments.value).toEqual({ docA: ["p1"] });
     expect(ds.sortPrefs.value).toEqual({
       __all__: { key: "updated", direction: "desc" },
@@ -301,17 +301,18 @@ describe("useDesktopState - two-tier refresh", () => {
 });
 
 describe("useDesktopState - projects", () => {
-  /** createProject but narrowed to string - throws if it unexpectedly fails. */
-  function createOrFail(name: string): string {
-    const id = ds.createProject(name);
+  /** createProject under `parentId` (null = root), narrowed to string - throws
+   *  if it unexpectedly fails. */
+  function createOrFail(name: string, parentId: string | null = null): string {
+    const id = ds.createProject(parentId, name);
     if (!id) throw new Error(`createProject(${name}) returned null`);
     return id;
   }
 
-  it("createProject adds a project and persists it under snake_case keys", async () => {
-    const id = ds.createProject("Legal");
+  it("createProject adds a root project and persists it (parent_id omitted when null)", async () => {
+    const id = ds.createProject(null, "Legal");
     expect(id).toBeTruthy();
-    expect(ds.projects.value).toEqual([{ id, name: "Legal" }]);
+    expect(ds.projects.value).toEqual([{ id, name: "Legal", parentId: null }]);
     await vi.waitFor(() => {
       expect(invokeArgs("set_desktop_state")).toStrictEqual({
         tags: {},
@@ -324,19 +325,37 @@ describe("useDesktopState - projects", () => {
     });
   });
 
-  it("createProject rejects empty and duplicate names (case-insensitive)", () => {
-    ds.createProject("Legal");
-    expect(ds.createProject("   ")).toBeNull();
-    // Duplicate, case-insensitive - no second project, no id returned.
-    expect(ds.createProject("legal")).toBeNull();
+  it("createProject rejects empty and duplicate sibling names (case-insensitive)", () => {
+    ds.createProject(null, "Legal");
+    expect(ds.createProject(null, "   ")).toBeNull();
+    // Duplicate among root siblings - no second project.
+    expect(ds.createProject(null, "legal")).toBeNull();
     expect(ds.projects.value).toHaveLength(1);
+  });
+
+  it("createProject allows the same name under different parents (sub-projects)", async () => {
+    const parent = createOrFail("Legal");
+    vi.mocked(invoke).mockClear();
+    // A sub-project named "Legal" under the parent is allowed (different scope).
+    const child = ds.createProject(parent, "Legal");
+    expect(child).toBeTruthy();
+    expect(ds.projects.value).toHaveLength(2);
+    expect(ds.projects.value.find((p) => p.id === child)?.parentId).toBe(parent);
+    // Persisted with parent_id present.
+    await vi.waitFor(() => {
+      expect(invokeArgs("set_desktop_state").projects).toContainEqual({
+        id: child,
+        name: "Legal",
+        parent_id: parent,
+      });
+    });
   });
 
   it("renameProject updates the name and persists", async () => {
     const id = createOrFail("Old");
     vi.mocked(invoke).mockClear();
     expect(ds.renameProject(id, "New")).toBe(true);
-    expect(ds.projects.value).toEqual([{ id, name: "New" }]);
+    expect(ds.projects.value).toEqual([{ id, name: "New", parentId: null }]);
     await vi.waitFor(() => {
       expect(invokeArgs("set_desktop_state").projects).toEqual([
         { id, name: "New" },
@@ -344,9 +363,9 @@ describe("useDesktopState - projects", () => {
     });
   });
 
-  it("renameProject refuses a name taken by another project", () => {
+  it("renameProject refuses a name taken by a sibling", () => {
     const a = createOrFail("Alpha");
-    ds.createProject("Beta");
+    ds.createProject(null, "Beta");
     expect(ds.renameProject(a, "beta")).toBe(false);
     expect(ds.projects.value.find((p) => p.id === a)?.name).toBe("Alpha");
   });
@@ -358,9 +377,23 @@ describe("useDesktopState - projects", () => {
     ds.assignDocumentToProject("docA", id2);
     vi.mocked(invoke).mockClear();
     ds.deleteProject(id);
-    expect(ds.projects.value).toEqual([{ id: id2, name: "Finance" }]);
+    expect(ds.projects.value).toEqual([
+      { id: id2, name: "Finance", parentId: null },
+    ]);
     // docA keeps its other membership.
     expect(ds.assignments.value).toEqual({ docA: [id2] });
+  });
+
+  it("deleteProject re-parents the deleted project's children to its parent", () => {
+    const root = createOrFail("Legal");
+    const child = createOrFail("Sub", root);
+    const grandchild = createOrFail("SubSub", child);
+    ds.deleteProject(child);
+    // child gone; grandchild re-parented up to root.
+    expect(ds.projects.value.map((p) => p.id)).not.toContain(child);
+    expect(ds.projects.value.find((p) => p.id === grandchild)?.parentId).toBe(
+      root,
+    );
   });
 
   it("assignDocumentToProject / unassignDocumentFromProject manage multi-membership; projectsFor reads it", () => {
@@ -386,17 +419,24 @@ describe("useDesktopState - projects", () => {
     expect(ds.projectsFor("docA")).toEqual([]);
   });
 
-  it("moveProject reorders within the list and clamps the index", () => {
+  it("reparentProject moves a project under a new parent, forbidding cycles", () => {
     const a = createOrFail("A");
     const b = createOrFail("B");
     const c = createOrFail("C");
-    expect(ds.projects.value.map((p) => p.id)).toEqual([a, b, c]);
-    ds.moveProject(a, 2); // move A to the end
-    expect(ds.projects.value.map((p) => p.id)).toEqual([b, c, a]);
-    ds.moveProject(c, 99); // clamp to end
-    expect(ds.projects.value.map((p) => p.id)).toEqual([b, a, c]);
-    ds.moveProject("nope", 0); // unknown id is a no-op
-    expect(ds.projects.value.map((p) => p.id)).toEqual([b, a, c]);
+    // A under B.
+    expect(ds.reparentProject(a, b)).toBe(true);
+    expect(ds.projects.value.find((p) => p.id === a)?.parentId).toBe(b);
+    // Reparenting to root (null) is allowed.
+    expect(ds.reparentProject(a, null)).toBe(true);
+    expect(ds.projects.value.find((p) => p.id === a)?.parentId).toBeNull();
+    // Cannot reparent a project under itself.
+    expect(ds.reparentProject(a, a)).toBe(false);
+    // Put C under B, then reparenting B under C would create a cycle.
+    ds.reparentProject(c, b);
+    expect(ds.reparentProject(b, c)).toBe(false);
+    // Unknown ids / unknown parent fail.
+    expect(ds.reparentProject("nope", b)).toBe(false);
+    expect(ds.reparentProject(a, "nope")).toBe(false);
   });
 
   it("setSortPref / getSortPref persist and read back, scoped by view", () => {

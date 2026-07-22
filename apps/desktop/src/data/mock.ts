@@ -68,10 +68,13 @@ export interface FileProbe {
   sha256?: string | null;
 }
 
-/** A user-created project folder for grouping documents in the sidebar. */
+/** A user-created project folder for grouping documents in the sidebar.
+ * `parentId` (null for a root project) supports nesting: a sub-project hangs
+ * off its parent. The tree is rendered depth-aware in the sidebar. */
 export interface ProjectDef {
   id: string;
   name: string;
+  parentId: string | null;
 }
 
 /** Desktop-local annotations for the active vault (tags + tracked files). */
@@ -342,8 +345,8 @@ export const desktopState: DesktopState = {
     },
   ],
   projects: [
-    { id: "proj-legal", name: "法务项目" },
-    { id: "proj-finance", name: "财务项目" },
+    { id: "proj-legal", name: "法务项目", parentId: null },
+    { id: "proj-finance", name: "财务项目", parentId: null },
   ],
   assignments: {
     "550e8400": ["proj-legal"],

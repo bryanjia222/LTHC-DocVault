@@ -35,10 +35,10 @@ docvault-core = { path = "../../../crates/core" }
 docvault-storage = { path = "../../../crates/storage" }
 docvault-types = { path = "../../../shared/types" }
 docvault-jobs = { path = "../../../crates/jobs" }
+docvault-ooxml = { path = "../../../crates/ooxml" }
 
 # Keep this crate out of the root workspace; it is built standalone by tauri.
 [workspace]
 
 [dev-dependencies]
-docvault-ooxml = { path = "../../../crates/ooxml" }
 tempfile = "3"

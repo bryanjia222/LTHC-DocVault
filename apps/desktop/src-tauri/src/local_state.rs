@@ -282,6 +282,7 @@ mod tests {
                 projects: vec![ProjectDef {
                     id: "proj1".to_owned(),
                     name: "诉讼案".to_owned(),
+                    parent_id: None,
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();
@@ -346,6 +347,7 @@ mod tests {
                 projects: vec![ProjectDef {
                     id: "pa".to_owned(),
                     name: "项目甲".to_owned(),
+                    parent_id: None,
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();

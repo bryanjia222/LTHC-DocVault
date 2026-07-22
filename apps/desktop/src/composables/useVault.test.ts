@@ -67,6 +67,7 @@ beforeEach(() => {
       case "library_path":
         return "/vault/library/docA.docx";
       case "commit_document":
+      case "create_blank_document":
       case "export_version":
       case "checkout_version":
       case "delete_document":
@@ -155,6 +156,24 @@ describe("useVault - commit_document contract", () => {
       new_name: "Renamed",
       author: "Bryan",
       note: "msg",
+    });
+  });
+});
+
+describe("useVault - create_blank_document contract", () => {
+  it("sends name + format (the backend lowercases the format itself)", async () => {
+    await vault.createBlankDocument({ name: "Notes", format: "docx" });
+    expect(invokeArgs("create_blank_document")).toStrictEqual({
+      name: "Notes",
+      format: "docx",
+    });
+  });
+
+  it("forwards the format verbatim - backend handles upper/lowercase", async () => {
+    await vault.createBlankDocument({ name: "Sheet", format: "XLSX" });
+    expect(invokeArgs("create_blank_document")).toStrictEqual({
+      name: "Sheet",
+      format: "XLSX",
     });
   });
 });

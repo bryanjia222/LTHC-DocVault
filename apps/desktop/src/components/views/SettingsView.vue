@@ -6,7 +6,6 @@ import { useVault } from "../../composables/useVault";
 import { useNavigation, type SettingsTab } from "../../composables/useNavigation";
 import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
-import { useDialogs } from "../../composables/useDialogs";
 import StatusVaultCard from "../status/StatusVaultCard.vue";
 import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
@@ -16,7 +15,6 @@ const { isDark, setTheme } = useTheme();
 const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
-const { openSwitchBackend } = useDialogs();
 
 // Dev-only reset card: vite strips this in production builds, so the
 // destructive test actions never ship to end users.
@@ -35,7 +33,6 @@ async function onLogLevelChange(event: Event) {
 
 const tabs: { id: SettingsTab; labelKey: string }[] = [
   { id: "status", labelKey: "settings.tabs.status" },
-  { id: "storage", labelKey: "settings.tabs.storage" },
   { id: "appearance", labelKey: "settings.tabs.appearance" },
 ];
 </script>
@@ -61,88 +58,47 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
       </button>
     </div>
 
-    <!-- 状态: vault summary + tasks + archive (the old sidebar vault block +
-         the Jobs/Archive views, unified into one tab). v-show keeps every pane
-         mounted so switching tabs never pays a teardown/remount cost (the status
-         pane's heavy children made leaving it lag). -->
+    <!-- 状态: vault summary (with switch-backend) + tasks + archive + database/
+         logging. The old "存储" tab was folded in here and de-duplicated: the
+         backend / repo size / storage paths already lived on the archive panel,
+         so only the database path and logging controls that were unique to it
+         move into this tab. v-show keeps every pane mounted so switching tabs
+         never pays a teardown/remount cost. -->
     <div v-show="settingsTab === 'status'" class="tab-pane status-pane">
       <StatusVaultCard />
       <StatusTasksPanel />
       <StatusArchivePanel />
-    </div>
 
-    <!-- 存储: switch backend + storage / database / logging paths. -->
-    <div v-show="settingsTab === 'storage'" class="tab-pane">
-      <div class="surface settings-card switch-card">
-        <h3>{{ t("settings.connectSection") }}</h3>
-        <p class="switch-hint">{{ t("connect.switchHint") }}</p>
-        <button
-          class="primary switch-button"
-          type="button"
-          @click="openSwitchBackend"
-        >
-          {{ t("connect.switchAction") }}
-        </button>
-      </div>
+      <div class="surface settings-card status-detail-card">
+        <h3>{{ t("settings.databaseSection") }}</h3>
+        <dl class="settings-dl">
+          <div>
+            <dt>{{ t("settings.dbPath") }}</dt>
+            <dd class="mono break">{{ config.dbPath }}</dd>
+          </div>
+        </dl>
 
-      <div class="settings-grid">
-        <div class="surface settings-card">
-          <h3>{{ t("settings.storageSection") }}</h3>
-          <dl class="settings-dl">
-            <div>
-              <dt>{{ t("settings.backend") }}</dt>
-              <dd>{{ t(`backend.${config.backend}`) }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("settings.dataDir") }}</dt>
-              <dd class="mono">{{ config.dataDir }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("settings.repoDir") }}</dt>
-              <dd class="mono">{{ config.repoDir }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("settings.resticPath") }}</dt>
-              <dd class="mono break">{{ config.resticPath }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("settings.resticPassword") }}</dt>
-              <dd>{{ t("settings.resticPasswordHidden") }}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div class="surface settings-card">
-          <h3>{{ t("settings.databaseSection") }}</h3>
-          <dl class="settings-dl">
-            <div>
-              <dt>{{ t("settings.dbPath") }}</dt>
-              <dd class="mono break">{{ config.dbPath }}</dd>
-            </div>
-          </dl>
-
-          <h3 class="logging-title">{{ t("settings.loggingSection") }}</h3>
-          <dl class="settings-dl">
-            <div>
-              <dt>{{ t("settings.logLevel") }}</dt>
-              <dd>
-                <select
-                  class="locale-select"
-                  :value="config.logLevel"
-                  @change="onLogLevelChange"
-                >
-                  <option v-for="level in logLevels" :key="level" :value="level">
-                    {{ level }}
-                  </option>
-                </select>
-              </dd>
-            </div>
-            <div>
-              <dt>{{ t("settings.logFile") }}</dt>
-              <dd class="mono break">{{ config.logFile }}</dd>
-            </div>
-          </dl>
-        </div>
+        <h3 class="logging-title">{{ t("settings.loggingSection") }}</h3>
+        <dl class="settings-dl">
+          <div>
+            <dt>{{ t("settings.logLevel") }}</dt>
+            <dd>
+              <select
+                class="locale-select"
+                :value="config.logLevel"
+                @change="onLogLevelChange"
+              >
+                <option v-for="level in logLevels" :key="level" :value="level">
+                  {{ level }}
+                </option>
+              </select>
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.logFile") }}</dt>
+            <dd class="mono break">{{ config.logFile }}</dd>
+          </div>
+        </dl>
       </div>
     </div>
 
@@ -357,21 +313,6 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
   height: 32px;
   min-width: 64px;
   padding: 0 14px;
-}
-
-.switch-card {
-  padding: 18px;
-}
-
-.switch-hint {
-  margin: 4px 0 14px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.switch-button {
-  height: 34px;
-  padding: 0 18px;
 }
 
 .field-hint {
