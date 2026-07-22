@@ -202,7 +202,7 @@ pub fn set_desktop_state(
     tags: BTreeMap<String, Vec<String>>,
     tracked: Vec<TrackedFile>,
     projects: Vec<ProjectDef>,
-    assignments: BTreeMap<String, Vec<String>>,
+    assignments: BTreeMap<String, String>,
     sort_prefs: BTreeMap<String, SortPref>,
     trashed: Vec<String>,
 ) -> Result<(), String> {
@@ -286,7 +286,7 @@ mod tests {
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();
-                    m.insert("docA".to_owned(), vec!["proj1".to_owned()]);
+                    m.insert("docA".to_owned(), "proj1".to_owned());
                     m
                 },
                 sort_prefs: {
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(slice.projects[0].name, "诉讼案");
         assert_eq!(
             slice.assignments.get("docA").unwrap(),
-            &vec!["proj1".to_owned()]
+            &"proj1".to_owned()
         );
         let sort = slice.sort_prefs.get("proj1").unwrap();
         assert_eq!(sort.key, "name");
@@ -351,7 +351,7 @@ mod tests {
                 }],
                 assignments: {
                     let mut m = BTreeMap::new();
-                    m.insert("docA".to_owned(), vec!["pa".to_owned()]);
+                    m.insert("docA".to_owned(), "pa".to_owned());
                     m
                 },
                 sort_prefs: BTreeMap::new(),
@@ -383,7 +383,7 @@ mod tests {
         assert!(a.tracked.is_empty());
         assert_eq!(a.projects.len(), 1);
         assert_eq!(a.projects[0].id, "pa");
-        assert_eq!(a.assignments.get("docA").unwrap(), &vec!["pa".to_owned()]);
+        assert_eq!(a.assignments.get("docA").unwrap(), &"pa".to_owned());
         assert!(b.tags.is_empty());
         assert_eq!(b.tracked.len(), 1);
         assert!(b.projects.is_empty());
@@ -398,29 +398,24 @@ mod tests {
         );
     }
 
-    /// Legacy desktop-state.json files wrote `assignments` as docId -> single
-    /// projectId (String). The tolerant deserializer coerces each such value to
-    /// a one-element Vec, and accepts the current Vec shape alongside it, so old
-    /// files load transparently after the multi-membership change.
+    /// `assignments` is now `docId -> single projectId`. Legacy state files may
+    /// carry a multi-membership `Vec<String>` (or an even older single `String`);
+    /// the tolerant deserializer collapses a `Vec` to its first element and passes
+    /// a `String` through, so old files load transparently.
     #[test]
-    fn assignments_migrate_legacy_single_string() {
+    fn assignments_coerce_legacy_shapes() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("desktop-state.json");
-        // docA uses the legacy single-String shape; docB uses the current Vec
-        // shape - both must round-trip into Vec<String>.
+        // docA uses a legacy single-String; docB a legacy multi-membership Vec -
+        // both must load as the single (first) project id.
         let json = r#"{"version":1,"vaults":{"/v":{"tags":{},"tracked":[],"projects":[{"id":"p1","name":"P"}],"assignments":{"docA":"p1","docB":["p1","p2"]},"sort_prefs":{}}}}"#;
         fs::write(&path, json).unwrap();
 
         let file = load_file_at(&path).unwrap();
         let slice = slice_for_root(&file, "/v");
-        assert_eq!(
-            slice.assignments.get("docA").unwrap(),
-            &vec!["p1".to_owned()]
-        );
-        assert_eq!(
-            slice.assignments.get("docB").unwrap(),
-            &vec!["p1".to_owned(), "p2".to_owned()]
-        );
+        assert_eq!(slice.assignments.get("docA").unwrap(), &"p1".to_owned());
+        // Legacy Vec collapses to its first element ("p1"); the extra "p2" is dropped.
+        assert_eq!(slice.assignments.get("docB").unwrap(), &"p1".to_owned());
     }
 
     /// `stat_at` reports exists/size/mtime for a real file and `exists: false`

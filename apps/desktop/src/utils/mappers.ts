@@ -116,8 +116,8 @@ export interface RawDesktopState {
   tags: Record<string, string[]>;
   tracked: RawTrackedFile[];
   projects: RawProjectDef[];
-  /** documentId -> projectIds (multi-membership). */
-  assignments: Record<string, string[]>;
+  /** documentId -> its single projectId (absent = unassigned). */
+  assignments: Record<string, string>;
   /** scope key (project id or "__all__") -> persisted table sort (snake_case wire). */
   sort_prefs: Record<string, RawSortPref>;
   /** Document ids soft-deleted to the recycle bin (desktop-local hide). */

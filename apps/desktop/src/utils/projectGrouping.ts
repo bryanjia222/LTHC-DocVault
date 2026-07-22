@@ -56,22 +56,21 @@ function preorderProjectIds(
 }
 
 /**
- * The in-scope project memberships of a document - the groups it should appear
- * under. In a selected-project view (`pid` set) a membership counts only when it
- * is the selected project or one of its descendants; in "all documents" every
- * membership counts. A doc appears under **each** of these (multi-membership is
- * duplicated across groups, by design), so a doc in `[parent, child]` shows in
- * both the parent and child groups.
+ * The in-scope project of a document - the group it should appear under, or none.
+ * In a selected-project view (`pid` set) the doc's project counts only when it is
+ * the selected project or one of its descendants; in "all documents" any assigned
+ * project counts. Returns at most one id (single-membership), so a doc lands in
+ * exactly one group.
  */
 function inScopeProjectIds(
   doc: Document,
   pid: string | null,
   isAncestorOrSelf: (id: string, ancestorId: string) => boolean,
 ): string[] {
-  const memberships = doc.projects ?? [];
-  return pid === null
-    ? memberships
-    : memberships.filter((mp) => isAncestorOrSelf(mp, pid));
+  const project = doc.project ?? null;
+  if (project === null) return [];
+  if (pid === null) return [project];
+  return isAncestorOrSelf(project, pid) ? [project] : [];
 }
 
 export function groupDocumentsByProject(

@@ -72,7 +72,7 @@ describe("useDesktopState - get_desktop_state contract", () => {
         { document_id: "docA", path: "/p.docx", size: 9, mtime_ms: 7, sha256: "abc" },
       ],
       projects: [{ id: "p1", name: "Legal" }],
-      assignments: { docA: ["p1"] },
+      assignments: { docA: "p1" },
       sort_prefs: { __all__: { key: "updated", direction: "desc" } },
       trashed: ["docA"],
     });
@@ -82,7 +82,7 @@ describe("useDesktopState - get_desktop_state contract", () => {
       { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
     ]);
     expect(ds.projects.value).toEqual([{ id: "p1", name: "Legal", parentId: null }]);
-    expect(ds.assignments.value).toEqual({ docA: ["p1"] });
+    expect(ds.assignments.value).toEqual({ docA: "p1" });
     expect(ds.sortPrefs.value).toEqual({
       __all__: { key: "updated", direction: "desc" },
     });
@@ -370,18 +370,18 @@ describe("useDesktopState - projects", () => {
     expect(ds.projects.value.find((p) => p.id === a)?.name).toBe("Alpha");
   });
 
-  it("deleteProject removes the project and drops it from each doc's memberships", async () => {
+  it("deleteProject removes the project; docs assigned to it become unassigned", async () => {
     const id = createOrFail("Legal");
     const id2 = createOrFail("Finance");
-    ds.assignDocumentToProject("docA", id);
-    ds.assignDocumentToProject("docA", id2);
+    ds.setDocumentProject("docA", id2);
+    ds.setDocumentProject("docB", id);
     vi.mocked(invoke).mockClear();
     ds.deleteProject(id);
     expect(ds.projects.value).toEqual([
       { id: id2, name: "Finance", parentId: null },
     ]);
-    // docA keeps its other membership.
-    expect(ds.assignments.value).toEqual({ docA: [id2] });
+    // docA (in Finance) keeps its project; docB (in the deleted Legal) is now unassigned.
+    expect(ds.assignments.value).toEqual({ docA: id2 });
   });
 
   it("deleteProject re-parents the deleted project's children to its parent", () => {
@@ -396,27 +396,26 @@ describe("useDesktopState - projects", () => {
     );
   });
 
-  it("assignDocumentToProject / unassignDocumentFromProject manage multi-membership; projectsFor reads it", () => {
+  it("setDocumentProject / clearDocumentProject manage single membership; projectOf reads it", () => {
     const id = createOrFail("Legal");
     const id2 = createOrFail("Finance");
-    ds.assignDocumentToProject("docA", id);
-    expect(ds.projectsFor("docA")).toEqual([id]);
-    ds.assignDocumentToProject("docA", id2);
-    expect(ds.projectsFor("docA")).toEqual([id, id2]);
-    // Idempotent - assigning the same project twice is a no-op.
-    ds.assignDocumentToProject("docA", id2);
-    expect(ds.projectsFor("docA")).toEqual([id, id2]);
-    ds.unassignDocumentFromProject("docA", id);
-    expect(ds.projectsFor("docA")).toEqual([id2]);
-    // Removing the last membership clears the entry entirely.
-    ds.unassignDocumentFromProject("docA", id2);
-    expect(ds.projectsFor("docA")).toEqual([]);
+    ds.setDocumentProject("docA", id);
+    expect(ds.projectOf("docA")).toBe(id);
+    // Setting a second project replaces the first (single-membership).
+    ds.setDocumentProject("docA", id2);
+    expect(ds.projectOf("docA")).toBe(id2);
+    // Idempotent - setting the same project again is a no-op.
+    ds.setDocumentProject("docA", id2);
+    expect(ds.projectOf("docA")).toBe(id2);
+    // Clearing drops the entry entirely (unassigned).
+    ds.clearDocumentProject("docA");
+    expect(ds.projectOf("docA")).toBeNull();
     expect(ds.assignments.value).toEqual({});
   });
 
-  it("assignDocumentToProject ignores unknown project ids", () => {
-    ds.assignDocumentToProject("docA", "does-not-exist");
-    expect(ds.projectsFor("docA")).toEqual([]);
+  it("setDocumentProject ignores unknown project ids", () => {
+    ds.setDocumentProject("docA", "does-not-exist");
+    expect(ds.projectOf("docA")).toBeNull();
   });
 
   it("reparentProject moves a project under a new parent, forbidding cycles", () => {
@@ -466,7 +465,7 @@ describe("useDesktopState - projects", () => {
 
   it("clearDoc clears tags, tracked, and the project assignment (but not the project)", async () => {
     const id = createOrFail("Legal");
-    ds.assignDocumentToProject("docA", id);
+    ds.setDocumentProject("docA", id);
     ds.addTag("docA", "x");
     ds.setTracked({
       documentId: "docA",

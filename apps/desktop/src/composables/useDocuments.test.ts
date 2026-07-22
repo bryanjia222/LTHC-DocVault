@@ -119,12 +119,10 @@ describe("useDocuments - enrichment", () => {
     expect(docs.documents.value.find((d) => d.id === "docB")?.trackedPath).toBeNull();
   });
 
-  it("exposes the project memberships (empty when unassigned)", () => {
-    desktop.assignments.value = { docA: ["p1"] };
-    expect(docs.documents.value.find((d) => d.id === "docA")?.projects).toEqual([
-      "p1",
-    ]);
-    expect(docs.documents.value.find((d) => d.id === "docB")?.projects).toEqual([]);
+  it("exposes the project assignment (null when unassigned)", () => {
+    desktop.assignments.value = { docA: "p1" };
+    expect(docs.documents.value.find((d) => d.id === "docA")?.project).toBe("p1");
+    expect(docs.documents.value.find((d) => d.id === "docB")?.project).toBeNull();
   });
 });
 
@@ -187,7 +185,7 @@ describe("useDocuments - filteredDocuments wiring", () => {
 
 describe("useDocuments - project scope", () => {
   it("selectAll (null scope) shows every document", () => {
-    desktop.assignments.value = { docA: ["p1"], docB: ["p2"] };
+    desktop.assignments.value = { docA: "p1", docB: "p2" };
     docs.selectAll();
     expect(docs.activeProjectId.value).toBeNull();
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual([
@@ -197,21 +195,21 @@ describe("useDocuments - project scope", () => {
   });
 
   it("selectProject narrows the list to that project only", () => {
-    desktop.assignments.value = { docA: ["p1"], docB: ["p2"] };
+    desktop.assignments.value = { docA: "p1", docB: "p2" };
     docs.selectProject("p1");
     expect(docs.activeProjectId.value).toBe("p1");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
   });
 
   it("project scope composes with the search filter", () => {
-    desktop.assignments.value = { docA: ["p1"], docB: ["p1"] };
+    desktop.assignments.value = { docA: "p1", docB: "p1" };
     docs.selectProject("p1");
     docs.searchQuery.value = "beta";
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docB"]);
   });
 
   it("documents with no assignment are hidden under a project scope but shown under all", () => {
-    desktop.assignments.value = { docA: ["p1"] }; // docB unassigned
+    desktop.assignments.value = { docA: "p1" }; // docB unassigned
     docs.selectProject("p1");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
     docs.selectAll();
@@ -221,11 +219,13 @@ describe("useDocuments - project scope", () => {
     ]);
   });
 
-  it("a document in multiple projects shows under each project scope", () => {
-    desktop.assignments.value = { docA: ["p1", "p2"] };
-    docs.selectProject("p1");
-    expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
-    docs.selectProject("p2");
+  it("a document in a sub-project shows under the parent project's scope", () => {
+    desktop.projects.value = [
+      { id: "parent", name: "Parent", parentId: null },
+      { id: "child", name: "Child", parentId: "parent" },
+    ];
+    desktop.assignments.value = { docA: "child" };
+    docs.selectProject("parent");
     expect(docs.filteredDocuments.value.map((d) => d.id)).toEqual(["docA"]);
   });
 });

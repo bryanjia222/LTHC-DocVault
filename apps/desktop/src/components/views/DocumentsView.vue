@@ -241,8 +241,8 @@ function projectName(id: string | null | undefined): string {
 }
 
 /** Documents bucketed by their project's full path, for the per-group divider
- *  headers. Multi-membership docs appear under each of their (in-scope) projects;
- *  unassigned docs (all-documents view only) land in a trailing bucket. */
+ *  headers. Each doc appears under its single (in-scope) project; unassigned docs
+ *  (all-documents view only) land in a trailing bucket. */
 const groupedDocuments = computed(() =>
   groupDocumentsByProject({
     docs: filteredDocuments.value,
@@ -258,14 +258,15 @@ const groupedDocuments = computed(() =>
  *  views get the per-path separators. */
 const showGroupHeaders = computed(() => groupedDocuments.value.length > 1);
 
-/** Remove the selected document from one project (keeps other memberships). */
-function removeProjectFromSelected(projectId: string) {
+/** Remove the selected document from its project (it becomes unassigned). */
+function removeProjectFromSelected() {
   const doc = selectedDocument.value;
   if (!doc) return;
-  desktop.unassignDocumentFromProject(doc.id, projectId);
+  desktop.clearDocumentProject(doc.id);
 }
 
-/** Drag a document row onto a sidebar project to assign it (multi-membership). */
+/** Drag a document row onto a sidebar project to set its project (a classified
+ *  doc is confirmed before moving). */
 function onDragStartDoc(event: DragEvent, document: Document) {
   if (!event.dataTransfer) return;
   event.dataTransfer.setData("application/x-docvault-doc", document.id);
@@ -312,15 +313,15 @@ function docMenuDelete() {
 }
 
 /**
- * Remove the right-clicked document from the active project (keeps other
- * memberships + the document itself; only meaningful when scoped to a project).
+ * Remove the right-clicked document from its project (it becomes unassigned;
+ * the document itself is kept). Only meaningful when scoped to a project.
  */
 function docMenuRemoveFromProject() {
   const doc = selectedDocument.value;
   const pid = activeProjectId.value;
   closeDocMenu();
   if (!doc || !pid) return;
-  desktop.unassignDocumentFromProject(doc.id, pid);
+  desktop.clearDocumentProject(doc.id);
 }
 
 function versionMenuCheckout() {
@@ -673,25 +674,21 @@ onBeforeUnmount(() => {
         <h3>{{ t("projects.title") }}</h3>
         <div class="tag-chips">
           <span
-            v-for="pid in selectedDocument?.projects ?? []"
-            :key="pid"
+            v-if="selectedDocument?.project"
             class="tag-chip"
           >
-            {{ projectName(pid) }}
+            {{ projectName(selectedDocument.project) }}
             <button
               type="button"
               class="tag-remove"
               :aria-label="t('actions.clear')"
               :title="t('actions.clear')"
-              @click="removeProjectFromSelected(pid)"
+              @click="removeProjectFromSelected()"
             >
               <X aria-hidden="true" />
             </button>
           </span>
-          <span
-            v-if="!selectedDocument?.projects?.length"
-            class="muted"
-          >{{ t("projects.empty") }}</span>
+          <span v-else class="muted">{{ t("projects.empty") }}</span>
         </div>
       </section>
 

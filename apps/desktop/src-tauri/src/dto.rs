@@ -102,13 +102,14 @@ pub struct ProjectDef {
 ///
 /// `tags` maps document id -> tag list. `tracked` holds the source-file baseline
 /// captured at import time, used by the modification tracker. `projects` is the
-/// vault's project-folder list; `assignments` maps document id -> project id list
-/// (multi-membership: a document may belong to several projects). `sort_prefs`
-/// stores each project's persisted table sort (keyed by project id, with
-/// `"__all__"` for the ungrouped "all documents" view).
+/// vault's project-folder list; `assignments` maps document id -> its single
+/// project id (one-to-many: a document belongs to at most one project; an absent
+/// key means unassigned). `sort_prefs` stores each project's persisted table sort
+/// (keyed by project id, with `"__all__"` for the ungrouped "all documents" view).
 ///
-/// `assignments` is deserialized tolerantly: a legacy single `String` value
-/// (pre-multi-membership state files) is coerced to a one-element `Vec`, so old
+/// `assignments` is deserialized tolerantly: a legacy multi-membership
+/// `Vec<String>` value (pre-single-membership state files) is collapsed to its
+/// first element, and a legacy single `String` value passes through, so old
 /// desktop-state.json files load without a migration step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DesktopStateSlice {
@@ -119,7 +120,7 @@ pub struct DesktopStateSlice {
     #[serde(default)]
     pub projects: Vec<ProjectDef>,
     #[serde(default, deserialize_with = "deserialize_assignments")]
-    pub assignments: BTreeMap<String, Vec<String>>,
+    pub assignments: BTreeMap<String, String>,
     #[serde(default)]
     pub sort_prefs: BTreeMap<String, SortPref>,
     /// Document ids soft-deleted to the recycle bin (desktop-local hide). The
@@ -140,12 +141,14 @@ pub struct SortPref {
     pub direction: String,
 }
 
-/// Deserialize `assignments` accepting either the legacy single-`String` value
-/// (coerced to a one-element list) or the current `Vec<String>` value, so older
-/// desktop-state.json files load transparently after the multi-membership change.
+/// Deserialize `assignments` into `doc_id -> single project_id`, accepting the
+/// legacy shapes older desktop-state.json files may carry: a multi-membership
+/// `Vec<String>` is collapsed to its first element, and a single `String` passes
+/// through. So files written before single-membership load transparently (the
+/// dropped extra memberships are recoverable by re-assigning in the UI).
 fn deserialize_assignments<'de, D>(
     deserializer: D,
-) -> Result<BTreeMap<String, Vec<String>>, D::Error>
+) -> Result<BTreeMap<String, String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -159,15 +162,16 @@ where
     }
 
     let map: BTreeMap<String, StringOrVec> = BTreeMap::deserialize(deserializer)?;
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
     for (doc_id, value) in map {
-        out.insert(
-            doc_id,
-            match value {
-                StringOrVec::Many(vec) => vec,
-                StringOrVec::One(s) => vec![s],
-            },
-        );
+        let project_id = match value {
+            // Legacy multi-membership: keep only the first project id.
+            StringOrVec::Many(vec) => vec.into_iter().next(),
+            StringOrVec::One(s) => Some(s),
+        };
+        if let Some(id) = project_id {
+            out.insert(doc_id, id);
+        }
     }
     Ok(out)
 }

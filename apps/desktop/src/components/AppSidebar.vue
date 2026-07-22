@@ -275,16 +275,27 @@ function onProjectDragLeave(id: string) {
   if (dragOverProjectId.value === id) dragOverProjectId.value = null;
 }
 
-/** Drop on a project row: a dropped document is assigned (multi-membership);
- *  a dropped project is reparented as a child of the target. */
-function onProjectDrop(event: DragEvent, targetId: string) {
+/** Drop on a project row: a dropped document is assigned to the project (a
+ *  document already in another project is confirmed before moving); a dropped
+ *  project is reparented as a child of the target. */
+async function onProjectDrop(event: DragEvent, targetId: string) {
   event.preventDefault();
   dragOverProjectId.value = null;
   const dt = event.dataTransfer;
   if (!dt) return;
   const docId = dt.getData("application/x-docvault-doc");
   if (docId) {
-    desktop.assignDocumentToProject(docId, targetId);
+    const current = desktop.projectOf(docId);
+    if (current === targetId) return; // already here
+    if (current) {
+      // Classified doc: confirm the move before reassigning.
+      const from = desktop.projectPath(current);
+      const to = desktop.projectPath(targetId);
+      if (!(await confirmDialog(t("sidebar.confirmMoveProject", { from, to })))) {
+        return;
+      }
+    }
+    desktop.setDocumentProject(docId, targetId);
     return;
   }
   const projId = dt.getData("application/x-docvault-project");

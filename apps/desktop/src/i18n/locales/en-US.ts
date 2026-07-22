@@ -27,6 +27,8 @@ export const enUS = {
     deleteProject: "Delete",
     confirmDeleteProject:
       "Delete project \"{name}\"? Its documents stay in the vault and any other projects they belong to.",
+    confirmMoveProject:
+      "Move document from \"{from}\" to \"{to}\"?",
     projectDropHint:
       "Drop a document here to add it; drag a project onto another to nest it (or onto All documents to move it to the root)",
     projectNameTaken: "A project with this name already exists",
@@ -197,8 +199,6 @@ export const enUS = {
     label: "Projects",
     title: "Project membership",
     empty: "Not in any project - drag it onto a sidebar project to add it.",
-    addPlaceholder: "Add to project…",
-    noneAvailable: "No projects available to join",
   },
   filters: {
     title: "Filters",

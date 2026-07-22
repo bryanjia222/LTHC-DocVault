@@ -83,8 +83,8 @@ export interface DesktopState {
   tracked: TrackedFile[];
   /** Project folders, desktop-local like tags. Empty until the user adds one. */
   projects: ProjectDef[];
-  /** documentId -> projectIds; multi-membership (a doc may belong to several projects). */
-  assignments: Record<string, string[]>;
+  /** documentId -> its single projectId (one-to-many; absent key = unassigned). */
+  assignments: Record<string, string>;
   /** Persisted per-project table sort: scope key (project id or "__all__") -> sort pref. */
   sortPrefs: Record<string, SortPref>;
   /** Document ids soft-deleted to the recycle bin (desktop-local hide). */
@@ -124,8 +124,8 @@ export interface Document {
   modification?: ModificationStatus;
   /** The tracked source-file path, if any. Merged in by useDocuments. */
   trackedPath?: string | null;
-  /** Project folder ids this doc belongs to (multi-membership); empty/undefined for "all". */
-  projects?: string[];
+  /** The single project this doc belongs to; null/undefined = unassigned. Merged in by useDocuments. */
+  project?: string | null;
 }
 
 export type JobKind =
@@ -355,8 +355,8 @@ export const desktopState: DesktopState = {
     { id: "proj-finance", name: "财务项目", parentId: null },
   ],
   assignments: {
-    "550e8400": ["proj-legal"],
-    "7c1b28d1": ["proj-finance"],
+    "550e8400": "proj-legal",
+    "7c1b28d1": "proj-finance",
   },
   sortPrefs: {},
   trashed: [],

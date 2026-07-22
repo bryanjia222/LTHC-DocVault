@@ -89,7 +89,7 @@ async function submit() {
       desktop.setTracked(baseline);
       // Assign to the originating project when the kebab was on a project row.
       const projectId = newDocumentProjectId.value;
-      if (projectId) desktop.assignDocumentToProject(created.id, projectId);
+      if (projectId) desktop.setDocumentProject(created.id, projectId);
     }
     submitted.value = true;
     log(t("log.documentCreated", { name: resolvedName }));

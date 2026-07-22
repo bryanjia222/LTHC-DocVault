@@ -27,6 +27,8 @@ export const zhCN = {
     deleteProject: "删除",
     confirmDeleteProject:
       "确认删除项目「{name}」？文档仍保留在仓库与其他所属项目中。",
+    confirmMoveProject:
+      "确认将文档从「{from}」移动到「{to}」？",
     projectDropHint:
       "拖入文档以加入该项目；将项目拖到另一项目上可设为子项目（拖到「全部文档」上则移至顶层）",
     projectNameTaken: "该项目名称已存在",
@@ -196,8 +198,6 @@ export const zhCN = {
     label: "项目",
     title: "所属项目",
     empty: "未归入任何项目，将其拖入左侧栏项目即可加入。",
-    addPlaceholder: "加入项目…",
-    noneAvailable: "暂无可加入的项目",
   },
   filters: {
     title: "筛选",

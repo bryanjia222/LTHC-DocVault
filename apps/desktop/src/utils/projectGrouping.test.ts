@@ -6,9 +6,9 @@ import type { Document, ProjectDef } from "../data/mock";
 /*
  * groupDocumentsByProject is pure: build a project tree + Document array, call
  * with local copies of the two injected helpers (mirroring the real
- * useDesktopState semantics), and assert bucketing / ordering / multi-membership
- * duplication / the unassigned bucket. The helper logic itself is trivial; this
- * test owns the grouping rules.
+ * useDesktopState semantics), and assert bucketing / ordering / single-
+ * membership placement / the unassigned bucket. The helper logic itself is
+ * trivial; this test owns the grouping rules.
  */
 
 function doc(overrides: Partial<Document> & { id: string }): Document {
@@ -84,12 +84,12 @@ const ids = (group: { docs: Document[] }) => group.docs.map((d) => d.id);
 
 describe("groupDocumentsByProject - all documents", () => {
   const docs: Document[] = [
-    doc({ id: "dWork", projects: ["work"] }),
-    doc({ id: "dPa", projects: ["pa"] }),
-    doc({ id: "dSub", projects: ["sub"] }),
-    doc({ id: "dPb", projects: ["pb"] }),
-    doc({ id: "dPers", projects: ["pers"] }),
-    doc({ id: "dNone", projects: [] }),
+    doc({ id: "dWork", project: "work" }),
+    doc({ id: "dPa", project: "pa" }),
+    doc({ id: "dSub", project: "sub" }),
+    doc({ id: "dPb", project: "pb" }),
+    doc({ id: "dPers", project: "pers" }),
+    doc({ id: "dNone", project: null }),
   ];
 
   it("emits one group per project in pre-order, then unassigned last", () => {
@@ -116,7 +116,7 @@ describe("groupDocumentsByProject - all documents", () => {
     ]);
   });
 
-  it("buckets each doc under its project; unassigned doc lands last", () => {
+  it("buckets each doc under its single project; unassigned doc lands last", () => {
     const groups = call(docs, null);
     expect(ids(groups[0])).toEqual(["dWork"]);
     expect(ids(groups[1])).toEqual(["dPa"]);
@@ -125,27 +125,28 @@ describe("groupDocumentsByProject - all documents", () => {
   });
 });
 
-describe("groupDocumentsByProject - multi-membership", () => {
-  it("duplicates a doc under each of its projects", () => {
+describe("groupDocumentsByProject - single membership", () => {
+  it("places a doc under its one project only (no duplication)", () => {
     const docs: Document[] = [
-      // belongs to ProjectA and its descendant Sub -> appears in both groups
-      doc({ id: "dBoth", projects: ["pa", "sub"] }),
-      // belongs to two unrelated roots -> appears in both
-      doc({ id: "dRoots", projects: ["work", "pers"] }),
+      doc({ id: "dPa", project: "pa" }),
+      // a doc whose project is a descendant of another still appears once, under
+      // its own project (Sub), not also under ProjectA
+      doc({ id: "dSub", project: "sub" }),
     ];
     const groups = call(docs, null);
     const byKey = Object.fromEntries(groups.map((g) => [g.key, ids(g)]));
-    expect(byKey.pa).toContain("dBoth");
-    expect(byKey.sub).toContain("dBoth");
-    expect(byKey.work).toContain("dRoots");
-    expect(byKey.pers).toContain("dRoots");
+    expect(byKey.pa).toEqual(["dPa"]);
+    expect(byKey.sub).toEqual(["dSub"]);
+    // no doc is duplicated across groups
+    const all = groups.flatMap((g) => ids(g));
+    expect(all).toHaveLength(new Set(all).size);
   });
 
   it("preserves input order within each group (stable bucketing)", () => {
     const docs: Document[] = [
-      doc({ id: "a", projects: ["pa"] }),
-      doc({ id: "b", projects: ["sub"] }),
-      doc({ id: "c", projects: ["pa"] }),
+      doc({ id: "a", project: "pa" }),
+      doc({ id: "b", project: "sub" }),
+      doc({ id: "c", project: "pa" }),
     ];
     const groups = call(docs, null);
     const pa = groups.find((g) => g.key === "pa")!;
@@ -157,11 +158,10 @@ describe("groupDocumentsByProject - selected project scope", () => {
   // Only docs in Work's subtree are passed in (the view's scoping already
   // dropped Personal / unassigned docs).
   const docs: Document[] = [
-    doc({ id: "dWork", projects: ["work"] }),
-    doc({ id: "dPa", projects: ["pa"] }),
-    doc({ id: "dSub", projects: ["sub"] }),
-    doc({ id: "dPb", projects: ["pb"] }),
-    doc({ id: "dBoth", projects: ["pa", "sub"] }),
+    doc({ id: "dWork", project: "work" }),
+    doc({ id: "dPa", project: "pa" }),
+    doc({ id: "dSub", project: "sub" }),
+    doc({ id: "dPb", project: "pb" }),
   ];
 
   it("groups only the selected project's subtree, parent before child", () => {
@@ -175,11 +175,11 @@ describe("groupDocumentsByProject - selected project scope", () => {
     ]);
   });
 
-  it("shows the multi-membership doc under both its in-scope groups", () => {
+  it("shows each doc under its own project only (no unassigned bucket)", () => {
     const groups = call(docs, "work");
     const byKey = Object.fromEntries(groups.map((g) => [g.key, ids(g)]));
-    expect(byKey.pa).toContain("dBoth");
-    expect(byKey.sub).toContain("dBoth");
+    expect(byKey.pa).toEqual(["dPa"]);
+    expect(byKey.sub).toEqual(["dSub"]);
     // no unassigned bucket in a scoped view
     expect(groups.some((g) => g.key === "__unassigned__")).toBe(false);
   });
@@ -187,7 +187,7 @@ describe("groupDocumentsByProject - selected project scope", () => {
 
 describe("groupDocumentsByProject - single group", () => {
   it("still returns the one group (header suppression is the view's concern)", () => {
-    const docs: Document[] = [doc({ id: "only", projects: ["pa"] })];
+    const docs: Document[] = [doc({ id: "only", project: "pa" })];
     const groups = call(docs, null);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("pa");

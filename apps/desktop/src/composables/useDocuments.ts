@@ -68,14 +68,14 @@ const sortKey = computed(() => effectiveSort.value.key);
 const sortDirection = computed(() => effectiveSort.value.direction);
 
 /** Vault documents enriched with desktop-local tags / modification / trackedPath
- *  / project memberships. */
+ *  / project assignment. */
 const documents = computed<Document[]>(() =>
   vaultDocuments.value.map((doc) => ({
     ...doc,
     tags: desktop.tags.value[doc.id] ?? [],
     modification: desktop.modificationFor(doc.id),
     trackedPath: desktop.trackedPathFor(doc.id),
-    projects: desktop.projectsFor(doc.id),
+    project: desktop.projectOf(doc.id),
   })),
 );
 
@@ -108,13 +108,13 @@ export function useDocuments() {
     const visible = matched.filter((d) => !desktop.isTrashed(d.id));
     // Scope by the sidebar's active project AFTER the filter, so search + type
     // filters compose with project grouping. A selected project shows its own
-    // docs plus every descendant project's docs: a document is in scope when any
-    // of its memberships is the selected project or below it in the tree. `null`
+    // docs plus every descendant project's docs: a document is in scope when
+    // its project is the selected project or below it in the tree. `null`
     // (the 文档 node) shows all.
     const pid = activeProjectId.value;
     const scoped = pid
       ? visible.filter((d) =>
-          (d.projects ?? []).some((mp) => desktop.isAncestorOrSelf(mp, pid)),
+          d.project ? desktop.isAncestorOrSelf(d.project, pid) : false,
         )
       : visible;
     return sortDocuments(

@@ -47,8 +47,8 @@ const tags: Ref<Record<string, string[]>> = ref({});
 const tracked: Ref<TrackedFile[]> = ref([]);
 /** User-created project folders for grouping documents (desktop-local, like tags). */
 const projects: Ref<ProjectDef[]> = ref([]);
-/** documentId -> projectIds; multi-membership (a doc may belong to several projects). */
-const assignments: Ref<Record<string, string[]>> = ref({});
+/** documentId -> its single projectId (absent key = unassigned; one-to-many). */
+const assignments: Ref<Record<string, string>> = ref({});
 /** Per-view persisted table sort: scope key (project id or "__all__") -> sort pref. */
 const sortPrefs: Ref<Record<string, SortPref>> = ref({});
 /** Document ids soft-deleted to the recycle bin (desktop-local hide). The vault
@@ -243,10 +243,9 @@ function deleteProject(id: string): void {
         : p,
   );
   projects.value = projects.value.filter((p) => p.id !== id);
-  const next: Record<string, string[]> = {};
-  for (const [docId, pids] of Object.entries(assignments.value)) {
-    const filtered = pids.filter((p) => p !== id);
-    if (filtered.length > 0) next[docId] = filtered;
+  const next: Record<string, string> = {};
+  for (const [docId, pid] of Object.entries(assignments.value)) {
+    if (pid !== id) next[docId] = pid;
   }
   assignments.value = next;
   // Drop the deleted project's persisted sort pref (no longer reachable).
@@ -258,30 +257,27 @@ function deleteProject(id: string): void {
   void saveDesktopState();
 }
 
-/** The project ids a document belongs to (possibly several), empty when ungrouped. */
-function projectsFor(docId: string): string[] {
-  return assignments.value[docId] ?? [];
+/** The single project a document belongs to, or null when unassigned. */
+function projectOf(docId: string): string | null {
+  return assignments.value[docId] ?? null;
 }
 
-/** Assign a document to an additional project (multi-membership). Idempotent.
- *  Persisted. Unknown project ids are ignored. */
-function assignDocumentToProject(docId: string, projectId: string): void {
+/** Set a document's single project (replacing any previous assignment).
+ *  Idempotent when the doc is already in this project. Persisted. Unknown
+ *  project ids are ignored. */
+function setDocumentProject(docId: string, projectId: string): void {
   if (!projects.value.some((p) => p.id === projectId)) return;
-  const current = assignments.value[docId] ?? [];
-  if (current.includes(projectId)) return;
-  assignments.value = { ...assignments.value, [docId]: [...current, projectId] };
+  if (assignments.value[docId] === projectId) return;
+  assignments.value = { ...assignments.value, [docId]: projectId };
   void saveDesktopState();
 }
 
-/** Remove a document from one project (leaves any other memberships intact).
- *  Persisted; no-op when the doc is not in the project. */
-function unassignDocumentFromProject(docId: string, projectId: string): void {
-  const current = assignments.value[docId];
-  if (!current || !current.includes(projectId)) return;
-  const next = current.filter((p) => p !== projectId);
+/** Clear a document's project assignment (it becomes unassigned). Persisted;
+ *  no-op when the doc is not assigned to any project. */
+function clearDocumentProject(docId: string): void {
+  if (!(docId in assignments.value)) return;
   const nextAssign = { ...assignments.value };
-  if (next.length === 0) delete nextAssign[docId];
-  else nextAssign[docId] = next;
+  delete nextAssign[docId];
   assignments.value = nextAssign;
   void saveDesktopState();
 }
@@ -593,9 +589,9 @@ export function useDesktopState() {
     renameProject,
     deleteProject,
     reparentProject,
-    projectsFor,
-    assignDocumentToProject,
-    unassignDocumentFromProject,
+    projectOf,
+    setDocumentProject,
+    clearDocumentProject,
     isAncestorOrSelf,
     projectPath,
     // sort prefs

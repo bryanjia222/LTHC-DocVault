@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { X } from "@lucide/vue";
 import BaseModal from "./BaseModal.vue";
 import { useDialogs } from "../composables/useDialogs";
 import { useDocuments } from "../composables/useDocuments";
@@ -26,35 +25,19 @@ const modificationStatus = computed<ModificationStatus>(
 );
 const trackedPath = computed(() => selectedDocument.value?.trackedPath ?? null);
 
-/** Project ids the selected document currently belongs to. */
-const memberProjects = computed(() => {
+/** The single project the selected document belongs to (null = unassigned). */
+const currentProject = computed(() => {
   const doc = selectedDocument.value;
-  return doc ? desktop.projectsFor(doc.id) : [];
+  return doc ? desktop.projectOf(doc.id) : null;
 });
 
-/** Projects the document does NOT yet belong to (joinable via the select). */
-const joinableProjects = computed(() =>
-  desktop.projects.value.filter((p) => !memberProjects.value.includes(p.id)),
-);
-
-/** Resolve a project id to its display name (falls back to the raw id). */
-function projectName(id: string): string {
-  return desktop.projects.value.find((p) => p.id === id)?.name ?? id;
-}
-
-function addProject(event: Event) {
-  const doc = selectedDocument.value;
-  const value = (event.target as HTMLSelectElement).value;
-  if (!doc || !value) return;
-  desktop.assignDocumentToProject(doc.id, value);
-  // Reset the select so the placeholder shows again after joining.
-  (event.target as HTMLSelectElement).value = "";
-}
-
-function removeProject(projectId: string) {
+/** Pick the document's project, or clear it. An empty value -> unassigned. */
+function setProject(event: Event) {
   const doc = selectedDocument.value;
   if (!doc) return;
-  desktop.unassignDocumentFromProject(doc.id, projectId);
+  const value = (event.target as HTMLSelectElement).value;
+  if (value) desktop.setDocumentProject(doc.id, value);
+  else desktop.clearDocumentProject(doc.id);
 }
 </script>
 
@@ -96,41 +79,17 @@ function removeProject(projectId: string) {
 
     <section class="projects-section">
       <h3 class="projects-heading">{{ t("projects.title") }}</h3>
-      <div class="tag-chips">
-        <span
-          v-for="pid in memberProjects"
-          :key="pid"
-          class="tag-chip"
-        >
-          {{ projectName(pid) }}
-          <button
-            type="button"
-            class="tag-remove"
-            :aria-label="t('actions.clear')"
-            :title="t('actions.clear')"
-            @click="removeProject(pid)"
-          >
-            <X aria-hidden="true" />
-          </button>
-        </span>
-        <span v-if="memberProjects.length === 0" class="muted">{{
-          t("projects.empty")
-        }}</span>
-      </div>
       <select
-        v-if="joinableProjects.length > 0"
         class="project-add-select"
-        :aria-label="t('projects.addPlaceholder')"
-        @change="addProject"
+        :value="currentProject ?? ''"
+        :aria-label="t('projects.title')"
+        @change="setProject"
       >
-        <option value="" disabled selected>{{ t("projects.addPlaceholder") }}</option>
-        <option v-for="p in joinableProjects" :key="p.id" :value="p.id">
-          {{ p.name }}
+        <option value="">{{ t("documents.unassigned") }}</option>
+        <option v-for="p in desktop.projects.value" :key="p.id" :value="p.id">
+          {{ desktop.projectPath(p.id) }}
         </option>
       </select>
-      <p v-else-if="memberProjects.length > 0" class="muted small">
-        {{ t("projects.noneAvailable") }}
-      </p>
     </section>
 
     <template #footer>
