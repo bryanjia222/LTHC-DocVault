@@ -224,6 +224,43 @@ describe("useVault - rename_document contract", () => {
   });
 });
 
+describe("useVault - set_version_note contract", () => {
+  it("sends document_id + version_id + note", async () => {
+    await vault.setVersionNote({
+      document_id: "docA",
+      version_id: "v1",
+      note: "updated",
+    });
+    expect(invokeArgs("set_version_note")).toStrictEqual({
+      document_id: "docA",
+      version_id: "v1",
+      note: "updated",
+    });
+  });
+
+  it("forwards null to clear the note", async () => {
+    await vault.setVersionNote({
+      document_id: "docA",
+      version_id: "v1",
+      note: null,
+    });
+    expect(invokeArgs("set_version_note")).toStrictEqual({
+      document_id: "docA",
+      version_id: "v1",
+      note: null,
+    });
+  });
+});
+
+describe("useVault - set_log_level contract", () => {
+  it("sends the level under snake_case key and reloads config", async () => {
+    await vault.setLogLevel("debug");
+    expect(invokeArgs("set_log_level")).toStrictEqual({ level: "debug" });
+    // setLogLevel reloads the config so the Settings view reflects the new level.
+    expect(invoke).toHaveBeenCalledWith("get_config");
+  });
+});
+
 describe("useVault - library model contracts", () => {
   it("library_path sends document_id and resolves the path string", async () => {
     const path = await vault.libraryPath({ document_id: "docA" });

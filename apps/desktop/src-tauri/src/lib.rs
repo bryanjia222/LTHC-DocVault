@@ -4,6 +4,7 @@ mod dto;
 mod jobs;
 mod library;
 mod local_state;
+mod logging;
 mod prefs;
 mod state;
 
@@ -94,6 +95,12 @@ pub fn run() {
             // / third_party beside the vault / PATH).
             let restic_path = bundled_restic_path(app.handle());
             *app.state::<AppState>().inner().restic_path.lock().unwrap() = restic_path;
+            // Install the tracing subscriber (rolling file under the app config
+            // dir) before opening the vault, so open_if_initialized's
+            // reload_log_level has a subscriber to configure. `None` when the
+            // config dir is unavailable - logging then stays off, matching prior
+            // behavior (all tracing calls were discarded).
+            *app.state::<AppState>().inner().logger.lock().unwrap() = logging::init(app.handle());
             state::open_if_initialized(app.handle(), app.state::<AppState>().inner());
             Ok(())
         })
@@ -101,6 +108,7 @@ pub fn run() {
             commands::vault_status,
             commands::list_documents_with_versions,
             commands::get_config,
+            commands::set_log_level,
             commands::connect_vault,
             commands::probe_vault,
             commands::open_devtools,
@@ -111,6 +119,7 @@ pub fn run() {
             jobs::checkout_version,
             jobs::delete_document,
             jobs::rename_document,
+            jobs::set_version_note,
             jobs::list_jobs,
             jobs::cancel_job,
             local_state::get_desktop_state,

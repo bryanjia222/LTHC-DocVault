@@ -847,3 +847,86 @@ describe("useVaultActions - rename document", () => {
     expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
   });
 });
+
+describe("useVaultActions - edit version note", () => {
+  it("updates the selected version's note and reloads the list", async () => {
+    asTauri();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_documents_with_versions") return [];
+      return undefined;
+    });
+
+    await actions.editVersionNote("new note");
+
+    expect(invoke).toHaveBeenCalledWith("set_version_note", {
+      document_id: docA.id,
+      version_id: "a1",
+      note: "new note",
+    });
+    // Note editing reloads the document list so the new note shows immediately.
+    expect(invoke).toHaveBeenCalledWith("list_documents_with_versions");
+  });
+
+  it("trims whitespace before sending the note", async () => {
+    asTauri();
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.editVersionNote("  new note  ");
+
+    expect(invoke).toHaveBeenCalledWith("set_version_note", {
+      document_id: docA.id,
+      version_id: "a1",
+      note: "new note",
+    });
+  });
+
+  it("sends null to clear the note when the new value is blank", async () => {
+    asTauri();
+    // Seed a version with an existing note so a blank submit is a real change.
+    documents.value = [
+      { ...docA, versions: [{ ...docA.versions[0], note: "existing" }] },
+    ];
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.editVersionNote("   ");
+
+    expect(invoke).toHaveBeenCalledWith("set_version_note", {
+      document_id: docA.id,
+      version_id: "a1",
+      note: null,
+    });
+  });
+
+  it("does not invoke when the note is unchanged", async () => {
+    asTauri();
+    documents.value = [
+      { ...docA, versions: [{ ...docA.versions[0], note: "same" }] },
+    ];
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.editVersionNote("same");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+  });
+
+  it("does not invoke when no version is selected", async () => {
+    asTauri();
+    documents.value = [];
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.editVersionNote("new note");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+  });
+
+  it("does not invoke when not running under Tauri", async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+
+    await actions.editVersionNote("new note");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+  });
+});

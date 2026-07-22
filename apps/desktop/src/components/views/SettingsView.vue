@@ -13,7 +13,7 @@ import StatusArchivePanel from "../status/StatusArchivePanel.vue";
 
 const { t, locale } = useI18n();
 const { isDark, setTheme } = useTheme();
-const { config } = useVault();
+const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
 const { openSwitchBackend } = useDialogs();
@@ -21,6 +21,17 @@ const { openSwitchBackend } = useDialogs();
 // Dev-only reset card: vite strips this in production builds, so the
 // destructive test actions never ship to end users.
 const isDev = import.meta.env.DEV;
+
+const logLevels = ["error", "warn", "info", "debug", "trace"] as const;
+
+async function onLogLevelChange(event: Event) {
+  const level = (event.target as HTMLSelectElement).value;
+  try {
+    await setLogLevel(level);
+  } catch (e) {
+    console.error("set_log_level failed", e);
+  }
+}
 
 const tabs: { id: SettingsTab; labelKey: string }[] = [
   { id: "status", labelKey: "settings.tabs.status" },
@@ -114,7 +125,17 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
           <dl class="settings-dl">
             <div>
               <dt>{{ t("settings.logLevel") }}</dt>
-              <dd>{{ config.logLevel }}</dd>
+              <dd>
+                <select
+                  class="locale-select"
+                  :value="config.logLevel"
+                  @change="onLogLevelChange"
+                >
+                  <option v-for="level in logLevels" :key="level" :value="level">
+                    {{ level }}
+                  </option>
+                </select>
+              </dd>
             </div>
             <div>
               <dt>{{ t("settings.logFile") }}</dt>

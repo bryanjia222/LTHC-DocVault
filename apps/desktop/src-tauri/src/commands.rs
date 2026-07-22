@@ -48,11 +48,17 @@ pub fn list_documents_with_versions(
 }
 
 #[tauri::command]
-pub fn get_config(state: State<AppState>) -> Result<ConfigDto, String> {
+pub fn get_config(app: AppHandle, state: State<AppState>) -> Result<ConfigDto, String> {
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     let paths = vault.paths();
-    let (log_level, log_file) = read_logging(&paths.config_path)?;
+    let log_level = crate::logging::read_level(&paths.config_path);
+    // Show where logs actually roll (the fixed app-level logs dir), not the
+    // `[logging].file` hint from config - the subscriber always writes under the
+    // app config dir regardless of vault.
+    let log_file = crate::logging::log_dir(&app)
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_default();
     Ok(ConfigDto {
         backend: vault.backend().as_str().to_owned(),
         data_dir: paths.data_dir.display().to_string(),
@@ -65,17 +71,41 @@ pub fn get_config(state: State<AppState>) -> Result<ConfigDto, String> {
     })
 }
 
-/// Read the logging section from the on-disk config. Falls back to `info` /
-/// empty when the file or section is absent.
-fn read_logging(config_path: &std::path::Path) -> Result<(String, String), String> {
-    let Ok(text) = std::fs::read_to_string(config_path) else {
-        return Ok(("info".to_owned(), String::new()));
+/// Change the active vault's log level: validates the level, persists it to the
+/// vault's `config.toml` `[logging].level`, and reloads the live tracing
+/// subscriber so the new level takes effect immediately (no restart). The level
+/// is vault-scoped (each vault keeps its own) and reapplied on every vault open.
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_log_level(state: State<AppState>, level: String) -> Result<(), String> {
+    validate_level(&level)?;
+    let config_path = {
+        let vault = state::lock_vault(&state.vault);
+        let vault = vault.as_ref().ok_or("vault not initialized")?;
+        vault.paths().config_path.clone()
     };
-    let config: VaultConfig = toml::from_str(&text).map_err(|e| e.to_string())?;
-    Ok((
-        config.logging.level,
-        config.logging.file.unwrap_or_default(),
-    ))
+    write_log_level(&config_path, &level)?;
+    state::reload_log_level(state.inner(), &config_path);
+    Ok(())
+}
+
+fn validate_level(level: &str) -> Result<(), String> {
+    match level {
+        "error" | "warn" | "info" | "debug" | "trace" => Ok(()),
+        _ => Err(format!("invalid log level: {level}")),
+    }
+}
+
+/// Persist `[logging].level` into a vault's `config.toml` by round-tripping the
+/// full `VaultConfig` (read -> mutate -> `to_string_pretty`, matching how
+/// `write_initial_config` writes the file). Preserves every other field and
+/// adds the `[logging]` section when absent (its other fields default).
+fn write_log_level(config_path: &std::path::Path, level: &str) -> Result<(), String> {
+    let text = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+    let mut config: VaultConfig = toml::from_str(&text).map_err(|e| e.to_string())?;
+    config.logging.level = level.to_owned();
+    let rendered = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(config_path, rendered).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Connect (and switch to) the vault at the chosen directory with the chosen

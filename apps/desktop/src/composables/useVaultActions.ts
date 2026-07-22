@@ -37,6 +37,7 @@ export function useVaultActions() {
     checkoutVersion,
     deleteDocument: sendDelete,
     renameDocument: sendRename,
+    setVersionNote: sendSetVersionNote,
     loadDocuments,
     resetToStage,
     isTauri,
@@ -452,6 +453,47 @@ export function useVaultActions() {
   }
 
   /**
+   * Update the selected version's note (its commit message). Called by the
+   * note-edit dialog after it collects the new text. A note unchanged from the
+   * current value is treated as a cancel (no backend call). An empty note clears
+   * it (sent as null). Synchronous, so the document list is reloaded on success
+   * and a noteUpdated entry is logged.
+   */
+  async function editVersionNote(note: string) {
+    const actionKey = "actionLogs.editNote" as const;
+    const doc = selectedDocument.value;
+    const ver = selectedVersion.value;
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: ver?.label ?? t("log.latest"),
+      }),
+    );
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    const trimmed = note.trim();
+    if (trimmed === ver.note.trim()) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    try {
+      await sendSetVersionNote({
+        document_id: doc.id,
+        version_id: ver.id,
+        note: trimmed || null,
+      });
+      await loadDocuments();
+      log(t("log.noteUpdated", { name: doc.name, version: ver.label }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
+  }
+
+  /**
    * Commit the document's tracked source file as a new version directly - no
    * file dialog, since the path is already known. Only meaningful when the
    * tracker reports "modified"; the UI disables the button otherwise. Registers
@@ -628,5 +670,6 @@ export function useVaultActions() {
     emptyTrash,
     exportVersionAction,
     renameDocument,
+    editVersionNote,
   };
 }

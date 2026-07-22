@@ -21,7 +21,7 @@ export const zhCN = {
     renameProject: "重命名",
     deleteProject: "删除",
     confirmDeleteProject:
-      "确认删除项目「{name}」？不会删除项目内的文档，文档仍保留在仓库与其他所属项目中。",
+      "确认删除项目「{name}」？文档仍保留在仓库与其他所属项目中。",
     projectDropHint: "拖入文档以加入该项目；拖动项目可调整顺序",
     projectNameTaken: "该项目名称已存在",
     projectNameEmpty: "项目名称不能为空",
@@ -90,12 +90,20 @@ export const zhCN = {
     hint: "仅修改文档名，版本历史与备份快照保持不变。",
     submit: "重命名",
   },
+  noteEditDialog: {
+    title: "编辑版本备注",
+    subtitle: "更新该版本的提交说明。",
+    noteLabel: "备注",
+    notePlaceholder: "该版本的说明…",
+    hint: "留空将清除备注。归档与其他版本不受影响。",
+    submit: "保存",
+  },
   confirm: {
-    delete: "确认删除文档「{name}」？其所有版本与备份快照都将被移除（不会删除源文件）。",
+    delete: "确认删除文档「{name}」？其所有版本与备份快照都将被移除。",
     moveToTrash:
       "将文档「{name}」移入回收站？它会从文档列表中隐藏，可在回收站中恢复或永久删除。",
     permanentDelete:
-      "永久删除文档「{name}」？其所有版本与备份快照都将被移除（不会删除源文件），且无法恢复。",
+      "永久删除文档「{name}」？其所有版本与备份快照都将被移除，且无法恢复。",
     permanentDeleteAgain:
       "再次确认：永久删除「{name}」的全部历史记录？此操作不可撤销。",
     emptyTrash:
@@ -113,6 +121,7 @@ export const zhCN = {
     checkout: "切换版本",
     open: "打开文档",
     rename: "重命名文档",
+    editNote: "编辑版本备注",
     delete: "删除文档",
     restore: "从回收站恢复文档",
     emptyTrash: "清空回收站",
@@ -239,7 +248,7 @@ export const zhCN = {
     size: "大小",
     note: "备注",
     noNote: "无备注",
-    noteEditHint: "备注可在提交修改时填写（编辑功能即将上线）",
+    noteEditHint: "编辑备注",
     documentId: "文档 ID",
     backend: "备份后端",
   },
@@ -299,6 +308,7 @@ export const zhCN = {
     openFailedTitle: "无法打开文档",
     openNoDefaultApp: "DocVault 无法用系统默认程序打开「{name}」。通常是因为系统未为该文件类型（.docx/.xlsx/.pptx）关联默认程序，或关联的程序启动失败。请在系统设置中为该扩展名关联一个 Office 程序（如 Word/WPS/LibreOffice）后重试。详细错误：{error}",
     renamed: "已重命名文档：{name} → {newName}",
+    noteUpdated: "已更新备注：{name} {version}",
     latest: "latest",
     exported: "已导出 {target}",
     cleared: "活动日志已清空",

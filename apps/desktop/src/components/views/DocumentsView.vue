@@ -65,7 +65,8 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
-const { openCommitModified, openDocumentStatus, openRename } = useDialogs();
+const { openCommitModified, openDocumentStatus, openRename, openNoteEdit } =
+  useDialogs();
 const { log } = useActivityLog();
 const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction } =
   useVaultActions();
@@ -399,19 +400,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="preview-bar">
-        <button
-          class="preview-btn"
-          type="button"
-          :disabled="!selectedDocument"
-          :title="t('actions.preview')"
-          @click="openPreview()"
-        >
-          <Eye aria-hidden="true" />
-          {{ t("actions.preview") }}
-        </button>
-      </div>
-
       <div class="filter-bar">
         <div class="filter-group">
           <span class="filter-label">{{ t("filters.type") }}</span>
@@ -439,6 +427,16 @@ onBeforeUnmount(() => {
           @click="clearFilters"
         >
           {{ t("filters.clear") }}
+        </button>
+        <button
+          class="preview-btn"
+          type="button"
+          :disabled="!selectedDocument"
+          :title="t('actions.preview')"
+          @click="openPreview()"
+        >
+          <Eye aria-hidden="true" />
+          {{ t("actions.preview") }}
         </button>
       </div>
 
@@ -789,9 +787,10 @@ onBeforeUnmount(() => {
               <button
                 class="note-edit-hint"
                 type="button"
-                disabled
+                :disabled="!selectedVersion"
                 :title="t('details.noteEditHint')"
                 :aria-label="t('details.noteEditHint')"
+                @click="openNoteEdit"
               >
                 <Pencil aria-hidden="true" />
               </button>
@@ -886,9 +885,10 @@ onBeforeUnmount(() => {
                 <button
                   class="note-edit-hint"
                   type="button"
-                  disabled
+                  :disabled="!selectedVersion"
                   :title="t('details.noteEditHint')"
                   :aria-label="t('details.noteEditHint')"
+                  @click="openNoteEdit"
                 >
                   <Pencil aria-hidden="true" />
                 </button>
@@ -1352,12 +1352,6 @@ tbody tr.selected {
   gap: 8px;
 }
 
-.preview-bar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}
-
 .preview-btn {
   display: inline-flex;
   align-items: center;
@@ -1688,7 +1682,7 @@ tbody tr.selected {
   cursor: not-allowed;
 }
 
-/* Note pen hint (visual only - edit not wired yet) */
+/* Note pen - opens the version note editor */
 .note-edit-hint {
   display: inline-flex;
   align-items: center;
@@ -1701,6 +1695,15 @@ tbody tr.selected {
   background: transparent;
   color: var(--text-muted);
   vertical-align: middle;
+  cursor: pointer;
+}
+
+.note-edit-hint:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.note-edit-hint:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 

@@ -10,6 +10,7 @@ use tauri::AppHandle;
 use tracing::warn;
 
 use crate::dto::{ConnectError, ConnectOutcome, VaultProbe};
+use crate::logging::Logger;
 use crate::prefs;
 
 /// Shared application state. The vault is `None` until the user initializes it
@@ -31,6 +32,10 @@ pub struct AppState {
     /// [`restic_override`] so the bundled binary is used regardless of where the
     /// vault lives - replacing the former `DOCVAULT_RESTIC_PATH` env var.
     pub restic_path: Mutex<Option<PathBuf>>,
+    /// The initialized tracing subscriber (file-rolling + reloadable level),
+    /// installed once in `run()`'s setup. `None` until then (and in unit tests,
+    /// which never call `logging::init`), so [`reload_log_level`] is a no-op.
+    pub logger: Mutex<Option<Logger>>,
 }
 
 impl AppState {
@@ -40,6 +45,7 @@ impl AppState {
             jobs: JobRegistry::new(),
             last_open_error: Arc::new(Mutex::new(None)),
             restic_path: Mutex::new(None),
+            logger: Mutex::new(None),
         }
     }
 }
@@ -90,6 +96,24 @@ pub(crate) fn set_open_error(state: &AppState, message: Option<String>) {
         .unwrap_or_else(|e| e.into_inner()) = message;
 }
 
+/// Re-apply the vault's configured log level to the live tracing subscriber.
+/// Reads `[logging].level` from the vault's `config.toml` and reloads the
+/// subscriber filter, so startup and vault switches pick up that vault's level
+/// without a restart. A no-op when no subscriber is installed (`logger` is
+/// `None`, e.g. in unit tests) - the level still takes effect on the next app
+/// start via `logging::init`'s default, but live switching needs the subscriber.
+/// A reload failure is logged, not fatal.
+pub fn reload_log_level(state: &AppState, config_path: &Path) {
+    let level = crate::logging::read_level(config_path);
+    let guard = state.logger.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(logger) = guard.as_ref() else {
+        return;
+    };
+    if let Err(error) = crate::logging::set_level(logger, &level) {
+        warn!(error = %error, level, "failed to reload log level");
+    }
+}
+
 /// Build the [`StorageOverrides`] that inject the desktop's bundled restic
 /// binary into a vault open/init. Only `restic_path` is set: the backend and
 /// password always come from the vault's `config.toml` (written by
@@ -119,10 +143,12 @@ pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
     if !paths.config_path.exists() {
         return;
     }
+    let config_path = paths.config_path.clone();
     match VaultStorage::open_with_overrides(paths, &restic_override(state)) {
         Ok(storage) => {
             set_open_error(state, None);
             *lock_vault(&state.vault) = Some(DocVault::new(storage));
+            reload_log_level(state, &config_path);
         }
         Err(e) => {
             warn!(error = %e, root = %root.display(), "failed to open existing vault");
@@ -161,6 +187,7 @@ pub fn connect_vault_core(
     let root = PathBuf::from(root_dir);
     let paths = VaultPaths::from_root(&root);
     let empty = is_empty_dir(&root)?;
+    let config_path = paths.config_path.clone();
 
     let (mode, resolved_backend) = if empty {
         write_config(&paths, backend, restic_password.as_deref())?;
@@ -184,6 +211,7 @@ pub fn connect_vault_core(
     // no job is in flight.
     set_open_error(state, None);
     state.jobs.clear();
+    reload_log_level(state, &config_path);
 
     Ok(ConnectOutcome {
         mode: mode.to_owned(),

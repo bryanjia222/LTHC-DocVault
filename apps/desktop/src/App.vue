@@ -11,6 +11,7 @@ import SwitchBackendDialog from "./components/SwitchBackendDialog.vue";
 import CommitModifiedDialog from "./components/CommitModifiedDialog.vue";
 import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
+import NoteEditDialog from "./components/NoteEditDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
@@ -185,6 +186,7 @@ onBeforeUnmount(() => {
     <CommitModifiedDialog />
     <DocumentStatusDialog />
     <RenameDialog />
+    <NoteEditDialog />
     <AppContextMenu />
     <ToastHost />
   </div>

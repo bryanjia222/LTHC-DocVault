@@ -21,7 +21,7 @@ export const enUS = {
     renameProject: "Rename",
     deleteProject: "Delete",
     confirmDeleteProject:
-      "Delete project \"{name}\"? Its documents are not deleted - they stay in the vault and any other projects they belong to.",
+      "Delete project \"{name}\"? Its documents stay in the vault and any other projects they belong to.",
     projectDropHint: "Drop a document here to add it; drag projects to reorder",
     projectNameTaken: "A project with this name already exists",
     projectNameEmpty: "Project name cannot be empty",
@@ -91,12 +91,20 @@ export const enUS = {
     hint: "Only the document name changes; version history and snapshots are kept.",
     submit: "Rename",
   },
+  noteEditDialog: {
+    title: "Edit version note",
+    subtitle: "Update the commit message for this version.",
+    noteLabel: "Note",
+    notePlaceholder: "Describe this version…",
+    hint: "Leave blank to clear the note. The archive and other versions are unaffected.",
+    submit: "Save",
+  },
   confirm: {
-    delete: "Delete document \"{name}\"? All its versions and backup snapshots will be removed (the source file is not deleted).",
+    delete: "Delete document \"{name}\"? All its versions and backup snapshots will be removed.",
     moveToTrash:
       "Move document \"{name}\" to the recycle bin? It will be hidden from the document list; restore or permanently delete it from the bin.",
     permanentDelete:
-      "Permanently delete document \"{name}\"? All its versions and backup snapshots will be removed (the source file is not deleted) and cannot be recovered.",
+      "Permanently delete document \"{name}\"? All its versions and backup snapshots will be removed and cannot be recovered.",
     permanentDeleteAgain:
       "Are you sure? Permanently deleting \"{name}\" removes all of its history. This cannot be undone.",
     emptyTrash:
@@ -114,6 +122,7 @@ export const enUS = {
     checkout: "Checkout",
     open: "Open document",
     rename: "Rename document",
+    editNote: "Edit version note",
     delete: "Delete document",
     restore: "Restore document from recycle bin",
     emptyTrash: "Empty recycle bin",
@@ -241,7 +250,7 @@ export const enUS = {
     size: "Size",
     note: "Note",
     noNote: "No note",
-    noteEditHint: "Notes can be entered when committing a modification (editing coming soon)",
+    noteEditHint: "Edit note",
     documentId: "Document ID",
     backend: "Backup backend",
   },
@@ -302,6 +311,7 @@ export const enUS = {
     openFailedTitle: "Could not open document",
     openNoDefaultApp: "DocVault could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
     renamed: "Renamed document: {name} -> {newName}",
+    noteUpdated: "Updated note: {name} {version}",
     latest: "latest",
     exported: "Exported {target}",
     cleared: "Activity log cleared",

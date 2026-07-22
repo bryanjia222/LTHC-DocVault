@@ -20,6 +20,12 @@ serde_json = "1"
 toml = "0.9"
 sha2 = "0.10"
 tracing = "0.1"
+# Initialize a tracing subscriber so the crates' `tracing::info!/warn!` calls
+# actually land somewhere (without a subscriber they are discarded). The reload
+# handle lets `set_log_level` switch the active level at runtime without a
+# restart; `tracing-appender` rolls a daily log file under the app config dir.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 # Launch the OS default editor (Word/WPS) on a library working copy. Pure Rust
 # call from a command, so no Tauri plugin / capability is needed.
 open = "5"

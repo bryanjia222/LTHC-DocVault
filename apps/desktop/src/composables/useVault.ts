@@ -268,6 +268,32 @@ async function renameDocument(params: {
 }
 
 /**
+ * Update a version's note (its commit message). Synchronous. `null` (or an
+ * empty string, which the caller normalizes to null) clears the note. The
+ * archive and every other version field are untouched; the caller reloads the
+ * document list on success.
+ */
+async function setVersionNote(params: {
+  document_id: string;
+  version_id: string;
+  note: string | null;
+}): Promise<void> {
+  await invoke<void>("set_version_note", params);
+}
+
+/**
+ * Change the active vault's log level. Persists it to the vault's `config.toml`
+ * and reloads the live tracing subscriber (backend side), so the new level takes
+ * effect immediately. Reloads the config afterward so the Settings view reflects
+ * the persisted level. No-op outside Tauri.
+ */
+async function setLogLevel(level: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("set_log_level", { level });
+  await loadConfig();
+}
+
+/**
  * Resolve the deterministic library path for a document's current-version
  * working copy (`<vault_root>/library/<docId>.<ext>`). Synchronous. Used to
  * point add/checkout/commit-modified flows at the tool-owned working copy
@@ -493,6 +519,8 @@ export function useVault() {
     checkoutVersion,
     deleteDocument,
     renameDocument,
+    setVersionNote,
+    setLogLevel,
     libraryPath,
     openLibraryCopy,
     previewVersion,

@@ -151,6 +151,28 @@ pub fn rename_document(
     Ok(())
 }
 
+/// Update a version's note (its commit message). Synchronous (a single SQL
+/// UPDATE); not a job. `None` (or an empty string from the UI) clears the note.
+/// Does not touch the archive or any other version field.
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_version_note(
+    state: State<'_, AppState>,
+    document_id: String,
+    version_id: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    let vault = state::lock_vault(&state.vault);
+    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    vault
+        .set_version_note(
+            &DocumentRef::IdPrefix(document_id),
+            &version_id,
+            note.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_jobs(state: State<'_, AppState>) -> Result<Vec<JobRecord>, String> {
     Ok(state.jobs.list())
