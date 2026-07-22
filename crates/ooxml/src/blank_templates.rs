@@ -89,6 +89,27 @@ pub(crate) const XLSX: &[Part] = &[
     ),
 ];
 
+/// `ppt/presentation.xml` for a 4:3 deck: 10in x 7.5in (`screen4x3`). This is
+/// the OOXML default and is what the static [`PPTX`] package carries.
+const PRESENTATION_4_3: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1">
+<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+<p:sldIdLst><p:sldId id="256" r:id="rId3"/></p:sldIdLst>
+<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
+<p:notesSz cx="6858000" cy="9144000"/>
+</p:presentation>"#;
+
+/// `ppt/presentation.xml` for a 16:9 deck: 13.333in x 7.5in (`screen16x9`). Only
+/// the `<p:sldSz>` differs from 4:3 - the slide master / layout / theme / slide
+/// are ratio-independent, so the rest of the [`PPTX`] package is reused verbatim.
+const PRESENTATION_16_9: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1">
+<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+<p:sldIdLst><p:sldId id="256" r:id="rId3"/></p:sldIdLst>
+<p:sldSz cx="12192000" cy="6858000" type="screen16x9"/>
+<p:notesSz cx="6858000" cy="9144000"/>
+</p:presentation>"#;
+
 /// Blank `.pptx`: one slide built on a minimal slide-master / slide-layout /
 /// theme set. PowerPoint is strict about these being present and cross-linked,
 /// so the full minimal set is included.
@@ -115,13 +136,7 @@ pub(crate) const PPTX: &[Part] = &[
     ),
     (
         "ppt/presentation.xml",
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1">
-<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
-<p:sldIdLst><p:sldId id="256" r:id="rId3"/></p:sldIdLst>
-<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
-<p:notesSz cx="6858000" cy="9144000"/>
-</p:presentation>"#,
+        PRESENTATION_4_3,
     ),
     (
         "ppt/_rels/presentation.xml.rels",
@@ -215,3 +230,33 @@ pub(crate) const PPTX: &[Part] = &[
 </a:theme>"#,
     ),
 ];
+
+/// The `ppt/presentation.xml` body for a pptx, choosing the slide size by aspect
+/// ratio. `None` (or any value other than `"16:9"`) yields 4:3 - the package's
+/// default - so callers that pass `None` keep their pre-existing behavior.
+pub(crate) fn presentation_xml(aspect_ratio: Option<&str>) -> &'static str {
+    match aspect_ratio {
+        Some("16:9") => PRESENTATION_16_9,
+        _ => PRESENTATION_4_3,
+    }
+}
+
+/// The pptx part set with `ppt/presentation.xml` chosen by `aspect_ratio`. The
+/// rest of the package (content-types, slide master, layout, theme, slide) is
+/// ratio-independent, so only the presentation part is swapped. Returned as an
+/// owned vec because the chosen presentation is picked at runtime; docx/xlsx
+/// stay on their static slices.
+pub(crate) fn pptx_parts(aspect_ratio: Option<&str>) -> Vec<(String, String)> {
+    let presentation = presentation_xml(aspect_ratio);
+    PPTX
+        .iter()
+        .map(|&(path, content)| {
+            let content = if path == "ppt/presentation.xml" {
+                presentation
+            } else {
+                content
+            };
+            (path.to_owned(), content.to_owned())
+        })
+        .collect()
+}

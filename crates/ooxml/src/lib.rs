@@ -203,19 +203,20 @@ pub fn manifest_for(path: impl AsRef<Path>) -> OoxmlResult<OoxmlManifest> {
 /// desktop layer's "new blank document" flow. Returns
 /// [`OoxmlError::UnsupportedFormat`] for any other format (plain-text formats
 /// like txt/md are created by the caller with an empty write, not here).
+///
+/// `aspect_ratio` only affects pptx: `Some("16:9")` widens the slide to 16:9
+/// (13.333in x 7.5in); `None` or any other value keeps the OOXML 4:3 default
+/// (10in x 7.5in). Ignored for docx/xlsx.
 pub fn create_empty_package(
     format: &str,
+    aspect_ratio: Option<&str>,
     destination_path: impl AsRef<Path>,
 ) -> OoxmlResult<()> {
-    let parts = match format.to_ascii_lowercase().as_str() {
-        "docx" => blank_templates::DOCX,
-        "xlsx" => blank_templates::XLSX,
-        "pptx" => blank_templates::PPTX,
-        other => return Err(OoxmlError::UnsupportedFormat(other.to_owned())),
-    };
+    let format = format.to_ascii_lowercase();
     let destination_path = destination_path.as_ref();
     info!(
-        format,
+        format = format.as_str(),
+        aspect_ratio = ?aspect_ratio,
         destination = %destination_path.display(),
         "creating blank OOXML package"
     );
@@ -226,21 +227,36 @@ pub fn create_empty_package(
     let file = File::create(destination_path)?;
     let mut writer = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    write_package_from_parts(&mut writer, parts, options)?;
+    // docx/xlsx ship a static part set; pptx builds an owned one so its slide
+    // size can vary with `aspect_ratio`. `write_package_from_parts` is generic
+    // over the string type so both the static slices and the owned vec work.
+    match format.as_str() {
+        "docx" => write_package_from_parts(&mut writer, blank_templates::DOCX, options)?,
+        "xlsx" => write_package_from_parts(&mut writer, blank_templates::XLSX, options)?,
+        "pptx" => {
+            let parts = blank_templates::pptx_parts(aspect_ratio);
+            write_package_from_parts(&mut writer, &parts, options)?
+        }
+        other => return Err(OoxmlError::UnsupportedFormat(other.to_owned())),
+    }
     writer.finish()?;
-    debug!(format, "blank OOXML package written");
+    debug!(format = format.as_str(), "blank OOXML package written");
     Ok(())
 }
 
-fn write_package_from_parts<W: Write + Seek>(
+fn write_package_from_parts<W, S>(
     writer: &mut ZipWriter<W>,
-    parts: &[blank_templates::Part],
+    parts: &[(S, S)],
     options: SimpleFileOptions,
-) -> OoxmlResult<()> {
+) -> OoxmlResult<()>
+where
+    W: Write + Seek,
+    S: AsRef<str>,
+{
     for (relative, contents) in parts {
-        let zip_name = relative.replace('\\', "/");
+        let zip_name = relative.as_ref().replace('\\', "/");
         writer.start_file(zip_name, options)?;
-        writer.write_all(contents.as_bytes())?;
+        writer.write_all(contents.as_ref().as_bytes())?;
     }
     Ok(())
 }
@@ -525,7 +541,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         for (format, ext) in [("docx", "docx"), ("xlsx", "xlsx"), ("pptx", "pptx")] {
             let path = temp_dir.path().join(format!("blank.{ext}"));
-            create_empty_package(format, &path).unwrap();
+            create_empty_package(format, None, &path).unwrap();
 
             // Structurally a valid OOXML package (ZIP + [Content_Types].xml).
             assert!(is_ooxml_package(&path), "{format} should be an OOXML package");
@@ -545,12 +561,38 @@ mod tests {
 
         // Case-insensitive format match.
         let upper = temp_dir.path().join("blank.DOCX");
-        create_empty_package("DOCX", &upper).unwrap();
+        create_empty_package("DOCX", None, &upper).unwrap();
         assert!(is_ooxml_package(&upper));
 
         // Unknown format -> UnsupportedFormat (plain-text formats are the
         // caller's responsibility, not this function).
-        let err = create_empty_package("txt", temp_dir.path().join("blank.txt")).unwrap_err();
+        let err = create_empty_package("txt", None, temp_dir.path().join("blank.txt")).unwrap_err();
         assert!(matches!(err, OoxmlError::UnsupportedFormat(f) if f == "txt"));
+    }
+
+    #[test]
+    fn create_empty_package_pptx_honors_aspect_ratio() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // 16:9 -> screen16x9 with the widened 13.333in slide.
+        let wide = root.join("wide.pptx");
+        create_empty_package("pptx", Some("16:9"), &wide).unwrap();
+        let unpacked = root.join("wide");
+        unpack_package(&wide, &unpacked).unwrap();
+        let presentation =
+            fs::read_to_string(unpacked.join("ppt").join("presentation.xml")).unwrap();
+        assert!(presentation.contains(r#"type="screen16x9""#), "16:9 slide type");
+        assert!(presentation.contains(r#"cx="12192000""#), "16:9 slide width");
+
+        // None -> 4:3 default (unchanged behavior).
+        let standard = root.join("standard.pptx");
+        create_empty_package("pptx", None, &standard).unwrap();
+        let unpacked2 = root.join("standard");
+        unpack_package(&standard, &unpacked2).unwrap();
+        let presentation2 =
+            fs::read_to_string(unpacked2.join("ppt").join("presentation.xml")).unwrap();
+        assert!(presentation2.contains(r#"type="screen4x3""#), "4:3 slide type");
+        assert!(presentation2.contains(r#"cx="9144000""#), "4:3 slide width");
     }
 }

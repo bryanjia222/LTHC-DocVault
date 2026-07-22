@@ -57,6 +57,15 @@ pub enum JobKind {
     /// Tracked separately from [`JobKind::Commit`] (which is now the synchronous
     /// Phase A) so the UI can show the long-running compress step on its own.
     Archive,
+    /// Phase B of creating a blank document: identical compress work as
+    /// [`Archive`], but tracked separately so the UI can label it "creating
+    /// \<name\>" rather than "archiving" - from the user's view they just created
+    /// a document, the compress step is incidental. Spawned by the desktop's
+    /// `create_blank_document` command. Renamed `create_blank` (not `createblank`,
+    /// which `rename_all = "lowercase"` alone would produce) so the wire token
+    /// matches the i18n key `jobs.create_blank`.
+    #[serde(rename = "create_blank")]
+    CreateBlank,
 }
 
 /// Authoritative record for a single job. Serialized verbatim to the UI, which

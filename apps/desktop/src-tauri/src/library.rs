@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 
 use docvault_core::DocVault;
 use docvault_storage::{DocumentRef, NEVER_CANCELLED};
-use tauri::{AppHandle, State};
+use tauri::{ipc::Response, AppHandle, State};
 use tracing::warn;
 
 use crate::dto::{DesktopStateSlice, TrackedFile};
@@ -405,6 +405,34 @@ pub fn export_working_copy(
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref().ok_or("vault not initialized")?;
     export_working_copy_at(vault, &document_id, Path::new(&output_path))
+}
+
+/// Return the document's working-copy (library file) bytes for in-app preview.
+/// Unlike [`crate::commands::preview_version`] - which exports the committed
+/// archive snapshot - this reads the live library file, so a document with
+/// uncommitted edits previews its edited state rather than the last committed
+/// version. If the library copy is missing it is rebuilt from the current
+/// version first. Async + `spawn_blocking` to match `preview_version` (the vault
+/// lock + file read run off the main thread, so a slow materialize never freezes
+/// the UI).
+#[tauri::command(rename_all = "snake_case")]
+pub async fn preview_working_copy(
+    document_id: String,
+    state: State<'_, AppState>,
+) -> Result<Response, String> {
+    let vault = state.vault.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Response, String> {
+        let guard = state::lock_vault(&vault);
+        let vault = guard.as_ref().ok_or("vault not initialized")?;
+        let lib_path = library_path_for_doc(vault, &document_id)?;
+        if !lib_path.exists() {
+            materialize_at(vault, &document_id, &lib_path, &NEVER_CANCELLED)?;
+        }
+        let bytes = std::fs::read(&lib_path).map_err(|e| e.to_string())?;
+        Ok(Response::new(bytes))
+    })
+    .await
+    .map_err(|e| format!("preview working copy task failed: {e}"))?
 }
 
 /// Ensure every document has a library copy and a tracked entry pointing at it.

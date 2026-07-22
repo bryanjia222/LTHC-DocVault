@@ -67,8 +67,9 @@ pub fn commit_document(
 /// `xlsx`/`pptx`) and commit its first version through the same two-phase
 /// pipeline as [`commit_document`]. Phase A (here, synchronous) writes a
 /// durable intake copy of a freshly generated blank file + the `pending` DB
-/// row + materializes the library copy; the Phase B Archive job then finalizes
-/// it. Returns the archive job id.
+/// row + materializes the library copy; the Phase B CreateBlank job then
+/// finalizes it (same compress work as Archive, labeled "creating" for the UI).
+/// Returns the job id.
 ///
 /// The blank source is generated, not supplied: txt/md are empty files, the
 /// Office formats are minimal valid OOXML packages from
@@ -81,9 +82,10 @@ pub fn create_blank_document(
     state: State<'_, AppState>,
     name: String,
     format: String,
+    aspect_ratio: Option<String>,
 ) -> Result<String, String> {
     let format = format.to_ascii_lowercase();
-    let (source_path, _temp_dir) = write_blank_source(&format)?;
+    let (source_path, _temp_dir) = write_blank_source(&format, aspect_ratio.as_deref())?;
     let document_ref = DocumentRef::NewName(name.clone());
     let metadata = CommitMetadata::default();
     let (_document, version) = phase_a_commit(&state.vault, &source_path, document_ref, metadata)?;
@@ -91,7 +93,7 @@ pub fn create_blank_document(
     let version_for_job = version.clone();
     let on_event = make_emitter(app);
     let job_id = state.jobs.spawn(
-        JobKind::Archive,
+        JobKind::CreateBlank,
         name,
         on_event,
         move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
@@ -104,16 +106,22 @@ pub fn create_blank_document(
 /// Write a blank source file for `format` to a fresh temp dir and return its
 /// path together with the dir handle. txt/md get an empty file; docx/xlsx/pptx
 /// get a minimal valid OOXML package from `docvault_ooxml::create_empty_package`.
-/// The caller must hold the returned `TempDir` until after [`phase_a_commit`],
-/// which durably copies the source into the vault's intake (so the temp file is
-/// unneeded once that returns).
-fn write_blank_source(format: &str) -> Result<(PathBuf, tempfile::TempDir), String> {
+/// `aspect_ratio` is forwarded to the OOXML layer and only affects pptx (16:9 vs
+/// the 4:3 default); ignored for the other formats. The caller must hold the
+/// returned `TempDir` until after [`phase_a_commit`], which durably copies the
+/// source into the vault's intake (so the temp file is unneeded once that
+/// returns).
+fn write_blank_source(
+    format: &str,
+    aspect_ratio: Option<&str>,
+) -> Result<(PathBuf, tempfile::TempDir), String> {
     let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let source_path = temp_dir.path().join(format!("blank.{format}"));
     match format {
         "txt" | "md" => std::fs::write(&source_path, b"").map_err(|e| e.to_string())?,
         "docx" | "xlsx" | "pptx" => {
-            docvault_ooxml::create_empty_package(format, &source_path).map_err(|e| e.to_string())?
+            docvault_ooxml::create_empty_package(format, aspect_ratio, &source_path)
+                .map_err(|e| e.to_string())?
         }
         other => return Err(format!("unsupported document format: {other}")),
     }
@@ -617,7 +625,7 @@ mod tests {
     #[test]
     fn write_blank_source_produces_valid_files() {
         for format in ["txt", "md", "docx", "xlsx", "pptx"] {
-            let (path, _temp) = write_blank_source(format).expect("blank source written");
+            let (path, _temp) = write_blank_source(format, None).expect("blank source written");
             assert!(path.exists(), "{format} source exists");
             match format {
                 "txt" | "md" => {
@@ -638,7 +646,7 @@ mod tests {
         }
         // Unknown format is rejected.
         assert!(
-            write_blank_source("pdf").is_err(),
+            write_blank_source("pdf", None).is_err(),
             "unsupported format rejected"
         );
     }
@@ -656,7 +664,7 @@ mod tests {
         let vault: Arc<Mutex<Option<DocVault>>> =
             Arc::new(Mutex::new(Some(DocVault::new(storage))));
 
-        let (source, _blank_temp) = write_blank_source("docx").unwrap();
+        let (source, _blank_temp) = write_blank_source("docx", None).unwrap();
         let path = source.to_string_lossy().to_string();
 
         let registry = JobRegistry::new();
