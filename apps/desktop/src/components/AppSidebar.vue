@@ -14,6 +14,7 @@ import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
 import { useDesktopState } from "../composables/useDesktopState";
 import { confirmDialog } from "../composables/useVault";
+import { useContextMenu } from "../composables/useContextMenu";
 
 const { t } = useI18n();
 const { activeSection, setSection } = useNavigation();
@@ -91,25 +92,37 @@ function cancelRename() {
 }
 
 // --- project context menu (rename / delete) ---
-const ctx = ref<{ projectId: string; x: number; y: number } | null>(null);
+// Positioning shares useContextMenu so a menu opened near the window's right or
+// bottom edge flips on-screen instead of being clipped. The target project id is
+// tracked separately - the composable only owns open + position.
+const {
+  open: ctxOpen,
+  pos: ctxPos,
+  menuRef: ctxMenuRef,
+  openAt: openCtxAt,
+  close: closeCtxMenu,
+} = useContextMenu();
+const ctxProjectId = ref<string | null>(null);
 
 function openCtx(event: MouseEvent, id: string) {
-  ctx.value = { projectId: id, x: event.clientX, y: event.clientY };
+  ctxProjectId.value = id;
+  openCtxAt(event);
 }
 
 function closeCtx() {
-  ctx.value = null;
+  ctxProjectId.value = null;
+  closeCtxMenu();
 }
 
 function ctxRename() {
-  const id = ctx.value?.projectId;
+  const id = ctxProjectId.value;
   const proj = id ? projects.value.find((p) => p.id === id) : undefined;
   closeCtx();
   if (id && proj) startRename(id, proj.name);
 }
 
 async function ctxDelete() {
-  const id = ctx.value?.projectId;
+  const id = ctxProjectId.value;
   closeCtx();
   if (!id) return;
   const proj = projects.value.find((p) => p.id === id);
@@ -325,14 +338,15 @@ function onProjectDrop(event: DragEvent, targetId: string) {
     <!-- project context menu -->
     <Teleport to="body">
       <div
-        v-if="ctx"
+        v-if="ctxOpen"
         class="ctx-backdrop"
         @click="closeCtx"
         @contextmenu.prevent="closeCtx"
       >
         <ul
+          ref="ctxMenuRef"
           class="ctx-menu"
-          :style="{ top: `${ctx.y}px`, left: `${ctx.x}px` }"
+          :style="{ top: `${ctxPos.y}px`, left: `${ctxPos.x}px` }"
           @click.stop
         >
           <li>

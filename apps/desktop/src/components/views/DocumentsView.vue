@@ -26,6 +26,7 @@ import { useDesktopState } from "../../composables/useDesktopState";
 import { useDialogs } from "../../composables/useDialogs";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
+import { useContextMenu } from "../../composables/useContextMenu";
 import {
   hasBranchingHistory,
   getParentLabel,
@@ -79,10 +80,40 @@ const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
 const newTag = ref("");
 const tagInputOpen = ref(false);
 const tagInputRef = ref<HTMLInputElement | null>(null);
-const docMenuOpen = ref(false);
-const docMenuPos = ref({ x: 0, y: 0 });
-const versionMenuOpen = ref(false);
-const versionMenuPos = ref({ x: 0, y: 0 });
+// Two right-click context menus, both positioned via useContextMenu so a menu
+// opened near the window's right/bottom edge flips on-screen instead of being
+// clipped (the version-history rows sit at the right edge, so this matters most
+// there). `.stop` keeps the global AppContextMenu (window-level) from firing.
+//  - Document menu (left table rows): open / rename / document status / export
+//    / refresh - acts on the right-clicked document (selected on open).
+//  - Version menu (right version-history rows): export this version / refresh -
+//    acts on the right-clicked version (selected on open).
+const {
+  open: docMenuOpen,
+  pos: docMenuPos,
+  menuRef: docMenuRef,
+  openAt: openDocMenuAt,
+  close: closeDocMenu,
+} = useContextMenu();
+const {
+  open: versionMenuOpen,
+  pos: versionMenuPos,
+  menuRef: versionMenuRef,
+  openAt: openVersionMenuAt,
+  close: closeVersionMenu,
+} = useContextMenu();
+
+function openDocMenu(event: MouseEvent, document: Document) {
+  selectDocument(document);
+  const current = document.versions.find((v) => v.status === "current");
+  if (current) selectVersion(current);
+  openDocMenuAt(event);
+}
+
+function openVersionMenu(event: MouseEvent, version: Version) {
+  selectVersion(version);
+  openVersionMenuAt(event);
+}
 const previewOpen = ref(false);
 /**
  * The version the preview overlay targets. The toolbar preview button clears it
@@ -219,34 +250,6 @@ function onDragStartDoc(event: DragEvent, document: Document) {
   if (!event.dataTransfer) return;
   event.dataTransfer.setData("application/x-docvault-doc", document.id);
   event.dataTransfer.effectAllowed = "copy";
-}
-
-// Two right-click context menus:
-//  - Document menu (left table rows): open / rename / document status / export
-//    / refresh - acts on the right-clicked document (selected on open).
-//  - Version menu (right version-history rows): export this version / refresh -
-//    acts on the right-clicked version (selected on open).
-// `.stop` keeps the global AppContextMenu (window-level) from also firing.
-function openDocMenu(event: MouseEvent, document: Document) {
-  selectDocument(document);
-  const current = document.versions.find((v) => v.status === "current");
-  if (current) selectVersion(current);
-  docMenuPos.value = { x: event.clientX, y: event.clientY };
-  docMenuOpen.value = true;
-}
-
-function closeDocMenu() {
-  docMenuOpen.value = false;
-}
-
-function openVersionMenu(event: MouseEvent, version: Version) {
-  selectVersion(version);
-  versionMenuPos.value = { x: event.clientX, y: event.clientY };
-  versionMenuOpen.value = true;
-}
-
-function closeVersionMenu() {
-  versionMenuOpen.value = false;
 }
 
 function docMenuOpenDocument() {
@@ -908,6 +911,7 @@ onBeforeUnmount(() => {
       @contextmenu.prevent.stop="closeDocMenu"
     >
       <div
+        ref="docMenuRef"
         class="ctx-menu surface"
         role="menu"
         :style="{ left: `${docMenuPos.x}px`, top: `${docMenuPos.y}px` }"
@@ -1007,6 +1011,7 @@ onBeforeUnmount(() => {
       @contextmenu.prevent.stop="closeVersionMenu"
     >
       <div
+        ref="versionMenuRef"
         class="ctx-menu surface"
         role="menu"
         :style="{ left: `${versionMenuPos.x}px`, top: `${versionMenuPos.y}px` }"

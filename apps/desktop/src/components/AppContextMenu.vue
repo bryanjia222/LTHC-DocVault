@@ -1,42 +1,27 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { useDevMode } from "../composables/useDevMode";
+import { useContextMenu } from "../composables/useContextMenu";
 
 /*
  * Global custom context menu. Replaces the native webview menu (so the native
  * "Inspect" entry never leaks) with an i18n-localized one. "Reload" is always
  * available; "Inspect" (opens devtools) only when developer mode is on, gating
- * the inspect capability behind the Settings toggle.
+ * the inspect capability behind the Settings toggle. Positioning (keeping the
+ * menu fully on-screen when opened near an edge) is shared with every other
+ * right-click menu via useContextMenu.
  */
 
 const { t } = useI18n();
 const { isDevMode } = useDevMode();
 
-const visible = ref(false);
-const x = ref(0);
-const y = ref(0);
-const menuRef = ref<HTMLDivElement | null>(null);
-
-function clamp() {
-  const el = menuRef.value;
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  if (x.value + rect.width > window.innerWidth) {
-    x.value = Math.max(0, window.innerWidth - rect.width - 4);
-  }
-  if (y.value + rect.height > window.innerHeight) {
-    y.value = Math.max(0, window.innerHeight - rect.height - 4);
-  }
-}
+const { open: visible, pos, menuRef, openAt, close } = useContextMenu();
 
 function onContextMenu(event: MouseEvent) {
   event.preventDefault();
-  x.value = event.clientX;
-  y.value = event.clientY;
-  visible.value = true;
-  void nextTick(clamp);
+  openAt(event);
 }
 
 // Capture phase: a right-click outside this menu closes it so it does not
@@ -47,10 +32,6 @@ function onContextMenuCapture(event: MouseEvent) {
   if (visible.value && !menuRef.value?.contains(event.target as Node)) {
     visible.value = false;
   }
-}
-
-function close() {
-  visible.value = false;
 }
 
 async function inspect() {
@@ -94,7 +75,7 @@ onBeforeUnmount(() => {
       v-if="visible"
       ref="menuRef"
       class="context-menu surface"
-      :style="{ left: `${x}px`, top: `${y}px` }"
+      :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
       @click.stop
     >
       <button type="button" class="context-item" @click="reload">
