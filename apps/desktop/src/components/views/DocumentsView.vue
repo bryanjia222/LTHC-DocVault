@@ -71,7 +71,7 @@ const desktop = useDesktopState();
 const { openCommitModified, openDocumentStatus, openRename, openNoteEdit } =
   useDialogs();
 const { log } = useActivityLog();
-const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction } =
+const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument } =
   useVaultActions();
 
 /** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
@@ -295,6 +295,17 @@ function docMenuExport() {
 function docMenuCommit() {
   closeDocMenu();
   openCommitModified();
+}
+
+/** Replace the right-clicked document's file with a user-picked file and commit
+ *  it as a new version. If the working copy has uncommitted changes, the action
+ *  confirms and commits them first (see replaceCommitDocument) so they aren't
+ *  lost. Always enabled - unlike 提交修改 it is meaningful whenever the user
+ *  wants to swap in a new file, modified or not. */
+function docMenuReplaceCommit() {
+  closeDocMenu();
+  const doc = selectedDocument.value;
+  if (doc) void replaceCommitDocument(doc.id);
 }
 
 function docMenuRefresh() {
@@ -950,12 +961,11 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
-          @click="docMenuRename"
+          @click="docMenuExport"
         >
-          <Pencil aria-hidden="true" />
-          {{ t("source.rename") }}
+          <Download aria-hidden="true" />
+          {{ t("actions.export") }}
         </button>
-        <div class="ctx-divider"></div>
         <button
           type="button"
           class="ctx-item"
@@ -975,31 +985,20 @@ onBeforeUnmount(() => {
           type="button"
           class="ctx-item"
           role="menuitem"
-          @click="docMenuStatus"
+          @click="docMenuReplaceCommit"
         >
-          <Info aria-hidden="true" />
-          {{ t("source.properties") }}
+          <ArrowRightLeft aria-hidden="true" />
+          {{ t("source.replaceCommit") }}
         </button>
         <button
           type="button"
           class="ctx-item"
           role="menuitem"
-          @click="docMenuExport"
+          @click="docMenuRename"
         >
-          <Download aria-hidden="true" />
-          {{ t("actions.export") }}
+          <Pencil aria-hidden="true" />
+          {{ t("source.rename") }}
         </button>
-        <div class="ctx-divider"></div>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuRefresh"
-        >
-          <RefreshCw aria-hidden="true" />
-          {{ t("actions.refresh") }}
-        </button>
-        <div class="ctx-divider"></div>
         <button
           v-if="activeProjectId"
           type="button"
@@ -1018,6 +1017,25 @@ onBeforeUnmount(() => {
         >
           <Trash2 aria-hidden="true" />
           {{ t("source.delete") }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuRefresh"
+        >
+          <RefreshCw aria-hidden="true" />
+          {{ t("actions.refresh") }}
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuStatus"
+        >
+          <Info aria-hidden="true" />
+          {{ t("source.properties") }}
         </button>
       </div>
     </div>

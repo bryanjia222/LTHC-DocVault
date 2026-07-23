@@ -142,6 +142,7 @@ export const zhCN = {
     commandPalette: "打开命令面板",
     commit: "提交新版本",
     commitModified: "提交修改的源文件",
+    replaceCommit: "替换提交新文件",
     addDocument: "添加文档",
     newDocument: "新建文档",
     export: "导出",
@@ -228,6 +229,9 @@ export const zhCN = {
     path: "源路径",
     notTracked: "本机未追踪该文档的源文件。",
     commitModified: "提交修改",
+    replaceCommit: "替换提交",
+    replaceCommitConfirm:
+      "文档「{name}」有未提交的修改。是否先提交当前修改（作为新版本），再替换为新文件？",
     commitModifiedDisabled: "文档未修改，无需提交",
     open: "打开",
     properties: "属性",

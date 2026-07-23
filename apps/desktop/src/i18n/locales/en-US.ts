@@ -143,6 +143,7 @@ export const enUS = {
     commandPalette: "Open command palette",
     commit: "Commit new version",
     commitModified: "Commit modified source",
+    replaceCommit: "Replace-commit new file",
     addDocument: "Add document",
     newDocument: "New document",
     export: "Export",
@@ -229,6 +230,9 @@ export const enUS = {
     path: "Source path",
     notTracked: "No source file tracked for this document on this machine.",
     commitModified: "Commit modified",
+    replaceCommit: "Replace commit",
+    replaceCommitConfirm:
+      "\"{name}\" has uncommitted changes. Commit them first (as a new version), then replace with the new file?",
     commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
     properties: "Properties",

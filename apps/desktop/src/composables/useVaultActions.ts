@@ -549,6 +549,80 @@ export function useVaultActions() {
   }
 
   /**
+   * Replace the document's current file with a user-picked file and commit it
+   * as a new version - the library copy (working copy) is materialized from the
+   * picked file's intake, so the working copy is effectively replaced. Mirrors
+   * `commitVersionAction` (pick file -> `commit({ path, document_id })`), but
+   * guards the pending working copy: if the tracker reports "modified", the
+   * user's uncommitted changes would be overwritten by the replacement, so we
+   * confirm and commit them first (as their own new version) before replacing.
+   * `docId` defaults to the selected document so the context menu can invoke it
+   * without an explicit id.
+   */
+  async function replaceCommitDocument(docId?: string) {
+    const actionKey = "actionLogs.replaceCommit" as const;
+    const id = docId ?? selectedDocument.value?.id;
+    const doc = documents.value.find((d) => d.id === id);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: t("log.latest"),
+      }),
+    );
+    if (!doc) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    // Precondition: don't silently drop uncommitted working-copy changes. If the
+    // tracker reports "modified", confirm and commit the current copy first (as
+    // a new version), then replace. "missing"/"unchanged"/"none" need no
+    // pre-commit - "missing" in particular just means we are relinking the file.
+    if (desktop.modificationFor(doc.id) === "modified") {
+      const ok = await confirmDialog(
+        t("source.replaceCommitConfirm", { name: doc.name }),
+      );
+      if (!ok) {
+        log(t("log.actionCancelled", { action: t(actionKey) }));
+        return;
+      }
+      await commitModifiedDocument(doc.id);
+      // commitModifiedDocument swallows its own errors (logs actionFailed,
+      // returns normally). If the pre-commit didn't land, abort so the pending
+      // changes aren't lost when the replacement file overwrites the working copy.
+      if (desktop.modificationFor(doc.id) === "modified") return;
+    }
+    const path = await pickDocumentFile();
+    if (!path) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    try {
+      // Phase A runs synchronously inside commit(): the version is written
+      // (pending) and the library copy materialized from the picked file's
+      // intake before this resolves, so reload the list and baseline the working
+      // copy immediately - the user sees "committed" at once. The returned id is
+      // the Phase B archive job (compress), which runs on and surfaces in the
+      // task bubble; its terminal refreshes the document list + repo size via
+      // subscribeJobs.
+      await commit({ path, document_id: doc.id });
+      await loadDocuments();
+      const libPath = await libraryPath({ document_id: doc.id });
+      const baseline = await desktop.probeAndBaseline(doc.id, libPath);
+      desktop.setTracked(baseline);
+      log(t("log.commitSucceeded", { target: doc.name }));
+    } catch (e) {
+      log(
+        t("log.actionFailed", {
+          action: t(actionKey),
+          error: String(e),
+        }),
+      );
+    }
+  }
+
+  /**
    * Open the document's library copy (the tool-owned current-version working
    * copy) in the OS default editor. The backend materializes the copy from the
    * current version first if it is missing (the automated replacement for
@@ -668,6 +742,7 @@ export function useVaultActions() {
     openStatus,
     toggleCurrentTheme,
     commitModifiedDocument,
+    replaceCommitDocument,
     openDocument,
     resetToStageAction,
     refreshAll,
