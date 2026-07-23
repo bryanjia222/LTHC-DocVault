@@ -138,6 +138,7 @@ pub fn run() {
             preview_cache::read_preview_cache,
             preview_cache::write_preview_cache,
             preview_cache::clear_preview_cache,
+            preview_cache::list_preview_cache,
             devtools::reset_to_stage,
         ])
         .run(tauri::generate_context!())

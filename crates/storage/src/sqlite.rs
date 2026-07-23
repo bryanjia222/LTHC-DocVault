@@ -189,8 +189,7 @@ impl VaultStorage {
         if version_ids.is_empty() {
             return Ok(());
         }
-        let placeholders = std::iter::repeat("?")
-            .take(version_ids.len())
+        let placeholders = std::iter::repeat_n("?", version_ids.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(

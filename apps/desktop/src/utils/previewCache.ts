@@ -41,6 +41,17 @@ export function setPreviewCache(key: string, html: string): void {
   }
 }
 
+/** Bulk-fill the LRU from the on-disk cache at startup. `entries` must arrive
+ *  in mtime-ascending order (oldest first): `set` appends to the end of the Map
+ *  and evicts the head past the limit, so inserting oldest-first leaves the
+ *  newest entries at the tail (most-recently-used) and drops the stalest when
+ *  the LRU fills - i.e. the prefetch warms the caches most likely to be reopened. */
+export function bulkSetPreviewCache(entries: { key: string; html: string }[]): void {
+  for (const { key, html } of entries) {
+    setPreviewCache(key, html);
+  }
+}
+
 export function clearPreviewCache(): void {
   cache.clear();
 }

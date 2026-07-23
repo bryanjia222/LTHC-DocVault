@@ -4,6 +4,7 @@ import {
   isMutablePreview,
   getPreviewCache,
   setPreviewCache,
+  bulkSetPreviewCache,
   clearPreviewCache,
   captureHtml,
 } from "./previewCache";
@@ -95,6 +96,32 @@ describe("previewCache", () => {
       setPreviewCache("k24", "v24");
       expect(getPreviewCache("k0")).toBe("v0"); // survived the promotion
       expect(getPreviewCache("k1")).toBeUndefined(); // evicted instead
+    });
+  });
+
+  describe("bulkSetPreviewCache", () => {
+    it("fills the LRU in entry order", () => {
+      bulkSetPreviewCache([
+        { key: "a", html: "<a/>" },
+        { key: "b", html: "<b/>" },
+      ]);
+      expect(getPreviewCache("a")).toBe("<a/>");
+      expect(getPreviewCache("b")).toBe("<b/>");
+    });
+
+    it("keeps the newest entries when the limit is exceeded", () => {
+      // 26 entries into a 24-cap LRU, oldest-first: the first two (k0, k1)
+      // evict, the newest two (k24, k25) survive as most-recently-used.
+      const entries = Array.from({ length: 26 }, (_, i) => ({
+        key: `k${i}`,
+        html: `v${i}`,
+      }));
+      bulkSetPreviewCache(entries);
+      expect(getPreviewCache("k0")).toBeUndefined();
+      expect(getPreviewCache("k1")).toBeUndefined();
+      expect(getPreviewCache("k2")).toBe("v2");
+      expect(getPreviewCache("k24")).toBe("v24");
+      expect(getPreviewCache("k25")).toBe("v25");
     });
   });
 

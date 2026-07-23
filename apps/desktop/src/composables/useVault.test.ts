@@ -360,4 +360,9 @@ describe("useVault - preview cache contracts", () => {
     await vault.clearPreviewCache();
     expect(invoke).toHaveBeenCalledWith("clear_preview_cache");
   });
+
+  it("listPreviewCache invokes list_preview_cache with no args", async () => {
+    await vault.listPreviewCache();
+    expect(invoke).toHaveBeenCalledWith("list_preview_cache");
+  });
 });

@@ -25,6 +25,7 @@ import type { RawJob } from "./composables/useVault";
 import { useDesktopState } from "./composables/useDesktopState";
 import { useToasts } from "./composables/useToasts";
 import { useDialogs } from "./composables/useDialogs";
+import { bulkSetPreviewCache } from "./utils/previewCache";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
@@ -46,6 +47,7 @@ const {
   subscribeJobs,
   libraryPath,
   ensureLibraryCopies,
+  listPreviewCache,
 } = useVault();
 
 const booting = ref(true);
@@ -127,6 +129,24 @@ async function runPostConnectSetup(): Promise<void> {
   await desktop.refreshModifications();
   if (!unsubJobs) {
     unsubJobs = await subscribeJobs(onJobTerminal, onJobUpdate);
+  }
+  // Warm the in-memory preview LRU from the on-disk cache so a reopened preview
+  // paints without a disk re-read (or re-render). Non-blocking: a cold cache
+  // only costs a re-render, never a failure.
+  void prefetchPreviewCache();
+}
+
+/**
+ * Warm the in-memory preview LRU from the on-disk cache so a preview reopened
+ * right after startup paints instantly. The backend returns entries oldest-
+ * first, which `bulkSetPreviewCache` turns into the LRU's most-recently-used
+ * tail (so the stalest drop out when the LRU fills). Fire-and-forget.
+ */
+async function prefetchPreviewCache(): Promise<void> {
+  try {
+    bulkSetPreviewCache(await listPreviewCache());
+  } catch {
+    // Best-effort: a failed prefetch just means a cold cache this session.
   }
 }
 

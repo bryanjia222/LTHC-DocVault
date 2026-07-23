@@ -185,7 +185,7 @@ async function renderAndShow(
 ) {
   const el = container.value;
   if (!el) return;
-  await renderInto(el, kind, bytes);
+  await renderInto(el, kind, bytes, bodyRef.value ?? el);
   if (cancelled) return;
   // Snapshot to cache (best-effort, non-blocking for the visible render).
   void captureAndCache(el, key);
@@ -214,9 +214,11 @@ async function captureAndCache(el: HTMLElement, key: string) {
 async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
   const kind = detectPreviewKind(props.document.type, bytes);
   if (cancelled || kind === "unsupported") return;
-  const temp = makeOffscreenSurface();
+  // Match the preview body's width so `fitMode: "contain"` scales slides the
+  // same off-screen as on-screen (an unsized fixed surface would collapse).
+  const temp = makeOffscreenSurface(bodyRef.value?.clientWidth);
   try {
-    await renderInto(temp, kind, bytes);
+    await renderInto(temp, kind, bytes, temp);
     if (cancelled) return;
     const html = await captureHtml(temp);
     if (cancelled) return;
@@ -247,8 +249,15 @@ async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
   }
 }
 
-/** Render any kind (pdf / md / txt / docx / xlsx / pptx) into `el`. */
-async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuffer) {
+/** Render any kind (pdf / md / txt / docx / xlsx / pptx) into `el`.
+ *  `scrollContainer` is the pptx list-mode IntersectionObserver root (the
+ *  preview body for the visible host, the temp surface itself for captures). */
+async function renderInto(
+  el: HTMLDivElement,
+  kind: PreviewKind,
+  bytes: ArrayBuffer,
+  scrollContainer: HTMLElement,
+) {
   switch (kind) {
     case "pdf":
       await renderPdf(bytes, el);
@@ -266,7 +275,7 @@ async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuf
       await renderXlsx(bytes, el);
       break;
     case "pptx":
-      await renderPptx(bytes, el);
+      await renderPptx(bytes, el, scrollContainer);
       break;
   }
 }
@@ -274,13 +283,16 @@ async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuf
 /** A hidden, in-DOM surface for off-screen background renders. Fixed off the
  *  viewport so it is never clipped by the scroll container's overflow and never
  *  visible, but still laid out (pdf.js / docx-preview render into it fine). */
-function makeOffscreenSurface(): HTMLDivElement {
+function makeOffscreenSurface(width?: number): HTMLDivElement {
   const el = document.createElement("div");
   el.style.position = "fixed";
   el.style.left = "-99999px";
   el.style.top = "0";
   el.style.visibility = "hidden";
   el.style.pointerEvents = "none";
+  // A width is required for pptx `fitMode: "contain"` - an unsized fixed
+  // surface would collapse to 0 and scale slides away.
+  if (width) el.style.width = `${width}px`;
   document.body.appendChild(el);
   return el;
 }
@@ -361,12 +373,23 @@ async function renderXlsx(bytes: ArrayBuffer, el: HTMLDivElement) {
   }
 }
 
-async function renderPptx(bytes: ArrayBuffer, el: HTMLDivElement) {
+async function renderPptx(
+  bytes: ArrayBuffer,
+  el: HTMLDivElement,
+  scrollContainer: HTMLElement,
+) {
   const { PptxViewer } = await import("@aiden0z/pptx-renderer");
   if (cancelled) return;
   // Disable the EMF-as-PDF fallback (rare in modern decks) so preview never
-  // reaches for a pdfjs URL we have not configured.
-  pptxViewer = await PptxViewer.open(bytes, el, { pdfjs: false });
+  // reaches for a pdfjs URL we have not configured. `fitMode: "contain"`
+  // scales each slide down to the container width (otherwise a 16:9 deck is
+  // ~1280px and overflows horizontally); `scrollContainer` is the list-mode
+  // IntersectionObserver root so slide tracking follows the preview body.
+  pptxViewer = await PptxViewer.open(bytes, el, {
+    pdfjs: false,
+    fitMode: "contain",
+    scrollContainer,
+  });
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -438,9 +461,11 @@ onBeforeUnmount(() => {
             ref="container"
             class="preview-content"
           />
-          <div v-if="refreshing" class="preview-refreshing" role="status">
-            {{ t("preview.refreshing") }}
-          </div>
+        </div>
+
+        <div v-if="refreshing" class="preview-refreshing" role="status">
+          <span class="preview-spinner" aria-hidden="true" />
+          {{ t("preview.refreshing") }}
         </div>
       </div>
     </div>
@@ -460,6 +485,7 @@ onBeforeUnmount(() => {
 }
 
 .preview-modal {
+  position: relative;
   width: min(1100px, 96vw);
   height: 92vh;
   display: flex;
@@ -501,6 +527,11 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow: auto;
   padding: 18px;
+  /* Reserve the vertical-scrollbar gutter so content width stays constant when a
+     scrollbar appears/disappears. Otherwise pptx-renderer's list mode re-
+     measures and rescales every slide on the frame the bar appears - visible
+     as a one-frame width jitter. */
+  scrollbar-gutter: stable;
 }
 
 .preview-status {
@@ -523,20 +554,40 @@ onBeforeUnmount(() => {
   color: var(--danger-text);
 }
 
-/* "loading latest preview…" badge: bottom-right of the scroll body, shown only
-   while a fresh render is produced in the background after a cached copy was
-   already shown. */
+/* "loading latest preview…" badge: fixed to the modal's bottom-right (NOT
+   inside the scrolling body, so it stays put while the user scrolls), shown
+   only while a fresh render is produced in the background after a cached copy
+   was already shown. */
 .preview-refreshing {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  padding: 5px 10px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 9px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: var(--bg-surface);
   box-shadow: var(--overlay-shadow);
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.preview-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: preview-spin 0.7s linear infinite;
+}
+
+@keyframes preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .preview-content {

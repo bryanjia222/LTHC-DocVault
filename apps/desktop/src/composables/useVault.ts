@@ -417,6 +417,18 @@ async function clearPreviewCache(): Promise<void> {
 }
 
 /**
+ * List the active vault's on-disk preview cache as `{ key, html }`, sorted oldest-
+ * first so the frontend can prefetch them into its in-memory LRU (newest inserted
+ * last = most-recently-used, so the stalest drop out when the LRU fills). Returns
+ * an empty array when no vault is open, the cache dir does not yet exist, or
+ * outside Tauri.
+ */
+async function listPreviewCache(): Promise<{ key: string; html: string }[]> {
+  if (!isTauri()) return [];
+  return invoke<{ key: string; html: string }[]>("list_preview_cache");
+}
+
+/**
  * Remove the library copy for a document (the tool-owned working file). Used on
  * delete so the working copy does not outlive its document. Missing file/dir is
  * a no-op. Synchronous.
@@ -615,6 +627,7 @@ export function useVault() {
     readPreviewCache,
     writePreviewCache,
     clearPreviewCache,
+    listPreviewCache,
     removeLibraryCopy,
     ensureLibraryCopies,
     cancelJob,
