@@ -6,6 +6,7 @@ import { useVault } from "../../composables/useVault";
 import { useNavigation, type SettingsTab } from "../../composables/useNavigation";
 import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
+import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import StatusVaultCard from "../status/StatusVaultCard.vue";
 import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
@@ -15,6 +16,7 @@ const { isDark, setTheme } = useTheme();
 const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
+const { doubleClickAction, setDoubleClickAction } = useDoubleClickPref();
 
 // Dev-only reset card: vite strips this in production builds, so the
 // destructive test actions never ship to end users.
@@ -163,6 +165,28 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
                   </button>
                 </div>
                 <p class="field-hint">{{ t("settings.devModeHint") }}</p>
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t("settings.doubleClick") }}</dt>
+              <dd>
+                <div class="segmented-control">
+                  <button
+                    type="button"
+                    :class="{ active: doubleClickAction === 'preview' }"
+                    @click="setDoubleClickAction('preview')"
+                  >
+                    {{ t("settings.doubleClickPreview") }}
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: doubleClickAction === 'open' }"
+                    @click="setDoubleClickAction('open')"
+                  >
+                    {{ t("settings.doubleClickOpen") }}
+                  </button>
+                </div>
+                <p class="field-hint">{{ t("settings.doubleClickHint") }}</p>
               </dd>
             </div>
           </dl>

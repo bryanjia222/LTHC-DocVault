@@ -27,6 +27,7 @@ import { useDialogs } from "../../composables/useDialogs";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { useContextMenu } from "../../composables/useContextMenu";
+import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import {
   hasBranchingHistory,
   getParentLabel,
@@ -74,6 +75,7 @@ const { openCommitModified, openDocumentStatus, openRename, openNoteEdit } =
 const { log } = useActivityLog();
 const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument, deleteVersion } =
   useVaultActions();
+const { doubleClickAction } = useDoubleClickPref();
 
 /** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
 const typeCategories = TYPE_CATEGORIES;
@@ -309,6 +311,26 @@ function onDragStartDoc(event: DragEvent, document: Document) {
   if (!event.dataTransfer) return;
   event.dataTransfer.setData("application/x-docvault-doc", document.id);
   event.dataTransfer.effectAllowed = "copy";
+}
+
+/** Preview the right-clicked document's current version in-app (read-only). */
+function docMenuPreview() {
+  closeDocMenu();
+  openPreview();
+}
+
+/**
+ * Double-click on a document row: preview in-app (default) or open in the OS
+ * editor, per the persisted double-click preference. The single click still
+ * just selects the row, so double-click never fires a redundant select race.
+ */
+function onDocDoubleClick(document: Document) {
+  if (doubleClickAction.value === "open") {
+    void openDocument(document.id);
+  } else {
+    selectDocument(document);
+    openPreview();
+  }
 }
 
 function docMenuOpenDocument() {
@@ -598,6 +620,7 @@ onBeforeUnmount(() => {
               draggable="true"
               :aria-label="document.name"
               @click="chooseDocument(document)"
+              @dblclick="onDocDoubleClick(document)"
               @keydown.enter="chooseDocument(document)"
               @keydown.space.prevent="chooseDocument(document)"
               @dragstart="onDragStartDoc($event, document)"
@@ -1001,6 +1024,15 @@ onBeforeUnmount(() => {
         :style="{ left: `${docMenuPos.x}px`, top: `${docMenuPos.y}px` }"
         @click.stop
       >
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="docMenuPreview"
+        >
+          <Eye aria-hidden="true" />
+          {{ t("source.preview") }}
+        </button>
         <button
           type="button"
           class="ctx-item"

@@ -252,6 +252,7 @@ export const enUS = {
       "The replacement for \"{name}\" must be the same type (same extension). Expected \"{expected}\", got \"{picked}\".",
     commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
+    preview: "Preview",
     properties: "Properties",
     removeFromProject: "Remove from {project}",
     rename: "Rename",
@@ -318,6 +319,7 @@ export const enUS = {
       "In-app preview is not supported for this file type. Use Open to launch it in the system editor.",
     unsupportedTitle: "Preview not supported",
     close: "Close preview",
+    refreshing: "Loading latest preview…",
   },
   jobs: {
     title: "Jobs",
@@ -470,6 +472,10 @@ export const enUS = {
     devModeHint: "Shows inspect and other dev tools in the right-click menu.",
     on: "On",
     off: "Off",
+    doubleClick: "Double-click document",
+    doubleClickPreview: "Preview",
+    doubleClickOpen: "Open",
+    doubleClickHint: "What double-clicking a document row does.",
   },
   commandPalette: {
     title: "Command palette",

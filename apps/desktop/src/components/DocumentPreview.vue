@@ -4,6 +4,13 @@ import { useI18n } from "vue-i18n";
 import { X } from "@lucide/vue";
 import { useVault } from "../composables/useVault";
 import { detectPreviewKind, type PreviewKind } from "../utils/previewDispatch";
+import {
+  previewCacheKey,
+  isMutablePreview,
+  getPreviewCache,
+  setPreviewCache,
+  captureHtml,
+} from "../utils/previewCache";
 import type { Document, Version } from "../data/mock";
 // Bundled worker URL (Vite copies the file to assets and hands back its URL).
 // Static so it ships with this (lazy) chunk; pdfjs only spawns the worker when a
@@ -22,6 +29,13 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
  * The renderer libs are dynamically imported per kind so only the one in use is
  * ever loaded. The whole component is lazy-loaded by DocumentsView, so none of
  * this (nor the pdf.js worker) is in the app's initial bundle.
+ *
+ * Caching: each kind's rendered output is snapshotted (previewCache) and shown
+ * instantly on reopen. An immutable committed version's cache is authoritative
+ * (no re-fetch); the mutable working copy refreshes in the background into an
+ * off-screen surface, then swaps in - restoring the user's scroll position - so
+ * the cached view stays visible (with a bottom-right badge) until the fresh one
+ * is ready. pptx is rendered live and not cached.
  */
 
 const props = defineProps<{ document: Document; version: Version | null }>();
@@ -32,7 +46,15 @@ const { previewVersion, previewWorkingCopy } = useVault();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const notSupported = ref(false);
+// The visible host: rendered output is placed here (cached HTML, or a live
+// renderer for pptx). `bodyRef` is the scroll container used to save/restore
+// the user's scroll position across a background refresh swap.
 const container = ref<HTMLDivElement | null>(null);
+const bodyRef = ref<HTMLDivElement | null>(null);
+// True while a fresh render is being produced in the background after a cached
+// copy was already shown (mutable working-copy previews only). Drives the
+// bottom-right "loading…" badge.
+const refreshing = ref(false);
 
 const versionLabel = computed(
   () => props.version?.label ?? t("log.latest"),
@@ -51,20 +73,43 @@ async function load() {
   loading.value = true;
   error.value = null;
   notSupported.value = false;
+  refreshing.value = false;
   if (container.value) container.value.innerHTML = "";
+
+  // When previewing the toolbar "current" view of a document with uncommitted
+  // edits, fetch the live working copy (the library file) so the preview
+  // reflects those edits - not the last committed version. A specific
+  // historical version (props.version set) is always the committed snapshot.
+  const wantsWorkingCopy =
+    props.document.modification === "modified" && props.version == null;
+  const key = previewCacheKey(props.document.id, props.version, wantsWorkingCopy);
+  const mutable = isMutablePreview(props.version);
+  const cached = getPreviewCache(key);
+
+  // Cached: paint instantly. A committed version is immutable, so the cache is
+  // authoritative and we are done. The mutable working copy refreshes in the
+  // background so edits since the last open are eventually shown - the cached
+  // copy stays visible (with a badge) until the fresh render is swapped in.
+  if (cached) {
+    if (container.value) container.value.innerHTML = cached;
+    loading.value = false;
+    if (!mutable) return;
+    refreshing.value = true;
+    try {
+      const bytes = await fetchBytes(wantsWorkingCopy);
+      if (!cancelled && bytes) await refreshAndSwap(bytes, key);
+    } catch (e) {
+      // Refresh failed: keep the cached copy visible, just drop the badge.
+      if (!cancelled) console.error("preview refresh failed", e);
+    } finally {
+      if (!cancelled) refreshing.value = false;
+    }
+    return;
+  }
+
+  // No cache: full load with the loading overlay.
   try {
-    // When previewing the toolbar "current" view of a document with uncommitted
-    // edits, fetch the live working copy (the library file) so the preview
-    // reflects those edits - not the last committed version. A specific
-    // historical version (props.version set) is always the committed snapshot.
-    const wantsWorkingCopy =
-      props.document.modification === "modified" && props.version == null;
-    const bytes = wantsWorkingCopy
-      ? await previewWorkingCopy({ document_id: props.document.id })
-      : await previewVersion({
-          document_id: props.document.id,
-          version: props.version?.label ?? "current",
-        });
+    const bytes = await fetchBytes(wantsWorkingCopy);
     if (cancelled) return;
     if (!bytes) {
       // No backend (browser dev) - nothing to preview.
@@ -73,11 +118,15 @@ async function load() {
     }
     const kind = detectPreviewKind(props.document.type, bytes);
     if (cancelled) return;
+    if (kind === "unsupported") {
+      notSupported.value = true;
+      return;
+    }
     // Ensure the container ref is mounted (it always is here, but nextTick keeps
     // the renderers safe against any future v-if around it).
     await nextTick();
     if (cancelled) return;
-    await render(kind, bytes);
+    await renderAndShow(bytes, key, kind);
   } catch (e) {
     if (!cancelled) error.value = String(e);
   } finally {
@@ -85,9 +134,71 @@ async function load() {
   }
 }
 
-async function render(kind: PreviewKind, bytes: ArrayBuffer) {
+async function fetchBytes(wantsWorkingCopy: boolean): Promise<ArrayBuffer | null> {
+  return wantsWorkingCopy
+    ? await previewWorkingCopy({ document_id: props.document.id })
+    : await previewVersion({
+        document_id: props.document.id,
+        version: props.version?.label ?? "current",
+      });
+}
+
+/**
+ * First-open render (no cache): render into the visible host, then snapshot the
+ * result into the cache for next time. pptx is rendered live and NOT cached
+ * (its slides don't serialize cleanly); it stays as today's behaviour.
+ */
+async function renderAndShow(
+  bytes: ArrayBuffer,
+  key: string,
+  kind: PreviewKind,
+) {
+  if (kind === "pptx") {
+    if (container.value) await renderPptx(bytes, container.value);
+    return;
+  }
   const el = container.value;
   if (!el) return;
+  await renderInto(el, kind, bytes);
+  if (cancelled) return;
+  setPreviewCache(key, captureHtml(el, kind));
+}
+
+/**
+ * Background refresh of a mutable working-copy preview. Renders the fresh bytes
+ * into an off-screen surface (so the cached copy stays visible meanwhile), then
+ * swaps the host to the fresh output and restores the user's scroll position so
+ * they land back on the page they were reading.
+ */
+async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
+  const kind = detectPreviewKind(props.document.type, bytes);
+  if (cancelled || kind === "unsupported" || kind === "pptx") return;
+  const temp = makeOffscreenSurface();
+  try {
+    await renderInto(temp, kind, bytes);
+    if (cancelled) return;
+    const html = captureHtml(temp, kind);
+    const scrollEl = bodyRef.value;
+    const scrollTop = scrollEl?.scrollTop ?? 0;
+    if (container.value) container.value.innerHTML = html;
+    setPreviewCache(key, html);
+    if (scrollEl) {
+      await nextTick();
+      if (!cancelled) scrollEl.scrollTop = scrollTop;
+    }
+  } finally {
+    // The temp's pdf.js document is done with once captured; free it. (The
+    // host keeps its own live handles until onBeforeUnmount.)
+    if (pdfLoadingTask) {
+      void pdfLoadingTask.destroy();
+      pdfLoadingTask = null;
+    }
+    temp.remove();
+  }
+}
+
+/** Render cacheable kinds (pdf / md / txt / docx / xlsx) into `el`. */
+async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuffer) {
   switch (kind) {
     case "pdf":
       await renderPdf(bytes, el);
@@ -104,13 +215,22 @@ async function render(kind: PreviewKind, bytes: ArrayBuffer) {
     case "xlsx":
       await renderXlsx(bytes, el);
       break;
-    case "pptx":
-      await renderPptx(bytes, el);
-      break;
-    case "unsupported":
-      notSupported.value = true;
-      break;
+    // pptx is rendered live into the host (renderPptx), not via renderInto.
   }
+}
+
+/** A hidden, in-DOM surface for off-screen background renders. Fixed off the
+ *  viewport so it is never clipped by the scroll container's overflow and never
+ *  visible, but still laid out (pdf.js / docx-preview render into it fine). */
+function makeOffscreenSurface(): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.left = "-99999px";
+  el.style.top = "0";
+  el.style.visibility = "hidden";
+  el.style.pointerEvents = "none";
+  document.body.appendChild(el);
+  return el;
 }
 
 async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement) {
@@ -249,7 +369,7 @@ onBeforeUnmount(() => {
           </button>
         </header>
 
-        <div class="preview-body">
+        <div ref="bodyRef" class="preview-body">
           <div v-if="loading" class="preview-status">{{ t("preview.loading") }}</div>
           <div v-else-if="error" class="preview-status preview-error">
             {{ t("preview.error", { error }) }}
@@ -266,6 +386,9 @@ onBeforeUnmount(() => {
             ref="container"
             class="preview-content"
           />
+          <div v-if="refreshing" class="preview-refreshing" role="status">
+            {{ t("preview.refreshing") }}
+          </div>
         </div>
       </div>
     </div>
@@ -346,6 +469,22 @@ onBeforeUnmount(() => {
 
 .preview-error {
   color: var(--danger-text);
+}
+
+/* "loading latest preview…" badge: bottom-right of the scroll body, shown only
+   while a fresh render is produced in the background after a cached copy was
+   already shown. */
+.preview-refreshing {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  box-shadow: var(--overlay-shadow);
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .preview-content {

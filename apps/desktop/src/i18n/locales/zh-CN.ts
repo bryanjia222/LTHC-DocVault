@@ -251,6 +251,7 @@ export const zhCN = {
       "文档「{name}」的替换文件必须是同类型文件（同后缀）。应为「{expected}」，实际为「{picked}」。",
     commitModifiedDisabled: "文档未修改，无需提交",
     open: "打开",
+    preview: "预览",
     properties: "属性",
     removeFromProject: "移出 {project}",
     rename: "重命名",
@@ -316,6 +317,7 @@ export const zhCN = {
       "此文件类型暂不支持应用内预览。可使用「打开」在系统默认程序中查看。",
     unsupportedTitle: "暂不支持预览",
     close: "关闭预览",
+    refreshing: "正在加载最新预览…",
   },
   jobs: {
     title: "任务",
@@ -462,6 +464,10 @@ export const zhCN = {
     devModeHint: "开启后右键菜单显示检查元素等开发工具。",
     on: "开",
     off: "关",
+    doubleClick: "双击文档",
+    doubleClickPreview: "预览",
+    doubleClickOpen: "打开",
+    doubleClickHint: "双击文档行时执行的操作。",
   },
   commandPalette: {
     title: "命令面板",
