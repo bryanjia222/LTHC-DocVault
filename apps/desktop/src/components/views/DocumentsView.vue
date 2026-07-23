@@ -117,6 +117,15 @@ function openVersionMenu(event: MouseEvent, version: Version) {
   selectVersion(version);
   openVersionMenuAt(event);
 }
+
+/**
+ * Tree-view right-click: select the node's version (so the version menu and its
+ * disabled-state guards target it) then open the same menu the list rows use.
+ * Reuses openVersionMenu rather than emitting a second path.
+ */
+function onGraphContextMenu(payload: { version: Version; event: MouseEvent }) {
+  openVersionMenu(payload.event, payload.version);
+}
 const previewOpen = ref(false);
 /**
  * The version the preview overlay targets. The toolbar preview button clears it
@@ -807,6 +816,7 @@ onBeforeUnmount(() => {
               :versions="versions"
               :selected-version-id="selectedVersionId"
               @select="chooseVersion"
+              @contextmenu="onGraphContextMenu"
             />
           </template>
 
@@ -916,6 +926,7 @@ onBeforeUnmount(() => {
           :versions="versions"
           :selected-version-id="selectedVersionId"
           @select="chooseVersion"
+          @contextmenu="onGraphContextMenu"
         />
       </section>
 

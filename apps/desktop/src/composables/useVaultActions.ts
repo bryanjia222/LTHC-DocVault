@@ -8,7 +8,7 @@ import { useDesktopState } from "./useDesktopState";
 import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "./useVault";
 import { useTheme } from "../theme";
 import { extOf, pickDocumentFile } from "../utils/file";
-import { descendantsOf } from "../utils/versionTree";
+import { descendantsOf, ancestorsOf } from "../utils/versionTree";
 
 /*
  * Centralized action handlers. Every UI action (commit, export, checkout,
@@ -541,11 +541,19 @@ export function useVaultActions() {
     );
   }
 
-  /** Restore a single version from the recycle bin (un-hide). No backend call -
-   *  the version was only hidden, never removed. Restoring is per-row; a version
-   *  whose ancestor is still trashed becomes visible with a (cosmetic) "based on
-   *  vX" annotation for the absent parent until that ancestor is restored too. */
-  function restoreVersion(docId: string, versionId: string) {
+  /**
+   * Restore a single version from the recycle bin (un-hide). No backend call -
+   * the version was only hidden, never removed. Symmetric with delete: just as a
+   * delete cascades DOWN to descendants (so a version is never orphaned from its
+   * children), a restore cascades UP to ancestors. Restoring a version while one
+   * of its ancestors is still in the bin would re-expose it with a hidden parent
+   * (orphaning it - in the list it shows as a detached root, in the tree it does
+   * not render at all), so when any trashed ancestor exists the user is asked
+   * whether to restore those ancestors too; "No" cancels the entire restore (the
+   * version stays trashed, never orphaned), mirroring the delete-side "No cancels
+   * entirely".
+   */
+  async function restoreVersion(docId: string, versionId: string) {
     const actionKey = "actionLogs.restoreVersion" as const;
     const doc = documents.value.find((d) => d.id === docId);
     const ver = doc?.versions.find((v) => v.id === versionId);
@@ -560,8 +568,40 @@ export function useVaultActions() {
       log(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
+    // Ancestors still in the bin: restoring without them would orphan this
+    // version (its parent hidden), so they must come back together. Nearest-first
+    // so the confirm lists "v2, v1" in reading order.
+    const trashedAncestors = ancestorsOf(doc.versions, versionId).filter((a) =>
+      desktop.isVersionTrashed(docId, a.id),
+    );
+    if (trashedAncestors.length > 0) {
+      const confirmed = await confirmDialog(
+        t("confirm.restoreVersionAncestors", {
+          name: doc.name,
+          version: ver.label,
+          ancestors: trashedAncestors.map((a) => a.label).join(", "),
+        }),
+      );
+      if (!confirmed) {
+        // "No" cancels the entire restore - the version stays trashed rather than
+        // being re-exposed with a hidden parent (never orphaned).
+        log(t("log.actionCancelled", { action: t(actionKey) }));
+        return;
+      }
+      for (const ancestor of trashedAncestors) {
+        desktop.restoreVersion(docId, ancestor.id);
+      }
+    }
     desktop.restoreVersion(docId, versionId);
-    log(t("log.versionRestored", { name: doc.name, version: ver.label }));
+    log(
+      trashedAncestors.length > 0
+        ? t("log.versionRestoredWithAncestors", {
+            name: doc.name,
+            version: ver.label,
+            ancestors: trashedAncestors.map((a) => a.label).join(", "),
+          })
+        : t("log.versionRestored", { name: doc.name, version: ver.label }),
+    );
   }
 
   /**
@@ -802,16 +842,16 @@ export function useVaultActions() {
     }
     if (!isTauri()) return;
     // Pick the replacement file FIRST, before any precondition side effect, so a
-    // cancel here never disturbs the working copy. The replacement must be the
-    // same type (same extension) as the document - a mismatch (e.g. swapping a
-    // .docx for a .pdf) is rejected with a visible message, so the user
-    // understands why nothing happened.
-    const path = await pickDocumentFile();
+    // cancel here never disturbs the working copy. The picker is restricted to the
+    // document's own extension so the user can only choose a same-type file; the
+    // extension check below is the authoritative guard (the OS filter is a
+    // convenience and some platforms still expose an "All files" override).
+    const expected = extOf(doc.originalFilename);
+    const path = await pickDocumentFile(expected);
     if (!path) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    const expected = extOf(doc.originalFilename);
     const picked = extOf(path);
     if (expected !== picked) {
       await message(

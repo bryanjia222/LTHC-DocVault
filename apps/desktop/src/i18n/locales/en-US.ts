@@ -147,6 +147,8 @@ export const enUS = {
       "Permanently delete version {version} of \"{name}\"? This will also permanently delete its derived versions: {descendants}",
     permanentDeleteVersionAgain:
       "Are you sure? Permanently deleting version {version} cannot be undone.",
+    restoreVersionAncestors:
+      "Restore version {version} of \"{name}\"? It is based on version(s) still in the recycle bin: {ancestors}. They must be restored together so the history is not orphaned. (No cancels the restore.)",
   },
   actionLogs: {
     refresh: "Refresh vault",
@@ -376,6 +378,8 @@ export const enUS = {
     versionMovedToTrash:
       "Moved version {version} of \"{name}\" to the recycle bin ({count} version(s))",
     versionRestored: "Restored version {version} of \"{name}\" from the recycle bin",
+    versionRestoredWithAncestors:
+      "Restored version {version} of \"{name}\" (and its ancestor(s): {ancestors}) from the recycle bin",
     trashEmpty: "Recycle bin is empty",
     trashEmptied: "Emptied the recycle bin ({count} document(s))",
     commandRun: "Run command: {command}",

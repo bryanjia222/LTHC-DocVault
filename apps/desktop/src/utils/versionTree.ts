@@ -100,3 +100,28 @@ export function descendantsOf(versions: Version[], rootId: string): Version[] {
   }
   return out;
 }
+
+/**
+ * Return the ancestor chain of `versionId` (its parent, grandparent, ... up to
+ * the root), excluding `versionId` itself, ordered nearest-first. This is the
+ * upward mirror of `descendantsOf`: used by the restore flow to find versions
+ * that must be un-hidden together with the one being restored, so a version is
+ * never re-exposed while its parent is still in the bin (which would orphan it
+ * in the tree). Defensive cycle guard like `descendantsOf`.
+ */
+export function ancestorsOf(versions: Version[], versionId: string): Version[] {
+  const byId = new Map<string, Version>();
+  for (const version of versions) byId.set(version.id, version);
+  const out: Version[] = [];
+  const visited = new Set<string>();
+  let cursor = byId.get(versionId)?.parentId ?? null;
+  while (cursor) {
+    if (visited.has(cursor)) break;
+    visited.add(cursor);
+    const node = byId.get(cursor);
+    if (!node) break;
+    out.push(node);
+    cursor = node.parentId ?? null;
+  }
+  return out;
+}

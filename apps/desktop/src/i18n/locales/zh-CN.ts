@@ -146,6 +146,8 @@ export const zhCN = {
       "永久删除文档「{name}」的版本 {version}？这将同时永久删除其衍生版本：{descendants}",
     permanentDeleteVersionAgain:
       "再次确认：永久删除版本 {version}？此操作不可撤销。",
+    restoreVersionAncestors:
+      "恢复文档「{name}」的版本 {version}？该版本基于仍在回收站中的版本：{ancestors}。需同时恢复它们以避免产生孤立版本。（否将取消本次恢复）",
   },
   actionLogs: {
     refresh: "刷新仓库",
@@ -373,6 +375,8 @@ export const zhCN = {
     versionMovedToTrash:
       "已将文档「{name}」的版本 {version} 移入回收站（共 {count} 个版本）",
     versionRestored: "已从回收站恢复文档「{name}」的版本 {version}",
+    versionRestoredWithAncestors:
+      "已从回收站恢复文档「{name}」的版本 {version}（及其祖先版本：{ancestors}）",
     trashEmpty: "回收站为空",
     trashEmptied: "已清空回收站（{count} 个文档）",
     commandRun: "执行命令：{command}",

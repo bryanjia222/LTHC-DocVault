@@ -1071,16 +1071,56 @@ describe("useVaultActions - restore version", () => {
     desktop.trashedVersions.value = [];
   });
 
-  it("restores a single trashed version (un-hide, no backend call)", async () => {
+  it("restores a single trashed version with no trashed ancestors (no prompt)", async () => {
     asTauri();
+    // Only v3a is trashed; its ancestors v3 / v1 are still live, so restoring it
+    // cannot orphan anything and needs no confirm.
     desktop.trashVersion(docTree.id, "v3a");
     vi.mocked(invoke).mockClear();
+    vi.mocked(confirm).mockClear();
 
-    actions.restoreVersion(docTree.id, "v3a");
+    await actions.restoreVersion(docTree.id, "v3a");
 
     expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+    expect(vi.mocked(confirm)).not.toHaveBeenCalled();
     // Restore is desktop-local - only the state save fires, never a vault delete.
     expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+  });
+
+  it("restores a version together with its trashed ancestors on confirm", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    // v3a was trashed along with its ancestors v3 and v1 (subtree delete). The
+    // ancestors are still in the bin, so restoring v3a alone would orphan it.
+    desktop.trashVersion(docTree.id, "v1");
+    desktop.trashVersion(docTree.id, "v3");
+    desktop.trashVersion(docTree.id, "v3a");
+
+    await actions.restoreVersion(docTree.id, "v3a");
+
+    // The version and every trashed ancestor come back together (no orphan).
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(false);
+    expect(desktop.isVersionTrashed(docTree.id, "v1")).toBe(false);
+    // The confirm names the trashed ancestors (nearest-first: v3, v1).
+    expect(vi.mocked(confirm)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v3"));
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v1"));
+  });
+
+  it("cancels the whole restore (keeps version + ancestors trashed) when declined", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(false);
+    desktop.trashVersion(docTree.id, "v1");
+    desktop.trashVersion(docTree.id, "v3");
+    desktop.trashVersion(docTree.id, "v3a");
+
+    await actions.restoreVersion(docTree.id, "v3a");
+
+    // "No" cancels entirely - nothing is un-hidden (the version is never orphaned).
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(true);
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
+    expect(desktop.isVersionTrashed(docTree.id, "v1")).toBe(true);
   });
 });
 

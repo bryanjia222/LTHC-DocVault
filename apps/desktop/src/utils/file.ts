@@ -10,11 +10,24 @@ import { DOCUMENT_EXTENSIONS } from "./documentTypes";
 
 export { DOCUMENT_EXTENSIONS };
 
-/** Native single-select dialog for a managed document file. Returns the path or null. */
-export async function pickDocumentFile(): Promise<string | null> {
+/**
+ * Native single-select dialog for a managed document file. Returns the path or
+ * null. With no argument the filter lists every managed document type (the
+ * add-document / new-commit flows). Pass an extension to restrict the filter to
+ * that single type - the replace-commit flow uses this so the picker only offers
+ * files of the same type as the document being replaced (the post-pick type
+ * check in replaceCommitDocument is the authoritative guard; the OS filter is a
+ * convenience and some platforms still expose an "All files" override).
+ */
+export async function pickDocumentFile(
+  extension?: string | null,
+): Promise<string | null> {
+  const filters = extension
+    ? [{ name: extension.toUpperCase(), extensions: [extension] }]
+    : [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }];
   const result = await open({
     multiple: false,
-    filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+    filters,
   });
   if (!result) return null;
   return Array.isArray(result) ? (result[0] ?? null) : result;

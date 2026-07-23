@@ -36,7 +36,10 @@ const props = withDefaults(
   { maximized: false },
 );
 
-const emit = defineEmits<{ (event: "select", version: Version): void }>();
+const emit = defineEmits<{
+  (event: "select", version: Version): void;
+  (event: "contextmenu", payload: { version: Version; event: MouseEvent }): void;
+}>();
 
 const { t } = useI18n();
 
@@ -223,6 +226,16 @@ function selectNode(version: Version) {
   emit("select", version);
 }
 
+/**
+ * Right-click on a node opens the same version context menu the list rows use
+ * (preview / export / checkout / delete), so the tree view's actions match the
+ * list view's. `.prevent.stop` keeps the browser's native menu and the global
+ * AppContextMenu from firing, exactly like the list-row handler.
+ */
+function onNodeContextMenu(event: MouseEvent, version: Version) {
+  emit("contextmenu", { version, event });
+}
+
 onMounted(() => {
   updateViewportSize();
   centerOnCurrent();
@@ -281,6 +294,7 @@ defineExpose({ resetView });
         :aria-label="node.version.label"
         @pointerdown.stop
         @click.stop="selectNode(node.version)"
+        @contextmenu.prevent.stop="onNodeContextMenu($event, node.version)"
         @keyup.enter="selectNode(node.version)"
       >
         <circle class="graph-current-ring" r="24" />

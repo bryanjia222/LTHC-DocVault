@@ -39,7 +39,7 @@ function onPermanentlyDelete(docId: string) {
 }
 
 function onRestoreVersion(docId: string, versionId: string) {
-  restoreVersion(docId, versionId);
+  void restoreVersion(docId, versionId);
 }
 
 function onPermanentlyDeleteVersion(docId: string, versionId: string) {

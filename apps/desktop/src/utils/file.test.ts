@@ -78,4 +78,22 @@ describe("pickDocumentFile", () => {
     vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx", "C:/docs/b.docx"]);
     expect(await pickDocumentFile()).toBe("C:/docs/a.docx");
   });
+
+  it("restricts the filter to the given extension", async () => {
+    vi.mocked(open).mockResolvedValueOnce("C:/docs/report.pdf");
+    expect(await pickDocumentFile("pdf")).toBe("C:/docs/report.pdf");
+    expect(open).toHaveBeenCalledWith({
+      multiple: false,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+  });
+
+  it("ignores a null/empty extension and lists all managed types", async () => {
+    vi.mocked(open).mockResolvedValueOnce("C:/docs/report.docx");
+    await pickDocumentFile(null);
+    expect(open).toHaveBeenCalledWith({
+      multiple: false,
+      filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+    });
+  });
 });
