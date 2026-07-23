@@ -387,6 +387,36 @@ async function previewWorkingCopy(params: {
 }
 
 /**
+ * Read a persisted preview from the on-disk cache - the second tier of the
+ * memory-LRU -> disk -> re-render lookup that [`previewVersion`]/[`previewWorkingCopy`]
+ * feed. Returns null on a miss, when no vault is open, or outside Tauri (browser
+ * dev has no cache). `key` is the frontend `previewCacheKey` string.
+ */
+async function readPreviewCache(key: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string | null>("read_preview_cache", { key });
+}
+
+/**
+ * Persist a rendered preview's HTML to the on-disk cache (overwrite). Best-
+ * effort: callers fire-and-forget. No-op outside Tauri. `key` is the frontend
+ * `previewCacheKey` string.
+ */
+async function writePreviewCache(key: string, html: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("write_preview_cache", { key, html });
+}
+
+/**
+ * Clear the active vault's on-disk preview cache (other vaults untouched).
+ * No-op outside Tauri.
+ */
+async function clearPreviewCache(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("clear_preview_cache");
+}
+
+/**
  * Remove the library copy for a document (the tool-owned working file). Used on
  * delete so the working copy does not outlive its document. Missing file/dir is
  * a no-op. Synchronous.
@@ -582,6 +612,9 @@ export function useVault() {
     openLibraryCopy,
     previewVersion,
     previewWorkingCopy,
+    readPreviewCache,
+    writePreviewCache,
+    clearPreviewCache,
     removeLibraryCopy,
     ensureLibraryCopies,
     cancelJob,

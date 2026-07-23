@@ -162,8 +162,9 @@ pub(crate) fn state_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// The canonicalized root of the currently-open vault, or `None` when no vault
-/// is open (onboarding). The desktop-state file is scoped by this key.
-fn current_vault_root(state: &State<AppState>) -> Option<String> {
+/// is open (onboarding). The desktop-state file is scoped by this key; the
+/// preview cache reuses it to scope on-disk previews per vault.
+pub(crate) fn current_vault_root(state: &State<AppState>) -> Option<String> {
     let vault = state::lock_vault(&state.vault);
     let vault = vault.as_ref()?;
     Some(canonical_key(&vault.paths().root_dir))

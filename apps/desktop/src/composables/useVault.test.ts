@@ -339,3 +339,25 @@ describe("useVault - preview_version contract", () => {
     });
   });
 });
+
+describe("useVault - preview cache contracts", () => {
+  it("readPreviewCache sends the cache key", async () => {
+    await vault.readPreviewCache("doc1|v:v2");
+    expect(invokeArgs("read_preview_cache")).toStrictEqual({
+      key: "doc1|v:v2",
+    });
+  });
+
+  it("writePreviewCache sends key + html", async () => {
+    await vault.writePreviewCache("doc1|working", "<div/>");
+    expect(invokeArgs("write_preview_cache")).toStrictEqual({
+      key: "doc1|working",
+      html: "<div/>",
+    });
+  });
+
+  it("clearPreviewCache invokes with no args", async () => {
+    await vault.clearPreviewCache();
+    expect(invoke).toHaveBeenCalledWith("clear_preview_cache");
+  });
+});

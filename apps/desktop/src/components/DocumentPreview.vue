@@ -30,18 +30,25 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
  * ever loaded. The whole component is lazy-loaded by DocumentsView, so none of
  * this (nor the pdf.js worker) is in the app's initial bundle.
  *
- * Caching: each kind's rendered output is snapshotted (previewCache) and shown
- * instantly on reopen. An immutable committed version's cache is authoritative
- * (no re-fetch); the mutable working copy refreshes in the background into an
- * off-screen surface, then swaps in - restoring the user's scroll position - so
- * the cached view stays visible (with a bottom-right badge) until the fresh one
- * is ready. pptx is rendered live and not cached.
+ * Caching is three-tier: an in-memory LRU, then an on-disk cache (per vault),
+ * then a fresh render. Each kind's rendered output is snapshotted (previewCache)
+ * into both tiers and shown instantly on reopen. An immutable committed
+ * version's cache is authoritative (no re-fetch); the mutable working copy
+ * refreshes in the background into an off-screen surface, then swaps in -
+ * restoring the user's scroll position - so the cached view stays visible (with
+ * a bottom-right badge) until the fresh one is ready. pptx is cached too: its
+ * slides (charts canvas, blob images) are inlined into the HTML snapshot.
  */
 
 const props = defineProps<{ document: Document; version: Version | null }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
-const { previewVersion, previewWorkingCopy } = useVault();
+const {
+  previewVersion,
+  previewWorkingCopy,
+  readPreviewCache,
+  writePreviewCache,
+} = useVault();
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -84,30 +91,34 @@ async function load() {
     props.document.modification === "modified" && props.version == null;
   const key = previewCacheKey(props.document.id, props.version, wantsWorkingCopy);
   const mutable = isMutablePreview(props.version);
-  const cached = getPreviewCache(key);
 
-  // Cached: paint instantly. A committed version is immutable, so the cache is
-  // authoritative and we are done. The mutable working copy refreshes in the
-  // background so edits since the last open are eventually shown - the cached
-  // copy stays visible (with a badge) until the fresh render is swapped in.
-  if (cached) {
-    if (container.value) container.value.innerHTML = cached;
+  // Tier 1: in-memory LRU. Paint instantly; an immutable committed version is
+  // authoritative (done), the mutable current/working copy refreshes in the
+  // background so edits since the last open are eventually shown (the cached
+  // copy stays visible with a badge until the fresh render swaps in).
+  const memHit = getPreviewCache(key);
+  if (memHit) {
+    if (container.value) container.value.innerHTML = memHit;
     loading.value = false;
     if (!mutable) return;
-    refreshing.value = true;
-    try {
-      const bytes = await fetchBytes(wantsWorkingCopy);
-      if (!cancelled && bytes) await refreshAndSwap(bytes, key);
-    } catch (e) {
-      // Refresh failed: keep the cached copy visible, just drop the badge.
-      if (!cancelled) console.error("preview refresh failed", e);
-    } finally {
-      if (!cancelled) refreshing.value = false;
-    }
+    await refreshMutable(wantsWorkingCopy, key);
     return;
   }
 
-  // No cache: full load with the loading overlay.
+  // Tier 2: on-disk cache. Backfill the memory LRU so the next lookup hits
+  // tier 1, then paint + (for mutable) background-refresh as above.
+  const diskHit = await readPreviewCache(key);
+  if (cancelled) return;
+  if (diskHit) {
+    setPreviewCache(key, diskHit);
+    if (container.value) container.value.innerHTML = diskHit;
+    loading.value = false;
+    if (!mutable) return;
+    await refreshMutable(wantsWorkingCopy, key);
+    return;
+  }
+
+  // Tier 3: no cache - full load with the loading overlay.
   try {
     const bytes = await fetchBytes(wantsWorkingCopy);
     if (cancelled) return;
@@ -134,6 +145,24 @@ async function load() {
   }
 }
 
+/**
+ * Background refresh of a mutable (current / working-copy) preview after a
+ * cached copy was already shown. Fetches fresh bytes and swaps in the re-render
+ * off-screen, restoring the user's scroll position. Failures keep the cached
+ * copy visible and just drop the badge.
+ */
+async function refreshMutable(wantsWorkingCopy: boolean, key: string) {
+  refreshing.value = true;
+  try {
+    const bytes = await fetchBytes(wantsWorkingCopy);
+    if (!cancelled && bytes) await refreshAndSwap(bytes, key);
+  } catch (e) {
+    if (!cancelled) console.error("preview refresh failed", e);
+  } finally {
+    if (!cancelled) refreshing.value = false;
+  }
+}
+
 async function fetchBytes(wantsWorkingCopy: boolean): Promise<ArrayBuffer | null> {
   return wantsWorkingCopy
     ? await previewWorkingCopy({ document_id: props.document.id })
@@ -145,23 +174,35 @@ async function fetchBytes(wantsWorkingCopy: boolean): Promise<ArrayBuffer | null
 
 /**
  * First-open render (no cache): render into the visible host, then snapshot the
- * result into the cache for next time. pptx is rendered live and NOT cached
- * (its slides don't serialize cleanly); it stays as today's behaviour.
+ * result into both cache tiers in the background (the host keeps its live
+ * render so the first paint shows the native canvas/DOM). pptx is cached too:
+ * its slides (charts canvas, blob images) are inlined into the snapshot.
  */
 async function renderAndShow(
   bytes: ArrayBuffer,
   key: string,
   kind: PreviewKind,
 ) {
-  if (kind === "pptx") {
-    if (container.value) await renderPptx(bytes, container.value);
-    return;
-  }
   const el = container.value;
   if (!el) return;
   await renderInto(el, kind, bytes);
   if (cancelled) return;
-  setPreviewCache(key, captureHtml(el, kind));
+  // Snapshot to cache (best-effort, non-blocking for the visible render).
+  void captureAndCache(el, key);
+}
+
+/** Render a container and write its snapshot to the memory LRU + disk cache. */
+async function captureAndCache(el: HTMLElement, key: string) {
+  try {
+    const html = await captureHtml(el);
+    if (cancelled) return;
+    setPreviewCache(key, html);
+    void writePreviewCache(key, html).catch((e) =>
+      console.error("preview cache write failed", e),
+    );
+  } catch (e) {
+    console.error("preview capture failed", e);
+  }
 }
 
 /**
@@ -172,32 +213,41 @@ async function renderAndShow(
  */
 async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
   const kind = detectPreviewKind(props.document.type, bytes);
-  if (cancelled || kind === "unsupported" || kind === "pptx") return;
+  if (cancelled || kind === "unsupported") return;
   const temp = makeOffscreenSurface();
   try {
     await renderInto(temp, kind, bytes);
     if (cancelled) return;
-    const html = captureHtml(temp, kind);
+    const html = await captureHtml(temp);
+    if (cancelled) return;
     const scrollEl = bodyRef.value;
     const scrollTop = scrollEl?.scrollTop ?? 0;
     if (container.value) container.value.innerHTML = html;
     setPreviewCache(key, html);
+    void writePreviewCache(key, html).catch((e) =>
+      console.error("preview cache write failed", e),
+    );
     if (scrollEl) {
       await nextTick();
       if (!cancelled) scrollEl.scrollTop = scrollTop;
     }
   } finally {
-    // The temp's pdf.js document is done with once captured; free it. (The
-    // host keeps its own live handles until onBeforeUnmount.)
+    // The temp's live handles (pdf.js doc / pptx viewer) are done once
+    // captured; free them. (The host keeps its own live handles until
+    // onBeforeUnmount.)
     if (pdfLoadingTask) {
       void pdfLoadingTask.destroy();
       pdfLoadingTask = null;
+    }
+    if (pptxViewer) {
+      pptxViewer.destroy();
+      pptxViewer = null;
     }
     temp.remove();
   }
 }
 
-/** Render cacheable kinds (pdf / md / txt / docx / xlsx) into `el`. */
+/** Render any kind (pdf / md / txt / docx / xlsx / pptx) into `el`. */
 async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuffer) {
   switch (kind) {
     case "pdf":
@@ -215,7 +265,9 @@ async function renderInto(el: HTMLDivElement, kind: PreviewKind, bytes: ArrayBuf
     case "xlsx":
       await renderXlsx(bytes, el);
       break;
-    // pptx is rendered live into the host (renderPptx), not via renderInto.
+    case "pptx":
+      await renderPptx(bytes, el);
+      break;
   }
 }
 

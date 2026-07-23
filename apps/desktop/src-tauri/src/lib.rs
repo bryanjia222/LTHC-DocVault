@@ -6,6 +6,7 @@ mod library;
 mod local_state;
 mod logging;
 mod prefs;
+mod preview_cache;
 mod state;
 
 use std::path::{Path, PathBuf};
@@ -134,6 +135,9 @@ pub fn run() {
             library::ensure_library_copies,
             library::export_working_copy,
             library::preview_working_copy,
+            preview_cache::read_preview_cache,
+            preview_cache::write_preview_cache,
+            preview_cache::clear_preview_cache,
             devtools::reset_to_stage,
         ])
         .run(tauri::generate_context!())

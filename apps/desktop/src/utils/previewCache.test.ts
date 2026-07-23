@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   previewCacheKey,
   isMutablePreview,
@@ -11,8 +11,9 @@ import type { Version } from "../data/mock";
 
 /*
  * previewCache: key derivation (working/version/current), the mutable flag that
- * drives background refresh, the in-memory store, and HTML snapshotting - where
- * PDF canvases (bitmaps that don't survive innerHTML) become <img> data URLs.
+ * drives background refresh, the in-memory LRU store, and HTML snapshotting -
+ * where <canvas> bitmaps (which don't survive innerHTML) become <img> data URLs
+ * and blob: images are inlined so the snapshot survives a disk round-trip.
  */
 
 function version(label: string): Version {
@@ -59,7 +60,7 @@ describe("previewCache", () => {
     });
   });
 
-  describe("cache store", () => {
+  describe("cache store (LRU)", () => {
     it("returns undefined for a miss", () => {
       expect(getPreviewCache("missing")).toBeUndefined();
     });
@@ -77,16 +78,34 @@ describe("previewCache", () => {
       clearPreviewCache();
       expect(getPreviewCache("k")).toBeUndefined();
     });
+
+    it("evicts the least-recently-used entry past the limit", () => {
+      // Capacity is 24; the 25th insert evicts the oldest (k0).
+      for (let i = 0; i < 24; i++) setPreviewCache(`k${i}`, `v${i}`);
+      setPreviewCache("k24", "v24");
+      expect(getPreviewCache("k0")).toBeUndefined();
+      expect(getPreviewCache("k1")).toBe("v1");
+      expect(getPreviewCache("k24")).toBe("v24");
+    });
+
+    it("a get promotes the entry to most-recently-used", () => {
+      for (let i = 0; i < 24; i++) setPreviewCache(`k${i}`, `v${i}`);
+      // Touch k0 so it is no longer the LRU; k1 becomes the oldest.
+      expect(getPreviewCache("k0")).toBe("v0");
+      setPreviewCache("k24", "v24");
+      expect(getPreviewCache("k0")).toBe("v0"); // survived the promotion
+      expect(getPreviewCache("k1")).toBeUndefined(); // evicted instead
+    });
   });
 
   describe("captureHtml", () => {
-    it("returns innerHTML directly for non-PDF kinds", () => {
+    it("returns innerHTML directly for plain content", async () => {
       const el = document.createElement("div");
       el.innerHTML = '<div class="preview-md">hello</div>';
-      expect(captureHtml(el, "md")).toBe('<div class="preview-md">hello</div>');
+      expect(await captureHtml(el)).toBe('<div class="preview-md">hello</div>');
     });
 
-    it("snapshots each PDF page canvas to a sized <img> data URL", () => {
+    it("snapshots each canvas to a sized <img> data URL", async () => {
       const el = document.createElement("div");
       const canvas = document.createElement("canvas");
       canvas.className = "preview-page";
@@ -95,20 +114,73 @@ describe("previewCache", () => {
       // jsdom doesn't render canvases; stub the data URL it would produce.
       canvas.toDataURL = () => "data:image/png;base64,FAKE";
       el.appendChild(canvas);
-      const html = captureHtml(el, "pdf");
+      const html = await captureHtml(el);
       expect(html).toContain("preview-page");
       expect(html).toContain('src="data:image/png;base64,FAKE"');
       expect(html).toContain('width="100"');
       expect(html).toContain('height="200"');
+      expect(html).not.toContain("<canvas");
     });
 
-    it("skips canvases without the preview-page class", () => {
+    it("snapshots any canvas, not just .preview-page (e.g. charts)", async () => {
       const el = document.createElement("div");
       const canvas = document.createElement("canvas");
       canvas.width = 50;
-      canvas.toDataURL = () => "data:image/png;base64,OTHER";
+      canvas.height = 50;
+      canvas.toDataURL = () => "data:image/png;base64,CHART";
       el.appendChild(canvas);
-      expect(captureHtml(el, "pdf")).toBe("");
+      const html = await captureHtml(el);
+      expect(html).toContain('src="data:image/png;base64,CHART"');
+      expect(html).not.toContain("<canvas");
+    });
+
+    it("inlines blob: images as data URLs", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ blob: async () => new Blob(["x"]) })),
+      );
+      class FakeReader {
+        result: string | null = null;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        error: unknown = null;
+        readAsDataURL(): void {
+          queueMicrotask(() => {
+            this.result = "data:image/png;base64,INLINED";
+            this.onload?.();
+          });
+        }
+      }
+      vi.stubGlobal("FileReader", FakeReader);
+      try {
+        const el = document.createElement("div");
+        const img = document.createElement("img");
+        img.src = "blob:http://localhost/abc";
+        el.appendChild(img);
+        const html = await captureHtml(el);
+        expect(html).toContain('src="data:image/png;base64,INLINED"');
+        expect(html).not.toContain("blob:");
+        expect(fetch).toHaveBeenCalledWith("blob:http://localhost/abc");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("leaves a blob src as-is when reading fails", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("network");
+        }),
+      );
+      const el = document.createElement("div");
+      const img = document.createElement("img");
+      img.src = "blob:http://localhost/xyz";
+      el.appendChild(img);
+      const html = await captureHtml(el);
+      // Best-effort: the dangling blob: src is kept rather than dropping the img.
+      expect(html).toContain("blob:http://localhost/xyz");
+      vi.unstubAllGlobals();
     });
   });
 });
