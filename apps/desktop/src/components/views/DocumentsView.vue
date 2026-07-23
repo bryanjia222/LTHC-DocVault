@@ -396,13 +396,6 @@ onBeforeUnmount(() => {
           </p>
         </div>
         <div class="toolbar">
-          <button
-            class="primary"
-            type="button"
-            @click="runAction('actionLogs.addDocument')"
-          >
-            {{ t("actions.addDocument") }}
-          </button>
           <select
             class="search-scope"
             :value="searchScope"
@@ -582,16 +575,11 @@ onBeforeUnmount(() => {
           <tbody v-if="filteredDocuments.length === 0">
             <tr>
               <td colspan="6" class="empty-state">
-                <div v-if="documents.length === 0" class="empty-cta">
-                  <p>{{ t("documents.emptyNoDocs") }}</p>
-                  <button
-                    class="primary"
-                    type="button"
-                    @click="runAction('actionLogs.addDocument')"
-                  >
-                    {{ t("actions.addDocument") }}
-                  </button>
-                </div>
+                <template v-if="documents.length === 0">
+                  {{
+                    t("documents.emptyNoDocs")
+                  }}
+                </template>
                 <template v-else>{{ t("documents.empty") }}</template>
               </td>
             </tr>
@@ -1262,18 +1250,6 @@ tbody tr.selected {
   flex: 1;
   height: 1px;
   background: var(--border-soft);
-}
-
-.empty-cta {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  font-style: normal;
-}
-
-.empty-cta .primary {
-  font-style: normal;
 }
 
 .version-list {

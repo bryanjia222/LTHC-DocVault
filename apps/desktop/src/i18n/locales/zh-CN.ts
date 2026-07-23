@@ -18,6 +18,7 @@ export const zhCN = {
     addProject: "新建项目",
     addSubProject: "新建子项目",
     newFile: "新建文件",
+    importDocument: "导入文档",
     moreActions: "更多操作",
     toggleExpand: "展开 / 折叠",
     expandAll: "展开全部",

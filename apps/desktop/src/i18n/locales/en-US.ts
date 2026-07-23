@@ -18,6 +18,7 @@ export const enUS = {
     addProject: "New project",
     addSubProject: "New sub-project",
     newFile: "New file",
+    importDocument: "Import document",
     moreActions: "More actions",
     toggleExpand: "Expand / collapse",
     expandAll: "Expand all",

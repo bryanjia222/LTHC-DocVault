@@ -7,6 +7,7 @@ import {
   ChevronsUpDown,
   FilePlus,
   FileText,
+  FileUp,
   Folder,
   FolderPlus,
   MoreVertical,
@@ -29,7 +30,7 @@ const { activeSection, setSection } = useNavigation();
 const { navigate } = useVaultActions();
 const { activeProjectId, selectAll, selectProject } = useDocuments();
 const desktop = useDesktopState();
-const { openNewDocument } = useDialogs();
+const { openNewDocument, openAddDocument } = useDialogs();
 
 const projects = computed(() => desktop.projects.value);
 
@@ -208,6 +209,23 @@ function actNewFile() {
   openNewDocument(id);
 }
 
+/** Import an existing file as a new document (unassigned). Reached from the
+ *  all-documents kebab, replacing the removed toolbar "添加文档" button. */
+function actImportDocument() {
+  closeMenu();
+  openAddDocument();
+}
+
+/** Expand / collapse the whole project tree from the all-documents kebab. */
+function actExpandAll() {
+  closeMenu();
+  expandAll();
+}
+function actCollapseAll() {
+  closeMenu();
+  collapseAll();
+}
+
 function actAddSubproject() {
   const id =
     menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
@@ -379,28 +397,6 @@ function indentFor(depth: number): string {
         </button>
       </div>
 
-      <!-- expand-all / collapse-all controls for the project tree -->
-      <div v-if="projects.length" class="tree-toolbar">
-        <button
-          class="icon-btn tree-action"
-          type="button"
-          :title="t('sidebar.expandAll')"
-          :aria-label="t('sidebar.expandAll')"
-          @click="expandAll"
-        >
-          <ChevronsUpDown class="nav-icon" aria-hidden="true" />
-        </button>
-        <button
-          class="icon-btn tree-action"
-          type="button"
-          :title="t('sidebar.collapseAll')"
-          :aria-label="t('sidebar.collapseAll')"
-          @click="collapseAll"
-        >
-          <ChevronsDownUp class="nav-icon" aria-hidden="true" />
-        </button>
-      </div>
-
       <!-- tree: projects (+ inline create/rename rows), flattened with depth -->
       <div class="project-list">
         <template v-for="row in flatRows" :key="row.key">
@@ -566,6 +562,25 @@ function indentFor(depth: number): string {
               <button type="button" @click="actNewFile">
                 <FilePlus class="nav-icon" aria-hidden="true" />
                 {{ t("sidebar.newFile") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actImportDocument">
+                <FileUp class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.importDocument") }}
+              </button>
+            </li>
+            <li class="ctx-divider" />
+            <li>
+              <button type="button" @click="actExpandAll">
+                <ChevronsUpDown class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.expandAll") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actCollapseAll">
+                <ChevronsDownUp class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.collapseAll") }}
               </button>
             </li>
           </template>
@@ -791,19 +806,6 @@ function indentFor(depth: number): string {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-}
-
-/* Expand-all / collapse-all controls, sitting above the project tree. */
-.tree-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 2px;
-  padding: 0 6px 2px;
-}
-
-.tree-action .nav-icon {
-  width: 14px;
-  height: 14px;
 }
 
 .trash-row {
