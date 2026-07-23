@@ -521,6 +521,7 @@ onBeforeUnmount(() => {
             <tr v-if="showGroupHeaders" class="group-header">
               <td colspan="6">
                 <div class="group-divider">
+                  <span class="group-line" />
                   <span class="group-label">{{ group.label }}</span>
                   <span class="group-line" />
                 </div>
@@ -1231,7 +1232,18 @@ tbody tr.selected {
  * a parent's own docs from each child project's (and, in all-documents, one
  * project's docs from the next). */
 .group-header td {
-  padding: 12px 10px 6px;
+  /* Extra room above each project group; the first document follows right
+     below the divider. No border under the header - its group-line is the
+     separator, so we don't draw a second line beneath it. */
+  padding: 18px 10px 4px;
+  border-bottom: none;
+}
+
+/* Separators exist only between two documents: drop the border under the last
+   row of each group so no line is drawn between a group's last document and
+   the next group header (or after the table's final row). */
+.table-wrap tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .group-divider {
