@@ -1,5 +1,5 @@
 use docvault_types::{Document, DocumentId, Version};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 use crate::{DocumentRef, StorageError, StorageResult, VaultStorage};
 
@@ -173,6 +173,35 @@ impl VaultStorage {
             .execute("DELETE FROM versions WHERE document_id = ?1", [document_id])?;
         self.connection
             .execute("DELETE FROM documents WHERE id = ?1", [document_id])?;
+        Ok(())
+    }
+
+    /// Delete specific version rows of one document by id, leaving the document
+    /// and its other versions intact. Callers orchestrate restic forget + local
+    /// archive cleanup around this. Empty `version_ids` is a no-op. Ids that do
+    /// not exist simply match nothing - the caller is expected to have validated
+    /// them first (and surface `VersionNotFound` if not).
+    pub(crate) fn remove_versions(
+        &self,
+        document_id: &str,
+        version_ids: &[String],
+    ) -> StorageResult<()> {
+        if version_ids.is_empty() {
+            return Ok(());
+        }
+        let placeholders = std::iter::repeat("?")
+            .take(version_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "DELETE FROM versions WHERE document_id = ? AND id IN ({placeholders})"
+        );
+        // document_id first, then each version id, as the bound params.
+        let mut params: Vec<String> = Vec::with_capacity(version_ids.len() + 1);
+        params.push(document_id.to_owned());
+        params.extend(version_ids.iter().cloned());
+        self.connection
+            .execute(&sql, params_from_iter(params.iter().map(|s| s.as_str())))?;
         Ok(())
     }
 

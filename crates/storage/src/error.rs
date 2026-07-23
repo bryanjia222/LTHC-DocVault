@@ -56,6 +56,16 @@ pub enum StorageError {
         document_name: String,
         version: String,
     },
+    /// The caller asked to delete a document's current (checked-out) version,
+    /// which would leave the document's `current_version_id` pointer dangling.
+    /// The UI blocks this too; this is the backend's defensive guard.
+    #[error(
+        "cannot delete the current version {version_id} of document {document_name}; switch to another version before deleting it"
+    )]
+    CannotDeleteCurrentVersion {
+        document_name: String,
+        version_id: String,
+    },
     #[error("invalid file name: {}", .0.display())]
     InvalidFileName(PathBuf),
     #[error("invalid backup backend: {0}")]

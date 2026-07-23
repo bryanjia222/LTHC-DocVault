@@ -158,6 +158,22 @@ impl DocVault {
         Ok(())
     }
 
+    /// Delete specific versions of a document by id (forgetting their restic
+    /// snapshots for the restic backend), keeping the document and its other
+    /// versions. Refuses the current (checked-out) version. The caller owns the
+    /// subtree policy - pass a version plus its descendants when the user
+    /// confirmed deleting the whole subtree.
+    pub fn delete_versions(
+        &self,
+        document_ref: &DocumentRef,
+        version_ids: &[String],
+        cancel: &AtomicBool,
+    ) -> CoreResult<()> {
+        self.storage
+            .delete_versions(document_ref, version_ids, cancel)?;
+        Ok(())
+    }
+
     /// Rename a document's display name. Does not touch the source file or any
     /// version's `original_filename`.
     pub fn rename_document(&self, document_ref: &DocumentRef, new_name: &str) -> StorageResult<()> {
