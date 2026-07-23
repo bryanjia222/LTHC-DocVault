@@ -682,6 +682,7 @@ onBeforeUnmount(() => {
 
       <section
         class="version-list"
+        :class="versionViewMode === 'tree' ? 'tree-mode' : 'list-mode'"
         :aria-label="t('details.versionHistoryLabel')"
       >
         <div class="section-heading">
@@ -1248,16 +1249,28 @@ tbody tr.selected {
 
 .group-line {
   flex: 1;
-  height: 1px;
-  background: var(--border-soft);
+  height: 2px;
+  background: var(--border-strong);
+  border-radius: 2px;
 }
 
 .version-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  flex: 1;
   gap: 8px;
-  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* List mode: the version list keeps its natural height; the leftover panel
+   height becomes blank space below it (above the author/size/note block) so a
+   tall right card no longer stretches a few version rows into an empty box. */
+.version-list.list-mode {
+  flex: 0 1 auto;
+}
+
+/* Tree mode: the graph fills the available height (unchanged behaviour). */
+.version-list.tree-mode {
+  flex: 1 1 0;
   overflow: hidden;
 }
 
@@ -1283,11 +1296,19 @@ tbody tr.selected {
   display: grid;
   min-height: 0;
   gap: 8px;
-  overflow: auto;
   padding-right: 4px;
 }
 
+/* List mode: content-sized but capped, so many versions scroll instead of
+   stretching the panel. */
+.version-history-scroll:not(.tree-mode) {
+  flex: 0 1 auto;
+  overflow: auto;
+  max-height: 40vh;
+}
+
 .version-history-scroll.tree-mode {
+  flex: 1 1 auto;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   padding-right: 0;
@@ -1366,6 +1387,7 @@ tbody tr.selected {
 }
 
 .version-detail {
+  margin-top: auto;
   display: grid;
   gap: 10px;
   padding-top: 12px;

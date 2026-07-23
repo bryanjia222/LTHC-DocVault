@@ -127,6 +127,18 @@ body {
   font-size: 14px;
   line-height: 1.45;
   text-rendering: optimizeLegibility;
+  /* Native-app feel: text is not selectable by default. Editing fields opt
+     back in below. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Re-enable text selection inside fields the user edits. */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 h1,
