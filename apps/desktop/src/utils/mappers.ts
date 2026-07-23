@@ -8,6 +8,7 @@ import type {
   Job,
   ProjectDef,
   TrackedFile,
+  TrashedVersion,
   VaultConfigPreview,
   Version,
 } from "../data/mock";
@@ -107,6 +108,13 @@ export interface RawProjectDef {
   parent_id?: string | null;
 }
 
+/** Raw (snake_case wire) form of a trashed version: version ids are unique only
+ *  within a document, so the pair identifies one entry. */
+export interface RawTrashedVersion {
+  document_id: string;
+  version_id: string;
+}
+
 export interface RawSortPref {
   key: string;
   direction: string;
@@ -122,6 +130,8 @@ export interface RawDesktopState {
   sort_prefs: Record<string, RawSortPref>;
   /** Document ids soft-deleted to the recycle bin (desktop-local hide). */
   trashed: string[];
+  /** Versions soft-deleted to the recycle bin, scoped by their document. */
+  trashed_versions: RawTrashedVersion[];
 }
 
 export interface RawFileStat {
@@ -260,13 +270,22 @@ export function mapDesktopState(raw: RawDesktopState): DesktopState {
   return {
     tags: raw.tags,
     tracked: raw.tracked.map(mapTrackedFile),
-    // `projects`/`assignments`/`sort_prefs`/`trashed` are newer fields; default
-    // to empty so older state files (and test fixtures) that omit them don't
-    // leak `undefined`.
+    // `projects`/`assignments`/`sort_prefs`/`trashed`/`trashed_versions` are
+    // newer fields; default to empty so older state files (and test fixtures)
+    // that omit them don't leak `undefined`.
     projects: (raw.projects ?? []).map(mapProject),
     assignments: raw.assignments ?? {},
     sortPrefs: raw.sort_prefs ?? {},
     trashed: raw.trashed ?? [],
+    trashedVersions: (raw.trashed_versions ?? []).map(mapTrashedVersion),
+  };
+}
+
+/** Map a raw (snake_case wire) trashed version to the view-model. */
+export function mapTrashedVersion(raw: RawTrashedVersion): TrashedVersion {
+  return {
+    documentId: raw.document_id,
+    versionId: raw.version_id,
   };
 }
 

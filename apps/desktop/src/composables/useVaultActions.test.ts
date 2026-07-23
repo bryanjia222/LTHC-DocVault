@@ -958,3 +958,231 @@ describe("useVaultActions - edit version note", () => {
     expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
   });
 });
+
+/*
+ * Version delete / restore / permanent-delete. A version is soft-deleted to the
+ * recycle bin together with all of its descendants (so it is never orphaned from
+ * its children); the descendants are listed in the confirm. The current version
+ * and the document's whole history are never deletable this way.
+ *
+ * Tree fixture: v1 -> { v2 (current), v3 -> v3a }. So v3 has a descendant (v3a)
+ * but its subtree does NOT contain the current version - the case where a
+ * descendant-bearing delete is allowed.
+ */
+const docTree: Document = {
+  id: "docTree",
+  name: "Tree",
+  originalFilename: "tree.docx",
+  type: "docx",
+  owner: "Alice",
+  updatedAt: "",
+  backend: "local-copy",
+  health: "synced",
+  versions: [
+    { id: "v1", label: "v1", author: "Alice", note: "", size: "", createdAt: "", status: "archived" },
+    { id: "v2", label: "v2", author: "Alice", note: "", size: "", createdAt: "", status: "current", parentId: "v1" },
+    { id: "v3", label: "v3", author: "Alice", note: "", size: "", createdAt: "", status: "archived", parentId: "v1" },
+    { id: "v3a", label: "v3a", author: "Alice", note: "", size: "", createdAt: "", status: "archived", parentId: "v3" },
+  ],
+};
+
+describe("useVaultActions - delete version (to recycle bin)", () => {
+  beforeEach(() => {
+    documents.value = [docTree];
+    desktop.trashedVersions.value = [];
+    vi.mocked(message).mockClear();
+  });
+
+  it("trashes a leaf version (no descendants) on confirm, with no backend call", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockClear();
+
+    await actions.deleteVersion(docTree.id, "v3a");
+
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(true);
+    // Trash is desktop-local - the backend is never touched.
+    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+  });
+
+  it("trashes a version together with its descendants, listing them in the confirm", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await actions.deleteVersion(docTree.id, "v3");
+
+    // v3 + its descendant v3a both move to the bin as one unit.
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(true);
+    // The descendants confirm text names the descendant label.
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v3a"));
+  });
+
+  it("cancels the whole delete (keeps version + descendants) when declined", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(false);
+
+    await actions.deleteVersion(docTree.id, "v3");
+
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(false);
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+  });
+
+  it("blocks deleting the current version (message shown, nothing trashed)", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await actions.deleteVersion(docTree.id, "v2");
+
+    expect(vi.mocked(message)).toHaveBeenCalled();
+    expect(desktop.isVersionTrashed(docTree.id, "v2")).toBe(false);
+  });
+
+  it("blocks deleting an ancestor of the current version (subtree contains current)", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+
+    await actions.deleteVersion(docTree.id, "v1");
+
+    expect(vi.mocked(message)).toHaveBeenCalled();
+    expect(desktop.isVersionTrashed(docTree.id, "v1")).toBe(false);
+  });
+
+  it("blocks deleting the document's only version", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    const solo: Document = {
+      ...docTree,
+      id: "solo",
+      versions: [{ ...docTree.versions[0], status: "archived" }],
+    };
+    documents.value = [solo];
+
+    await actions.deleteVersion("solo", "v1");
+
+    expect(vi.mocked(message)).toHaveBeenCalled();
+    expect(desktop.isVersionTrashed("solo", "v1")).toBe(false);
+  });
+});
+
+describe("useVaultActions - restore version", () => {
+  beforeEach(() => {
+    documents.value = [docTree];
+    desktop.trashedVersions.value = [];
+  });
+
+  it("restores a single trashed version (un-hide, no backend call)", async () => {
+    asTauri();
+    desktop.trashVersion(docTree.id, "v3a");
+    vi.mocked(invoke).mockClear();
+
+    actions.restoreVersion(docTree.id, "v3a");
+
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+    // Restore is desktop-local - only the state save fires, never a vault delete.
+    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+  });
+});
+
+describe("useVaultActions - permanently delete version", () => {
+  beforeEach(() => {
+    documents.value = [docTree];
+    desktop.trashedVersions.value = [];
+    vi.mocked(message).mockClear();
+  });
+
+  it("deletes the version + its trashed descendants, then clears + reloads", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_documents_with_versions") return [];
+      return "job-del";
+    });
+    // v3 + its descendant v3a were trashed together.
+    desktop.trashVersion(docTree.id, "v3");
+    desktop.trashVersion(docTree.id, "v3a");
+
+    await actions.permanentlyDeleteVersion(docTree.id, "v3");
+
+    // Both the version and its trashed descendant are removed in one job.
+    expect(invoke).toHaveBeenCalledWith("delete_versions", {
+      document_id: docTree.id,
+      version_ids: ["v3", "v3a"],
+    });
+    // The reload refreshes the now-shorter version list.
+    expect(invoke).toHaveBeenCalledWith("list_documents_with_versions");
+    // Bin membership for both is cleared.
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(false);
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+  });
+
+  it("deletes only the version when it has no trashed descendants", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+    desktop.trashVersion(docTree.id, "v3a");
+
+    await actions.permanentlyDeleteVersion(docTree.id, "v3a");
+
+    expect(invoke).toHaveBeenCalledWith("delete_versions", {
+      document_id: docTree.id,
+      version_ids: ["v3a"],
+    });
+  });
+
+  it("requires both confirms - cancels on the first with no backend call", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(false);
+    desktop.trashVersion(docTree.id, "v3");
+
+    await actions.permanentlyDeleteVersion(docTree.id, "v3");
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+    // Still trashed - the bin was not touched.
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
+  });
+});
+
+describe("useVaultActions - empty recycle bin (versions)", () => {
+  beforeEach(() => {
+    documents.value = [docTree];
+    desktop.trashed.value = [];
+    desktop.trashedVersions.value = [];
+  });
+
+  it("permanently deletes trashed versions grouped by document", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+    desktop.trashVersion(docTree.id, "v3");
+    desktop.trashVersion(docTree.id, "v3a");
+
+    await actions.emptyTrash();
+
+    expect(invoke).toHaveBeenCalledWith("delete_versions", {
+      document_id: docTree.id,
+      version_ids: ["v3", "v3a"],
+    });
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(false);
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
+  });
+
+  it("skips versions whose document is itself trashed (removed by its own delete)", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+    // docTree is trashed as a whole, so its trashed versions must NOT get a
+    // separate delete_versions call - delete_document removes them.
+    desktop.trashDoc(docTree.id);
+    desktop.trashVersion(docTree.id, "v3");
+
+    await actions.emptyTrash();
+
+    expect(invoke).toHaveBeenCalledWith("delete_document", {
+      document_id: docTree.id,
+    });
+    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+  });
+});
+

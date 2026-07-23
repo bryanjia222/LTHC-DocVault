@@ -8,6 +8,7 @@ import { useDesktopState } from "./useDesktopState";
 import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "./useVault";
 import { useTheme } from "../theme";
 import { extOf, pickDocumentFile } from "../utils/file";
+import { descendantsOf } from "../utils/versionTree";
 
 /*
  * Centralized action handlers. Every UI action (commit, export, checkout,
@@ -36,6 +37,7 @@ export function useVaultActions() {
     exportWorkingCopy,
     checkoutVersion,
     deleteDocument: sendDelete,
+    deleteVersions: sendDeleteVersions,
     renameDocument: sendRename,
     setVersionNote: sendSetVersionNote,
     loadDocuments,
@@ -374,14 +376,30 @@ export function useVaultActions() {
   }
 
   /**
-   * Empty the recycle bin: permanently delete every document in it. Like
-   * `permanentlyDeleteDocument` this is irreversible (all history + snapshots
-   * removed), so it is double-confirmed. Each document is unmanaged in turn;
-   * a per-document failure is logged but does not abort the rest of the batch.
+   * Empty the recycle bin: permanently delete every document AND every version
+   * in it. Like `permanentlyDeleteDocument` this is irreversible (all history +
+   * snapshots removed), so it is double-confirmed. Each document is unmanaged in
+   * turn; a per-document failure is logged but does not abort the rest of the
+   * batch. Trashed versions are batched per document into one `delete_versions`
+   * job each; versions whose document is itself in the bin are skipped here -
+   * the document delete removes all its versions anyway, so a second delete would
+   * race / fail on a missing document.
    */
   async function emptyTrash() {
     const actionKey = "actionLogs.emptyTrash" as const;
-    const ids = desktop.trashedIds();
+    const docIds = desktop.trashedIds();
+    const trashedDocSet = new Set(docIds);
+    // Only versions of still-live documents need their own delete; versions of
+    // trashed documents are removed by the document's delete_document job.
+    const versionsByDoc = new Map<string, string[]>();
+    for (const entry of desktop.trashedVersionList()) {
+      if (trashedDocSet.has(entry.documentId)) continue;
+      const list = versionsByDoc.get(entry.documentId);
+      if (list) list.push(entry.versionId);
+      else versionsByDoc.set(entry.documentId, [entry.versionId]);
+    }
+    const versionCount = [...versionsByDoc.values()].reduce((n, v) => n + v.length, 0);
+    const total = docIds.length + versionCount;
     log(
       t("log.actionRequested", {
         action: t(actionKey),
@@ -389,20 +407,20 @@ export function useVaultActions() {
         version: t("log.latest"),
       }),
     );
-    if (ids.length === 0) {
+    if (total === 0) {
       log(t("log.trashEmpty"));
       return;
     }
     if (!isTauri()) return;
-    if (!(await confirmDialog(t("confirm.emptyTrash", { count: ids.length })))) {
+    if (!(await confirmDialog(t("confirm.emptyTrash", { count: total })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    if (!(await confirmDialog(t("confirm.emptyTrashAgain", { count: ids.length })))) {
+    if (!(await confirmDialog(t("confirm.emptyTrashAgain", { count: total })))) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    for (const id of ids) {
+    for (const id of docIds) {
       try {
         await sendDelete({ document_id: id });
         desktop.clearDoc(id);
@@ -421,7 +439,215 @@ export function useVaultActions() {
         );
       }
     }
-    log(t("log.trashEmptied", { count: ids.length }));
+    for (const [docId, versionIds] of versionsByDoc) {
+      try {
+        await sendDeleteVersions({ document_id: docId, version_ids: versionIds });
+        for (const versionId of versionIds) {
+          desktop.clearVersion(docId, versionId);
+        }
+      } catch (e) {
+        const doc = documents.value.find((d) => d.id === docId);
+        log(
+          t("log.actionFailed", {
+            action: t(actionKey),
+            error: `${doc?.name ?? docId}: ${String(e)}`,
+          }),
+        );
+      }
+    }
+    log(t("log.trashEmptied", { count: total }));
+  }
+
+  /**
+   * Soft-delete a single version to the recycle bin: a desktop-local hide. The
+   * vault still holds the version (and the rest of the history) until it is
+   * permanently deleted from the bin. Because deleting a version orphans its
+   * children, a version is only ever trashed TOGETHER with all of its
+   * descendants - so when this version has descendants, the confirm dialog
+   * lists them and asks whether to delete them too; "No" cancels the entire
+   * delete (the version is never orphaned from its children). The current
+   * version and the document's whole history are never deletable this way
+   * (switch to another version first / delete the document instead).
+   */
+  async function deleteVersion(docId: string, versionId: string) {
+    const actionKey = "actionLogs.deleteVersion" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    const ver = doc?.versions.find((v) => v.id === versionId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: ver?.label ?? t("log.latest"),
+      }),
+    );
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    // Subtree-together: this version plus every descendant moves as one unit.
+    const descendants = descendantsOf(doc.versions, versionId);
+    const subtreeIds = [versionId, ...descendants.map((d) => d.id)];
+    // The current version is never deletable (it is the checked-out basis). This
+    // covers the version itself AND any descendant that happens to be current -
+    // deleting an ancestor would trash the current version too.
+    const current = doc.versions.find((v) => v.status === "current");
+    if (current && subtreeIds.includes(current.id)) {
+      await message(t("versionMenu.deleteBlockedCurrent"), {
+        title: t("versionMenu.deleteBlockedTitle"),
+        kind: "warning",
+      });
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    // Refuse to empty the document via version delete - if the subtree is the
+    // whole history, delete the document instead.
+    if (subtreeIds.length >= doc.versions.length) {
+      await message(t("versionMenu.deleteBlockedLast"), {
+        title: t("versionMenu.deleteBlockedTitle"),
+        kind: "warning",
+      });
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    let confirmed: boolean;
+    if (descendants.length > 0) {
+      confirmed = await confirmDialog(
+        t("confirm.deleteVersionDescendants", {
+          name: doc.name,
+          version: ver.label,
+          descendants: descendants.map((d) => d.label).join(", "),
+        }),
+      );
+    } else {
+      confirmed = await confirmDialog(
+        t("confirm.deleteVersion", { name: doc.name, version: ver.label }),
+      );
+    }
+    if (!confirmed) {
+      // "No" cancels the entire delete - the version is not orphaned from its
+      // children, and nothing moves to the bin.
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    // Trash the whole subtree as flat per-version entries (so each can be
+    // restored / permanently deleted individually from the bin).
+    for (const id of subtreeIds) desktop.trashVersion(docId, id);
+    log(
+      t("log.versionMovedToTrash", {
+        name: doc.name,
+        version: ver.label,
+        count: subtreeIds.length,
+      }),
+    );
+  }
+
+  /** Restore a single version from the recycle bin (un-hide). No backend call -
+   *  the version was only hidden, never removed. Restoring is per-row; a version
+   *  whose ancestor is still trashed becomes visible with a (cosmetic) "based on
+   *  vX" annotation for the absent parent until that ancestor is restored too. */
+  function restoreVersion(docId: string, versionId: string) {
+    const actionKey = "actionLogs.restoreVersion" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    const ver = doc?.versions.find((v) => v.id === versionId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: ver?.label ?? t("log.latest"),
+      }),
+    );
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    desktop.restoreVersion(docId, versionId);
+    log(t("log.versionRestored", { name: doc.name, version: ver.label }));
+  }
+
+  /**
+   * Permanently delete a version (and the descendants that were trashed with
+   * it) from the recycle bin: this is the irreversible step that removes the DB
+   * row(s), forgets restic snapshots, and deletes the local archive directory.
+   * Double-confirmed. Only trashed versions are removed - a descendant that was
+   * restored (still live) is left in place, so a visible version is never
+   * deleted by surprise (it may end up with a dangling parent reference, which
+   * the tree view surfaces cosmetically). Desktop bin membership is cleared
+   * once the job reports success; the truthful state arrives later via
+   * `job:update`.
+   */
+  async function permanentlyDeleteVersion(docId: string, versionId: string) {
+    const actionKey = "actionLogs.deleteVersion" as const;
+    const doc = documents.value.find((d) => d.id === docId);
+    const ver = doc?.versions.find((v) => v.id === versionId);
+    log(
+      t("log.actionRequested", {
+        action: t(actionKey),
+        name: doc?.name ?? t("log.noDocument"),
+        version: ver?.label ?? t("log.latest"),
+      }),
+    );
+    if (!doc || !ver) {
+      log(t("log.noSelection", { action: t(actionKey) }));
+      return;
+    }
+    if (!isTauri()) return;
+    // Remove this version plus any of its descendants that are still in the bin
+    // (they were trashed together). Non-trashed descendants are left alive.
+    const descendants = descendantsOf(doc.versions, versionId);
+    const toDelete = [
+      versionId,
+      ...descendants
+        .filter((d) => desktop.isVersionTrashed(docId, d.id))
+        .map((d) => d.id),
+    ];
+    const descendantLabels = descendants
+      .filter((d) => desktop.isVersionTrashed(docId, d.id))
+      .map((d) => d.label);
+    if (descendantLabels.length > 0) {
+      if (
+        !(await confirmDialog(
+          t("confirm.permanentDeleteVersionDescendants", {
+            name: doc.name,
+            version: ver.label,
+            descendants: descendantLabels.join(", "),
+          }),
+        ))
+      ) {
+        log(t("log.actionCancelled", { action: t(actionKey) }));
+        return;
+      }
+    } else {
+      if (
+        !(await confirmDialog(
+          t("confirm.permanentDeleteVersion", { name: doc.name, version: ver.label }),
+        ))
+      ) {
+        log(t("log.actionCancelled", { action: t(actionKey) }));
+        return;
+      }
+    }
+    if (
+      !(await confirmDialog(
+        t("confirm.permanentDeleteVersionAgain", {
+          name: doc.name,
+          version: ver.label,
+        }),
+      ))
+    ) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    try {
+      const id = await sendDeleteVersions({
+        document_id: doc.id,
+        version_ids: toDelete,
+      });
+      for (const vid of toDelete) desktop.clearVersion(doc.id, vid);
+      await loadDocuments();
+      log(t("log.jobStarted", { action: t(actionKey), id }));
+    } catch (e) {
+      log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
+    }
   }
 
   /**
@@ -575,6 +801,30 @@ export function useVaultActions() {
       return;
     }
     if (!isTauri()) return;
+    // Pick the replacement file FIRST, before any precondition side effect, so a
+    // cancel here never disturbs the working copy. The replacement must be the
+    // same type (same extension) as the document - a mismatch (e.g. swapping a
+    // .docx for a .pdf) is rejected with a visible message, so the user
+    // understands why nothing happened.
+    const path = await pickDocumentFile();
+    if (!path) {
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
+    const expected = extOf(doc.originalFilename);
+    const picked = extOf(path);
+    if (expected !== picked) {
+      await message(
+        t("source.replaceCommitTypeMismatch", {
+          name: doc.name,
+          expected: expected ?? "",
+          picked: picked ?? "",
+        }),
+        { title: t("source.replaceCommitTypeMismatchTitle"), kind: "error" },
+      );
+      log(t("log.actionCancelled", { action: t(actionKey) }));
+      return;
+    }
     // Precondition: don't silently drop uncommitted working-copy changes. If the
     // tracker reports "modified", confirm and commit the current copy first (as
     // a new version), then replace. "missing"/"unchanged"/"none" need no
@@ -592,11 +842,6 @@ export function useVaultActions() {
       // returns normally). If the pre-commit didn't land, abort so the pending
       // changes aren't lost when the replacement file overwrites the working copy.
       if (desktop.modificationFor(doc.id) === "modified") return;
-    }
-    const path = await pickDocumentFile();
-    if (!path) {
-      log(t("log.actionCancelled", { action: t(actionKey) }));
-      return;
     }
     try {
       // Phase A runs synchronously inside commit(): the version is written
@@ -750,6 +995,9 @@ export function useVaultActions() {
     restoreDocument,
     permanentlyDeleteDocument,
     emptyTrash,
+    deleteVersion,
+    restoreVersion,
+    permanentlyDeleteVersion,
     exportVersionAction,
     renameDocument,
     editVersionNote,

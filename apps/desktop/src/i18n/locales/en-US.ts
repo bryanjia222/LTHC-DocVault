@@ -134,9 +134,19 @@ export const enUS = {
     permanentDeleteAgain:
       "Are you sure? Permanently deleting \"{name}\" removes all of its history. This cannot be undone.",
     emptyTrash:
-      "Empty the recycle bin? This permanently deletes {count} document(s) and all their versions and backup snapshots, and cannot be undone.",
+      "Empty the recycle bin? This permanently deletes {count} item(s) (documents and versions) and their backup snapshots, and cannot be undone.",
     emptyTrashAgain:
-      "Are you sure? Permanently deleting all {count} document(s) in the bin removes all their history. This cannot be undone.",
+      "Are you sure? Permanently deleting all {count} item(s) in the bin removes their history. This cannot be undone.",
+    deleteVersion:
+      "Move version {version} of \"{name}\" to the recycle bin?",
+    deleteVersionDescendants:
+      "Move version {version} of \"{name}\" to the recycle bin? This will also move its derived versions: {descendants}",
+    permanentDeleteVersion:
+      "Permanently delete version {version} of \"{name}\"? Its archive and backup snapshot will be removed and cannot be recovered.",
+    permanentDeleteVersionDescendants:
+      "Permanently delete version {version} of \"{name}\"? This will also permanently delete its derived versions: {descendants}",
+    permanentDeleteVersionAgain:
+      "Are you sure? Permanently deleting version {version} cannot be undone.",
   },
   actionLogs: {
     refresh: "Refresh vault",
@@ -154,6 +164,8 @@ export const enUS = {
     delete: "Delete document",
     restore: "Restore document from recycle bin",
     emptyTrash: "Empty recycle bin",
+    deleteVersion: "Delete version",
+    restoreVersion: "Restore version from recycle bin",
     preview: "Preview document",
     history: "Open versions",
     jobCenter: "Open job center",
@@ -233,6 +245,9 @@ export const enUS = {
     replaceCommit: "Replace commit",
     replaceCommitConfirm:
       "\"{name}\" has uncommitted changes. Commit them first (as a new version), then replace with the new file?",
+    replaceCommitTypeMismatchTitle: "Wrong file type",
+    replaceCommitTypeMismatch:
+      "The replacement for \"{name}\" must be the same type (same extension). Expected \"{expected}\", got \"{picked}\".",
     commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
     properties: "Properties",
@@ -246,6 +261,12 @@ export const enUS = {
     preview: "Preview version {label}",
     checkout: "Switch to version {label}",
     export: "Export version {label}",
+    delete: "Delete version {label}",
+    deleteBlockedTitle: "Cannot delete version",
+    deleteBlockedCurrent:
+      "The current version is in this version's history. Switch to another version outside of it before deleting.",
+    deleteBlockedLast:
+      "This is the document's only version - delete the document instead to remove it.",
   },
   trash: {
     title: "Recycle bin",
@@ -257,6 +278,8 @@ export const enUS = {
     emptyTrash: "Empty recycle bin",
     permanentDeleteHint:
       "Permanent deletion removes all of the document's versions and backup snapshots, and cannot be undone.",
+    versionsTitle: "Deleted versions",
+    versionsCount: "{count} version(s)",
   },
   modification: {
     none: "Not tracked",
@@ -350,6 +373,9 @@ export const enUS = {
     cleared: "Activity log cleared",
     movedToTrash: "Moved \"{target}\" to the recycle bin",
     restored: "Restored \"{target}\" from the recycle bin",
+    versionMovedToTrash:
+      "Moved version {version} of \"{name}\" to the recycle bin ({count} version(s))",
+    versionRestored: "Restored version {version} of \"{name}\" from the recycle bin",
     trashEmpty: "Recycle bin is empty",
     trashEmptied: "Emptied the recycle bin ({count} document(s))",
     commandRun: "Run command: {command}",

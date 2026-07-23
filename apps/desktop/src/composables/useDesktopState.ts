@@ -11,6 +11,7 @@ import {
   type ProjectDef,
   type SortPref,
   type TrackedFile,
+  type TrashedVersion,
 } from "../data/mock";
 import {
   mapDesktopState,
@@ -21,6 +22,7 @@ import {
   type RawFileStat,
   type RawProjectDef,
   type RawTrackedFile,
+  type RawTrashedVersion,
 } from "../utils/mappers";
 import {
   MODIFICATION_HASH_THRESHOLD_BYTES,
@@ -54,6 +56,11 @@ const sortPrefs: Ref<Record<string, SortPref>> = ref({});
 /** Document ids soft-deleted to the recycle bin (desktop-local hide). The vault
  *  still holds these docs + history until permanently deleted from the bin. */
 const trashed: Ref<string[]> = ref([]);
+/** Versions soft-deleted to the recycle bin, scoped by their document (version
+ *  ids are unique only within a document, so the pair identifies one entry).
+ *  Like `trashed`, this is a desktop-local hide; the vault holds the version
+ *  until it is permanently deleted from the bin. */
+const trashedVersions: Ref<TrashedVersion[]> = ref([]);
 /** Latest probe per document id, populated by refreshModifications. */
 const probes: Ref<Record<string, FileProbe>> = ref({});
 const loaded: Ref<boolean> = ref(false);
@@ -88,6 +95,7 @@ async function loadDesktopState(): Promise<void> {
     assignments.value = { ...mockDesktopState.assignments };
     sortPrefs.value = { ...mockDesktopState.sortPrefs };
     trashed.value = [...mockDesktopState.trashed];
+    trashedVersions.value = mockDesktopState.trashedVersions.map((v) => ({ ...v }));
     loaded.value = true;
     return;
   }
@@ -100,6 +108,7 @@ async function loadDesktopState(): Promise<void> {
     assignments.value = state.assignments;
     sortPrefs.value = state.sortPrefs;
     trashed.value = state.trashed;
+    trashedVersions.value = state.trashedVersions;
   } catch (e) {
     console.error("loadDesktopState failed", e);
   } finally {
@@ -129,6 +138,12 @@ function toRawProject(project: ProjectDef): RawProjectDef {
   return raw;
 }
 
+/** View-model TrashedVersion -> the snake_case payload the Rust
+ *  `TrashedVersion` deserializes. */
+function toRawTrashedVersion(version: TrashedVersion): RawTrashedVersion {
+  return { document_id: version.documentId, version_id: version.versionId };
+}
+
 async function saveDesktopState(): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -139,6 +154,7 @@ async function saveDesktopState(): Promise<void> {
       assignments: assignments.value,
       sort_prefs: sortPrefs.value,
       trashed: trashed.value,
+      trashed_versions: trashedVersions.value.map(toRawTrashedVersion),
     });
   } catch (e) {
     console.error("saveDesktopState failed", e);
@@ -381,6 +397,59 @@ function trashedIds(): string[] {
   return trashed.value;
 }
 
+// --- version recycle bin (desktop-local soft-delete per version) ---
+
+/** True when the version is soft-deleted into the recycle bin (hidden). */
+function isVersionTrashed(docId: string, versionId: string): boolean {
+  return trashedVersions.value.some(
+    (v) => v.documentId === docId && v.versionId === versionId,
+  );
+}
+
+/**
+ * Move a version to the recycle bin: a desktop-local hide. The vault still
+ * holds the version until it is permanently deleted from the bin. No-op when
+ * already trashed. Persisted.
+ */
+function trashVersion(docId: string, versionId: string): void {
+  if (isVersionTrashed(docId, versionId)) return;
+  trashedVersions.value = [
+    ...trashedVersions.value,
+    { documentId: docId, versionId },
+  ];
+  void saveDesktopState();
+}
+
+/**
+ * Restore a version from the recycle bin (un-hide). No-op when not trashed.
+ * Persisted.
+ */
+function restoreVersion(docId: string, versionId: string): void {
+  if (!isVersionTrashed(docId, versionId)) return;
+  trashedVersions.value = trashedVersions.value.filter(
+    (v) => !(v.documentId === docId && v.versionId === versionId),
+  );
+  void saveDesktopState();
+}
+
+/** All trashed-version entries currently in the recycle bin. */
+function trashedVersionList(): TrashedVersion[] {
+  return trashedVersions.value;
+}
+
+/**
+ * Remove a single version's recycle-bin membership (desktop-local hide only).
+ * Called after the version is permanently deleted from the vault so no orphaned
+ * entry lingers in desktop-state.json. The version's archive is not touched.
+ */
+function clearVersion(docId: string, versionId: string): void {
+  if (!isVersionTrashed(docId, versionId)) return;
+  trashedVersions.value = trashedVersions.value.filter(
+    (v) => !(v.documentId === docId && v.versionId === versionId),
+  );
+  void saveDesktopState();
+}
+
 // --- tracked source files ---
 
 function trackedFor(docId: string): TrackedFile | undefined {
@@ -426,9 +495,10 @@ function clearTracked(docId: string): void {
 
 /**
  * Remove every desktop-local annotation for a document (tags, tracked source,
- * probe cache, recycle-bin membership) in one pass and persist. Called when a
- * document is permanently deleted so no orphaned metadata lingers in
- * desktop-state.json. The document's source file on disk is not touched.
+ * probe cache, recycle-bin membership, trashed versions) in one pass and
+ * persist. Called when a document is permanently deleted so no orphaned
+ * metadata lingers in desktop-state.json. The document's source file on disk
+ * is not touched.
  */
 function clearDoc(docId: string): void {
   if (tags.value[docId]) {
@@ -447,6 +517,12 @@ function clearDoc(docId: string): void {
   probes.value = nextProbes;
   if (trashed.value.includes(docId)) {
     trashed.value = trashed.value.filter((id) => id !== docId);
+  }
+  // The document is gone, so any of its trashed versions are moot.
+  if (trashedVersions.value.some((v) => v.documentId === docId)) {
+    trashedVersions.value = trashedVersions.value.filter(
+      (v) => v.documentId !== docId,
+    );
   }
   void saveDesktopState();
 }
@@ -574,6 +650,7 @@ export function useDesktopState() {
     assignments,
     sortPrefs,
     trashed,
+    trashedVersions,
     probes,
     loaded,
     allTags,
@@ -602,6 +679,12 @@ export function useDesktopState() {
     trashDoc,
     restoreDoc,
     trashedIds,
+    // version recycle bin
+    isVersionTrashed,
+    trashVersion,
+    restoreVersion,
+    trashedVersionList,
+    clearVersion,
     // tracked
     trackedPathFor,
     modificationFor,

@@ -58,3 +58,45 @@ export function shouldShowBaseVersion(
 ): boolean {
   return Boolean(version.parentId) && hasBranchingHistory(versions);
 }
+
+/**
+ * Return every version that descends from `rootId` (its children, their
+ * children, ...), excluding `rootId` itself. Descending is defined by the
+ * `parentId` link, so a version is a descendant when `rootId` appears anywhere
+ * in its ancestor chain.
+ *
+ * Order is a pre-order walk (root's first child first), which gives a stable,
+ * human-readable "v2, v3, v4" listing for confirm dialogs. The result is
+ * independent of the input array order only in *membership* - the walk order
+ * follows the input array's sibling sequence.
+ */
+export function descendantsOf(versions: Version[], rootId: string): Version[] {
+  // parent id -> direct children, preserving input order among siblings.
+  const childrenByParent = new Map<string, Version[]>();
+  for (const version of versions) {
+    if (version.parentId) {
+      const siblings = childrenByParent.get(version.parentId);
+      if (siblings) siblings.push(version);
+      else childrenByParent.set(version.parentId, [version]);
+    }
+  }
+
+  const out: Version[] = [];
+  const visited = new Set<string>();
+  const stack: Version[] = [...(childrenByParent.get(rootId) ?? [])];
+  while (stack.length > 0) {
+    const current = stack.shift()!;
+    // Defensive: real history is a proper forest, but guard against a malformed
+    // cyclic `parentId` link so a corrupt payload can't hang the UI.
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    out.push(current);
+    const children = childrenByParent.get(current.id);
+    if (children) {
+      // Prepend children so they are visited next (depth-first), after the
+      // already-queued siblings of `current`.
+      stack.unshift(...children);
+    }
+  }
+  return out;
+}

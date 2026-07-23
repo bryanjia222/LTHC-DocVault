@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Version } from "../data/mock";
 import {
+  descendantsOf,
   getParentLabel,
   hasBranchingHistory,
   shouldShowBaseVersion,
@@ -97,5 +98,53 @@ describe("getParentLabel", () => {
   it("falls back to the version's own label when it has no parent", () => {
     const versions = [v("v1")];
     expect(getParentLabel(versions[0], versions)).toBe("v1");
+  });
+});
+
+describe("descendantsOf", () => {
+  it("returns nothing for a leaf version with no children", () => {
+    const versions = [v("v1"), v("v2", "v1")];
+    expect(descendantsOf(versions, "v2")).toEqual([]);
+  });
+
+  it("returns nothing for an unknown root id", () => {
+    const versions = [v("v1"), v("v2", "v1")];
+    expect(descendantsOf(versions, "vX")).toEqual([]);
+  });
+
+  it("collects a single linear chain below the root, newest-first input", () => {
+    // Backend order (created_at desc); membership must be order-independent.
+    const versions = [v("v3", "v2"), v("v2", "v1"), v("v1")];
+    const got = descendantsOf(versions, "v1").map((x) => x.id);
+    expect(got.sort()).toEqual(["v2", "v3"]);
+  });
+
+  it("collects every descendant across a fork, including nested subtrees", () => {
+    // v1 -> {v2, v2a}; v2 -> v3; v2a -> v4. Deleting v1 must take all four.
+    const versions = [
+      v("v1"),
+      v("v2", "v1"),
+      v("v2a", "v1"),
+      v("v3", "v2"),
+      v("v4", "v2a"),
+    ];
+    const got = descendantsOf(versions, "v1").map((x) => x.id);
+    expect(got.sort()).toEqual(["v2", "v2a", "v3", "v4"]);
+  });
+
+  it("excludes the root itself and siblings outside its subtree", () => {
+    // Two roots share nothing: descendants of a must be only b.
+    const versions = [v("a"), v("b", "a"), v("c")];
+    expect(descendantsOf(versions, "a").map((x) => x.id)).toEqual(["b"]);
+    expect(descendantsOf(versions, "c")).toEqual([]);
+  });
+
+  it("does not loop on a cyclic parent link", () => {
+    // Defensive: a malformed cycle (a->b->a) must terminate, not hang. The
+    // visited guard caps the walk at the finite transitive closure, so the root
+    // itself surfaces once (a is reachable from itself via the cycle).
+    const versions = [v("a", "b"), v("b", "a")];
+    const got = descendantsOf(versions, "a").map((x) => x.id);
+    expect([...got].sort()).toEqual(["a", "b"]);
   });
 });

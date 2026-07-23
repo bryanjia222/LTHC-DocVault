@@ -75,6 +75,7 @@ describe("useDesktopState - get_desktop_state contract", () => {
       assignments: { docA: "p1" },
       sort_prefs: { __all__: { key: "updated", direction: "desc" } },
       trashed: ["docA"],
+      trashed_versions: [{ document_id: "docA", version_id: "a1" }],
     });
     await ds.loadDesktopState();
     expect(ds.tags.value).toEqual({ docA: ["legal"] });
@@ -87,6 +88,9 @@ describe("useDesktopState - get_desktop_state contract", () => {
       __all__: { key: "updated", direction: "desc" },
     });
     expect(ds.trashed.value).toEqual(["docA"]);
+    expect(ds.trashedVersions.value).toEqual([
+      { documentId: "docA", versionId: "a1" },
+    ]);
   });
 
   it("defaults trashed to empty when the payload omits it", async () => {
@@ -131,6 +135,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         assignments: {},
         sort_prefs: {},
         trashed: [],
+        trashed_versions: [],
       });
     });
   });
@@ -159,6 +164,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         assignments: {},
         sort_prefs: {},
         trashed: [],
+        trashed_versions: [],
       });
     });
   });
@@ -173,6 +179,7 @@ describe("useDesktopState - set_desktop_state contract", () => {
         assignments: {},
         sort_prefs: {},
         trashed: [],
+        trashed_versions: [],
       });
     });
   });
@@ -321,6 +328,7 @@ describe("useDesktopState - projects", () => {
         assignments: {},
         sort_prefs: {},
         trashed: [],
+        trashed_versions: [],
       });
     });
   });

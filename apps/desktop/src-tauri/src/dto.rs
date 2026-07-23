@@ -130,6 +130,24 @@ pub struct DesktopStateSlice {
     /// it (and unmanages the document in the backend).
     #[serde(default)]
     pub trashed: Vec<String>,
+    /// Versions soft-deleted to the recycle bin, scoped by their document
+    /// (version ids are unique only within a document, so the pair identifies
+    /// one trashed version). The backend still holds these versions until the
+    /// user permanently deletes them; this list only suppresses them from the
+    /// version list/graph. Restoring removes the pair; permanent delete clears
+    /// it (and deletes the version in the backend). A version whose document is
+    /// itself trashed is redundant - it goes with the document - but harmless.
+    #[serde(default)]
+    pub trashed_versions: Vec<TrashedVersion>,
+}
+
+/// A version soft-deleted to the recycle bin. `document_id` scopes `version_id`
+/// (version ids are unique only per document), so the pair identifies one
+/// trashed version.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrashedVersion {
+    pub document_id: String,
+    pub version_id: String,
 }
 
 /// A persisted document-table sort for one project view. `key` is the column

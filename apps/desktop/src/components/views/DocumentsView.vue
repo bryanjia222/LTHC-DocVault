@@ -31,6 +31,7 @@ import {
   hasBranchingHistory,
   getParentLabel,
   shouldShowBaseVersion,
+  descendantsOf,
 } from "../../utils/versionTree";
 import { TYPE_CATEGORIES } from "../../utils/typeCategory";
 import { extOf } from "../../utils/file";
@@ -71,7 +72,7 @@ const desktop = useDesktopState();
 const { openCommitModified, openDocumentStatus, openRename, openNoteEdit } =
   useDialogs();
 const { log } = useActivityLog();
-const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument } =
+const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument, deleteVersion } =
   useVaultActions();
 
 /** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
@@ -125,8 +126,36 @@ const previewOpen = ref(false);
  */
 const previewVersionRef = ref<Version | null>(null);
 
-const versions = computed(() => selectedDocument.value?.versions ?? []);
+const versions = computed(() => {
+  const doc = selectedDocument.value;
+  if (!doc) return [];
+  // Hide recycle-bin (soft-deleted) versions from the working history. They are
+  // still on the document (the unfiltered `selectedDocument.versions` list the
+  // actions use for subtree computation), just not shown here.
+  return doc.versions.filter((v) => !desktop.isVersionTrashed(doc.id, v.id));
+});
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
+/**
+ * Whether the version-menu "delete" item is enabled. Mirrors the action's
+ * guards: the current version (directly or anywhere in this version's subtree)
+ * and the document's whole history are never deletable here. The action still
+ * defends, so this only controls the greyed-out state + tooltip. Uses the
+ * UNFILTERED version list (`selectedDocument.versions`) so a trashed descendant
+ * doesn't hide a current-version-in-subtree block.
+ */
+const versionDeleteDisabled = computed(() => {
+  const doc = selectedDocument.value;
+  const ver = selectedVersion.value;
+  if (!doc || !ver) return true;
+  const subtreeIds = [
+    ver.id,
+    ...descendantsOf(doc.versions, ver.id).map((d) => d.id),
+  ];
+  const current = doc.versions.find((v) => v.status === "current");
+  if (current && subtreeIds.includes(current.id)) return true;
+  if (subtreeIds.length >= doc.versions.length) return true;
+  return false;
+});
 const modificationStatus = computed<ModificationStatus>(
   () => selectedDocument.value?.modification ?? "none",
 );
@@ -357,6 +386,19 @@ function versionMenuExport() {
 function versionMenuRefresh() {
   closeVersionMenu();
   void refreshAll();
+}
+
+/**
+ * Soft-delete the right-clicked version to the recycle bin (with its
+ * descendants). The handler is disabled when the guards would block it, but
+ * `deleteVersion` re-checks and surfaces a message if invoked anyway.
+ */
+function versionMenuDelete() {
+  const doc = selectedDocument.value;
+  const version = selectedVersion.value;
+  closeVersionMenu();
+  if (!doc || !version) return;
+  void deleteVersion(doc.id, version.id);
 }
 
 function onContextMenuKeydown(event: KeyboardEvent) {
@@ -1083,6 +1125,18 @@ onBeforeUnmount(() => {
         >
           <ArrowRightLeft aria-hidden="true" />
           {{ t("versionMenu.checkout", { label: selectedVersion?.label ?? "" }) }}
+        </button>
+        <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item danger"
+          role="menuitem"
+          :disabled="versionDeleteDisabled"
+          :title="versionDeleteDisabled ? t('versionMenu.deleteBlockedCurrent') : ''"
+          @click="versionMenuDelete"
+        >
+          <Trash2 aria-hidden="true" />
+          {{ t("versionMenu.delete", { label: selectedVersion?.label ?? "" }) }}
         </button>
         <div class="ctx-divider"></div>
         <button

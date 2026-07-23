@@ -77,6 +77,14 @@ export interface ProjectDef {
   parentId: string | null;
 }
 
+/** A version soft-deleted to the recycle bin (desktop-local hide). Version ids
+ * are unique only within a document, so the pair identifies one trashed
+ * version. The backend still holds the version until permanently deleted. */
+export interface TrashedVersion {
+  documentId: string;
+  versionId: string;
+}
+
 /** Desktop-local annotations for the active vault (tags + tracked files). */
 export interface DesktopState {
   tags: Record<string, string[]>;
@@ -89,6 +97,8 @@ export interface DesktopState {
   sortPrefs: Record<string, SortPref>;
   /** Document ids soft-deleted to the recycle bin (desktop-local hide). */
   trashed: string[];
+  /** Versions soft-deleted to the recycle bin, scoped by their document. */
+  trashedVersions: TrashedVersion[];
 }
 
 /** A persisted document-table sort for one project view. */
@@ -360,6 +370,7 @@ export const desktopState: DesktopState = {
   },
   sortPrefs: {},
   trashed: [],
+  trashedVersions: [],
 };
 
 export const mockProbes: Record<string, FileProbe> = {

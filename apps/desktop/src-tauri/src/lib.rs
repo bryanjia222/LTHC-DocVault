@@ -119,6 +119,7 @@ pub fn run() {
             jobs::export_version,
             jobs::checkout_version,
             jobs::delete_document,
+            jobs::delete_versions,
             jobs::rename_document,
             jobs::set_version_note,
             jobs::list_jobs,

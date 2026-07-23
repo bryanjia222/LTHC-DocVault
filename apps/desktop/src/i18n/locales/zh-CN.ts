@@ -133,9 +133,19 @@ export const zhCN = {
     permanentDeleteAgain:
       "再次确认：永久删除「{name}」的全部历史记录？此操作不可撤销。",
     emptyTrash:
-      "清空回收站？将永久删除回收站中的 {count} 个文档及其全部版本与备份快照，且无法恢复。",
+      "清空回收站？将永久删除回收站中的 {count} 项（文档与版本）及其备份快照，且无法恢复。",
     emptyTrashAgain:
-      "再次确认：永久删除回收站中全部 {count} 个文档的所有历史记录？此操作不可撤销。",
+      "再次确认：永久删除回收站中全部 {count} 项的历史记录？此操作不可撤销。",
+    deleteVersion:
+      "将文档「{name}」的版本 {version} 移入回收站？",
+    deleteVersionDescendants:
+      "将文档「{name}」的版本 {version} 移入回收站？这将同时移入其衍生版本：{descendants}",
+    permanentDeleteVersion:
+      "永久删除文档「{name}」的版本 {version}？其归档与备份快照都将被移除，且无法恢复。",
+    permanentDeleteVersionDescendants:
+      "永久删除文档「{name}」的版本 {version}？这将同时永久删除其衍生版本：{descendants}",
+    permanentDeleteVersionAgain:
+      "再次确认：永久删除版本 {version}？此操作不可撤销。",
   },
   actionLogs: {
     refresh: "刷新仓库",
@@ -153,6 +163,8 @@ export const zhCN = {
     delete: "删除文档",
     restore: "从回收站恢复文档",
     emptyTrash: "清空回收站",
+    deleteVersion: "删除版本",
+    restoreVersion: "从回收站恢复版本",
     preview: "预览文档",
     history: "打开版本历史",
     jobCenter: "打开任务中心",
@@ -232,6 +244,9 @@ export const zhCN = {
     replaceCommit: "替换提交",
     replaceCommitConfirm:
       "文档「{name}」有未提交的修改。是否先提交当前修改（作为新版本），再替换为新文件？",
+    replaceCommitTypeMismatchTitle: "文件类型不符",
+    replaceCommitTypeMismatch:
+      "文档「{name}」的替换文件必须是同类型文件（同后缀）。应为「{expected}」，实际为「{picked}」。",
     commitModifiedDisabled: "文档未修改，无需提交",
     open: "打开",
     properties: "属性",
@@ -245,6 +260,12 @@ export const zhCN = {
     preview: "预览 {label} 版本",
     checkout: "切换到 {label} 版本",
     export: "导出 {label} 版本",
+    delete: "删除 {label} 版本",
+    deleteBlockedTitle: "无法删除版本",
+    deleteBlockedCurrent:
+      "当前版本位于该版本的历史之中。请先切换到其历史之外的版本，再进行删除。",
+    deleteBlockedLast:
+      "这是该文档唯一的版本——如需移除，请直接删除整个文档。",
   },
   trash: {
     title: "回收站",
@@ -255,6 +276,8 @@ export const zhCN = {
     permanentDelete: "永久删除",
     emptyTrash: "清空回收站",
     permanentDeleteHint: "永久删除将移除该文档的所有版本与备份快照，且无法恢复。",
+    versionsTitle: "已删除的版本",
+    versionsCount: "{count} 个版本",
   },
   modification: {
     none: "未追踪",
@@ -347,6 +370,9 @@ export const zhCN = {
     cleared: "活动日志已清空",
     movedToTrash: "已将「{target}」移入回收站",
     restored: "已从回收站恢复「{target}」",
+    versionMovedToTrash:
+      "已将文档「{name}」的版本 {version} 移入回收站（共 {count} 个版本）",
+    versionRestored: "已从回收站恢复文档「{name}」的版本 {version}",
     trashEmpty: "回收站为空",
     trashEmptied: "已清空回收站（{count} 个文档）",
     commandRun: "执行命令：{command}",

@@ -8,16 +8,23 @@ import type { Document } from "../../data/mock";
 
 /*
  * Recycle bin view. Documents soft-deleted from the document list (the
- * desktop-local `trashed` set) are listed here. Restore un-hides a document
- * (the vault still holds it and all its history); permanently delete unmanages
- * it in the backend (double-confirmed, removes all versions + snapshots). Empty
- * recycle bin permanently deletes every trashed document at once.
+ * desktop-local `trashed` set) are listed here, alongside individually
+ * soft-deleted versions (`trashed_versions`). Restore un-hides a document or
+ * version (the vault still holds it and the rest of its history); permanently
+ * delete unmanages it in the backend (double-confirmed, removes versions /
+ * snapshots). Empty recycle bin permanently deletes every trashed document and
+ * version at once.
  */
 
 const { t } = useI18n();
-const { trashedDocuments } = useDocuments();
-const { restoreDocument, permanentlyDeleteDocument, emptyTrash } =
-  useVaultActions();
+const { trashedDocuments, trashedVersions } = useDocuments();
+const {
+  restoreDocument,
+  permanentlyDeleteDocument,
+  restoreVersion,
+  permanentlyDeleteVersion,
+  emptyTrash,
+} = useVaultActions();
 
 function currentVersionLabel(document: Document): string {
   return document.versions.find((v) => v.status === "current")?.label ?? "-";
@@ -31,8 +38,21 @@ function onPermanentlyDelete(docId: string) {
   void permanentlyDeleteDocument(docId);
 }
 
+function onRestoreVersion(docId: string, versionId: string) {
+  restoreVersion(docId, versionId);
+}
+
+function onPermanentlyDeleteVersion(docId: string, versionId: string) {
+  void permanentlyDeleteVersion(docId, versionId);
+}
+
 function onEmptyTrash() {
   void emptyTrash();
+}
+
+/** Whether the bin has anything to empty (documents or versions). */
+function hasTrashItems(): boolean {
+  return trashedDocuments.value.length > 0 || trashedVersions.value.length > 0;
 }
 </script>
 
@@ -48,8 +68,11 @@ function onEmptyTrash() {
           <span v-if="trashedDocuments.length" class="count">{{
             t("trash.count", { count: trashedDocuments.length })
           }}</span>
+          <span v-if="trashedVersions.length" class="count">{{
+            t("trash.versionsCount", { count: trashedVersions.length })
+          }}</span>
           <button
-            v-if="trashedDocuments.length"
+            v-if="hasTrashItems()"
             class="danger"
             type="button"
             @click="onEmptyTrash"
@@ -60,7 +83,7 @@ function onEmptyTrash() {
       </div>
 
       <div class="table-wrap">
-        <table>
+        <table v-if="trashedDocuments.length">
           <thead>
             <tr>
               <th>{{ t("documents.columns.name") }}</th>
@@ -106,11 +129,65 @@ function onEmptyTrash() {
                 </div>
               </td>
             </tr>
-            <tr v-if="trashedDocuments.length === 0">
-              <td colspan="5" class="empty-state">{{ t("trash.empty") }}</td>
-            </tr>
           </tbody>
         </table>
+
+        <div v-if="trashedVersions.length" class="versions-section">
+          <h3 class="subheading">{{ t("trash.versionsTitle") }}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>{{ t("documents.columns.name") }}</th>
+                <th>{{ t("documents.columns.currentVersion") }}</th>
+                <th>{{ t("documents.columns.updated") }}</th>
+                <th class="actions-col">{{ t("trash.title") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="item in trashedVersions"
+                :key="`${item.document.id}:${item.version.id}`"
+              >
+                <td>
+                  <div class="name-cell">
+                    <span class="file-type">{{
+                      extOf(item.document.originalFilename) ?? ""
+                    }}</span>
+                    <strong>{{ item.document.name }}</strong>
+                  </div>
+                </td>
+                <td>{{ item.version.label }}</td>
+                <td>{{ item.version.createdAt }}</td>
+                <td class="actions-col">
+                  <div class="row-actions">
+                    <button
+                      class="chip"
+                      type="button"
+                      :title="t('trash.restore')"
+                      @click="onRestoreVersion(item.document.id, item.version.id)"
+                    >
+                      <RotateCcw aria-hidden="true" />
+                      {{ t("trash.restore") }}
+                    </button>
+                    <button
+                      class="chip danger"
+                      type="button"
+                      :title="t('trash.permanentDeleteHint')"
+                      @click="
+                        onPermanentlyDeleteVersion(item.document.id, item.version.id)
+                      "
+                    >
+                      <Trash2 aria-hidden="true" />
+                      {{ t("trash.permanentDelete") }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p v-if="!hasTrashItems()" class="empty-state">{{ t("trash.empty") }}</p>
       </div>
     </section>
   </section>
@@ -262,8 +339,19 @@ button.danger:hover {
   background: color-mix(in srgb, var(--danger-text) 12%, var(--bg-surface));
 }
 
+.versions-section {
+  margin-top: 24px;
+}
+
+.subheading {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .empty-state {
-  height: auto;
+  margin: 0;
   padding: 36px 12px;
   color: var(--text-muted);
   font-style: italic;

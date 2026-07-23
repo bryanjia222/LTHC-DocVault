@@ -89,12 +89,21 @@ const selectedDocument = computed<Document | undefined>(
     documents.value.find((document) => !desktop.isTrashed(document.id)),
 );
 
-const selectedVersion = computed<Version | undefined>(
-  () =>
-    selectedDocument.value?.versions.find(
-      (version) => version.id === selectedVersionId.value,
-    ) ?? selectedDocument.value?.versions[0],
-);
+const selectedVersion = computed<Version | undefined>(() => {
+  const doc = selectedDocument.value;
+  if (!doc) return undefined;
+  // A trashed version is hidden from the history, so never let it be the
+  // active selection - fall back to the first visible version instead. This
+  // keeps the detail panel parked on something the user can still see after a
+  // version is soft-deleted.
+  const visible = doc.versions.filter(
+    (version) => !desktop.isVersionTrashed(doc.id, version.id),
+  );
+  return (
+    visible.find((version) => version.id === selectedVersionId.value) ??
+    visible[0]
+  );
+});
 
 export function useDocuments() {
   const filteredDocuments = computed<Document[]>(() => {
@@ -127,6 +136,28 @@ export function useDocuments() {
   /** Documents currently in the recycle bin (soft-deleted, hidden from the list). */
   const trashedDocuments = computed<Document[]>(() =>
     documents.value.filter((d) => desktop.isTrashed(d.id)),
+  );
+
+  /**
+   * Versions currently soft-deleted to the recycle bin, resolved to their
+   * document + version objects for the bin view. Excludes versions whose
+   * document is itself in the bin - those are removed wholesale by the
+   * document's own delete, so listing them separately would be misleading. The
+   * resolution uses the unfiltered vault list (trashed versions are absent from
+   * the enriched `documents` view only if filtered elsewhere; here we read the
+   * raw source so a just-trashed version is always found).
+   */
+  const trashedVersions = computed<{ document: Document; version: Version }[]>(
+    () => {
+      const out: { document: Document; version: Version }[] = [];
+      for (const entry of desktop.trashedVersionList()) {
+        if (desktop.isTrashed(entry.documentId)) continue;
+        const doc = vaultDocuments.value.find((d) => d.id === entry.documentId);
+        const version = doc?.versions.find((v) => v.id === entry.versionId);
+        if (doc && version) out.push({ document: doc, version });
+      }
+      return out;
+    },
   );
 
   const totalVersions = computed(() =>
@@ -211,6 +242,7 @@ export function useDocuments() {
     documents,
     filteredDocuments,
     trashedDocuments,
+    trashedVersions,
     selectedDocument,
     selectedDocumentId,
     selectedVersion,

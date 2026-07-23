@@ -275,6 +275,22 @@ async function deleteDocument(params: {
 }
 
 /**
+ * Delete specific versions of a document (not the document itself): forgets
+ * their restic snapshots, removes the DB rows, and deletes each version's local
+ * archive directory. Spawned as a job; returns the job id. The caller owns the
+ * subtree policy - it passes every version id to remove (a version plus its
+ * descendants) so no child is ever orphaned. The backend refuses the document's
+ * current version as a defensive guard. Desktop-local recycle-bin entries are
+ * cleared by the caller once the job reports success.
+ */
+async function deleteVersions(params: {
+  document_id: string;
+  version_ids: string[];
+}): Promise<string> {
+  return invoke<string>("delete_versions", params);
+}
+
+/**
  * Rename a document (DB name only - versions are untouched). Synchronous: it
  * resolves once the name is updated, so the caller reloads the document list.
  */
@@ -558,6 +574,7 @@ export function useVault() {
     exportWorkingCopy,
     checkoutVersion,
     deleteDocument,
+    deleteVersions,
     renameDocument,
     setVersionNote,
     setLogLevel,

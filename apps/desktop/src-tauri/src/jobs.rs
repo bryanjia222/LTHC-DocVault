@@ -200,6 +200,34 @@ pub fn delete_document(
     Ok(job_id)
 }
 
+/// Delete specific versions of a document by id, keeping the document and its
+/// other versions. Spawns a `Delete` job - restic forget/prune of the deleted
+/// snapshots can be slow. Returns the spawned job id; state arrives via
+/// `job:update`. The caller passes the version plus any descendants it
+/// confirmed deleting (the crate deletes exactly those ids - it never reparents
+/// or orphans survivors, and refuses the current version).
+#[tauri::command(rename_all = "snake_case")]
+pub fn delete_versions(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    document_id: String,
+    version_ids: Vec<String>,
+) -> Result<String, String> {
+    let target_label = lookup_document_name(&state, &document_id)?;
+    let document_ref = DocumentRef::IdPrefix(document_id);
+    let vault = state.vault.clone();
+    let on_event = make_emitter(app);
+    let job_id = state.jobs.spawn(
+        JobKind::Delete,
+        target_label,
+        on_event,
+        move |_: &dyn Fn(Option<f64>), cancel: &AtomicBool| -> JobOutcome {
+            execute_delete_versions(&vault, &document_ref, &version_ids, cancel)
+        },
+    );
+    Ok(job_id)
+}
+
 /// Rename a document's display name. Synchronous (a single SQL UPDATE); not a
 /// job. Does not touch the on-disk source file or any version's filename.
 #[tauri::command(rename_all = "snake_case")]
@@ -379,6 +407,28 @@ fn execute_delete(
         return JobOutcome::Failed("vault not initialized".to_owned());
     };
     match vault.delete_document(document_ref, cancel) {
+        Ok(_) => JobOutcome::Succeeded,
+        Err(CoreError::Storage(StorageError::Restic(ResticError::Cancelled))) => {
+            JobOutcome::Cancelled
+        }
+        Err(e) => JobOutcome::Failed(e.to_string()),
+    }
+}
+
+fn execute_delete_versions(
+    vault: &Arc<std::sync::Mutex<Option<docvault_core::DocVault>>>,
+    document_ref: &DocumentRef,
+    version_ids: &[String],
+    cancel: &AtomicBool,
+) -> JobOutcome {
+    let vault = match vault.lock() {
+        Ok(guard) => guard,
+        Err(e) => return JobOutcome::Failed(e.to_string()),
+    };
+    let Some(vault) = vault.as_ref() else {
+        return JobOutcome::Failed("vault not initialized".to_owned());
+    };
+    match vault.delete_versions(document_ref, version_ids, cancel) {
         Ok(_) => JobOutcome::Succeeded,
         Err(CoreError::Storage(StorageError::Restic(ResticError::Cancelled))) => {
             JobOutcome::Cancelled

@@ -25,7 +25,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 
-use crate::dto::{DesktopStateSlice, FileProbe, FileStat, ProjectDef, SortPref, TrackedFile};
+use crate::dto::{
+    DesktopStateSlice, FileProbe, FileStat, ProjectDef, SortPref, TrackedFile, TrashedVersion,
+};
 use crate::state::{self, AppState};
 
 /// On-disk shape: a versioned map of vault root -> slice. `version` is reserved
@@ -192,8 +194,8 @@ pub fn get_desktop_state(
 }
 
 /// Replace the current vault's slice (tags, tracked, projects, assignments,
-/// sort_prefs, trashed) and persist. Refuses when no vault is open, since there
-/// is no root to key the slice by.
+/// sort_prefs, trashed, trashed_versions) and persist. Refuses when no vault is
+/// open, since there is no root to key the slice by.
 #[tauri::command(rename_all = "snake_case")]
 #[allow(clippy::too_many_arguments)] // each arg maps 1:1 to the JS payload
 pub fn set_desktop_state(
@@ -205,6 +207,7 @@ pub fn set_desktop_state(
     assignments: BTreeMap<String, String>,
     sort_prefs: BTreeMap<String, SortPref>,
     trashed: Vec<String>,
+    trashed_versions: Vec<TrashedVersion>,
 ) -> Result<(), String> {
     let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
     let mut file = load_file(&app)?;
@@ -217,6 +220,7 @@ pub fn set_desktop_state(
             assignments,
             sort_prefs,
             trashed,
+            trashed_versions,
         },
     );
     save_file(&app, &file)
@@ -301,6 +305,7 @@ mod tests {
                     m
                 },
                 trashed: vec!["docA".to_owned()],
+                trashed_versions: Vec::new(),
             },
         );
         save_file_at(&path, &file).unwrap();
@@ -356,6 +361,7 @@ mod tests {
                 },
                 sort_prefs: BTreeMap::new(),
                 trashed: Vec::new(),
+                trashed_versions: Vec::new(),
             },
         );
         file.vaults.insert(
@@ -373,6 +379,7 @@ mod tests {
                 assignments: BTreeMap::new(),
                 sort_prefs: BTreeMap::new(),
                 trashed: Vec::new(),
+                trashed_versions: Vec::new(),
             },
         );
 
