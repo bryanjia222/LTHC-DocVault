@@ -525,13 +525,22 @@ onBeforeUnmount(() => {
   position: relative;
   min-height: 0;
   flex: 1;
-  overflow: auto;
+  /* Always reserve the vertical scrollbar (overflow-y: scroll) so the content
+     width is identical before pptx-renderer measures it and after its list
+     render. pptx-renderer sizes each slide wrapper to the container's
+     clientWidth and re-patches every wrapper post-render if that width changed
+     (`correctListMetricsIfNeeded`) - which fires when a bar appears and narrows
+     the container: the pre-patch width briefly overflows (a horizontal
+     scrollbar flashes for one frame) and the re-patch itself is the flash. A
+     permanently-reserved slot keeps clientWidth constant so no patch runs and
+     the centered wrapper leaves no asymmetric gap (the "left white edge").
+     `scrollbar-gutter: stable` is the textbook fix but proved unreliable in the
+     WebView (it must reserve even when the box is not overflowing); overflow-y:
+     scroll is the bullet-proof equivalent. overflow-x: hidden is a belt-and-
+     braces guard since fitMode "contain" already fits the slide to the width. */
+  overflow-y: scroll;
+  overflow-x: hidden;
   padding: 18px;
-  /* Reserve the vertical-scrollbar gutter so content width stays constant when a
-     scrollbar appears/disappears. Otherwise pptx-renderer's list mode re-
-     measures and rescales every slide on the frame the bar appears - visible
-     as a one-frame width jitter. */
-  scrollbar-gutter: stable;
 }
 
 .preview-status {
