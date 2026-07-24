@@ -7,6 +7,11 @@ import { useNavigation, type SettingsTab } from "../../composables/useNavigation
 import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
+import {
+  useTableColumns,
+  ALL_COLUMN_IDS,
+  type ColumnId,
+} from "../../composables/useTableColumns";
 import StatusVaultCard from "../status/StatusVaultCard.vue";
 import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
@@ -17,6 +22,12 @@ const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
 const { doubleClickAction, setDoubleClickAction } = useDoubleClickPref();
+const { columns, setVisible, resetColumns, isAlwaysVisible } =
+  useTableColumns();
+
+function onToggleColumn(id: ColumnId, event: Event) {
+  setVisible(id, (event.target as HTMLInputElement).checked);
+}
 
 // Dev-only reset card: vite strips this in production builds, so the
 // destructive test actions never ship to end users.
@@ -193,6 +204,33 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
         </div>
       </div>
 
+      <div class="surface settings-card">
+        <h3>{{ t("settings.columnsSection") }}</h3>
+        <p class="field-hint">{{ t("settings.columnsHint") }}</p>
+        <div class="column-toggles">
+          <label
+            v-for="id in ALL_COLUMN_IDS"
+            :key="id"
+            class="column-toggle"
+            :class="{ disabled: isAlwaysVisible(id) }"
+          >
+            <input
+              type="checkbox"
+              :checked="columns[id].visible"
+              :disabled="isAlwaysVisible(id)"
+              @change="onToggleColumn(id, $event)"
+            />
+            <span>{{ t(`documents.columns.${id}`) }}</span>
+            <span v-if="isAlwaysVisible(id)" class="always-on-tag">{{
+              t("settings.columnsAlwaysOn")
+            }}</span>
+          </label>
+        </div>
+        <button type="button" class="columns-reset" @click="resetColumns">
+          {{ t("settings.columnsReset") }}
+        </button>
+      </div>
+
       <div v-if="isDev" class="surface settings-card dev-card">
         <h3>{{ t("dev.title") }}</h3>
         <p class="field-hint">{{ t("dev.hint") }}</p>
@@ -347,5 +385,55 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
 
 .dev-card {
   padding: 18px;
+}
+
+.column-toggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin-top: 6px;
+}
+
+.column-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.column-toggle.disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.column-toggle input {
+  margin: 0;
+}
+
+.always-on-tag {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.columns-reset {
+  margin-top: 14px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.columns-reset:hover {
+  background: var(--bg-hover);
 }
 </style>

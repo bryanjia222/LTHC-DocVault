@@ -476,6 +476,10 @@ export const enUS = {
     doubleClickPreview: "Preview",
     doubleClickOpen: "Open",
     doubleClickHint: "What double-clicking a document row does.",
+    columnsSection: "Table columns",
+    columnsHint: "Drag a header's right edge to resize a column; drag below the minimum width and release to hide it. Tick below to show it.",
+    columnsReset: "Reset widths & visibility",
+    columnsAlwaysOn: "Always shown",
   },
   commandPalette: {
     title: "Command palette",

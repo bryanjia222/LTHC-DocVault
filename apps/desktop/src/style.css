@@ -380,6 +380,7 @@ small {
 /* File type tag */
 .file-type {
   display: inline-flex;
+  flex-shrink: 0;
   width: 42px;
   height: 22px;
   align-items: center;

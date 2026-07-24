@@ -29,6 +29,11 @@ import { useVaultActions } from "../../composables/useVaultActions";
 import { useContextMenu } from "../../composables/useContextMenu";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import {
+  useTableColumns,
+  COLUMN_MIN_FALLBACK,
+  type ColumnId,
+} from "../../composables/useTableColumns";
+import {
   hasBranchingHistory,
   getParentLabel,
   shouldShowBaseVersion,
@@ -76,6 +81,134 @@ const { log } = useActivityLog();
 const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument, deleteVersion } =
   useVaultActions();
 const { doubleClickAction } = useDoubleClickPref();
+
+/*
+ * Resizable, hideable document-table columns. Each visible column has an
+ * explicit pixel width (table-layout: fixed + <colgroup>); a trailing filler
+ * <col> soaks up the remainder so the table always fills its width.
+ *
+ * Resize "knob" feel: dragging a header's right-edge divider shrinks the column
+ * linearly down to a content-based minimum (measured from the cells - e.g. the
+ * "已同步" pill width), then FREEZES at that minimum while the mouse keeps
+ * moving left (the resistance). If the mouse over-travels to the previous
+ * column's right edge (this column's left edge), the drag arms to hide: on
+ * release the column hides. Widths + visibility persist via the composable.
+ */
+const { columns, visibleColumns, setWidth, commitResize, isAlwaysVisible } =
+  useTableColumns();
+const tableWrapRef = ref<HTMLElement | null>(null);
+const tableRef = ref<HTMLElement | null>(null);
+const wrapWidth = ref(0);
+let resizeObserver: ResizeObserver | null = null;
+
+const sumVisibleWidths = computed(() =>
+  visibleColumns.value.reduce((sum, id) => sum + columns[id].width, 0),
+);
+const fillerWidth = computed(() =>
+  Math.max(0, wrapWidth.value - sumVisibleWidths.value),
+);
+const tableWidth = computed(
+  () => sumVisibleWidths.value + fillerWidth.value,
+);
+// Colspan for the group-divider / empty-state rows: every visible column plus
+// the filler column.
+const fullColspan = computed(() => visibleColumns.value.length + 1);
+
+// Per-column selector for the "essential" content whose width sets the
+// resistance minimum: the pill for pill columns, the file-type badge for name
+// (the name text ellipsizes past it), the cell text for plain-text columns.
+const MEASURE_SELECTOR: Record<ColumnId, string> = {
+  name: ".file-type",
+  owner: ".cell-text",
+  currentVersion: ".cell-text",
+  status: ".status-pill",
+  modification: ".mod-pill",
+  updated: ".cell-text",
+};
+// Extra room past the file-type badge so a sliver of the name stays visible at
+// the minimum (only the name column).
+const NAME_RESERVE = 28;
+const TD_HPAD = 20; // th/td horizontal padding (0 10px)
+const MEASURE_BUFFER = 4;
+const MEASURE_SAMPLE = 40; // cap rows measured, to bound cost on big lists
+
+/** Measure a column's content-based minimum width from the rendered cells +
+ *  header label. This is the resistance point below which the column freezes
+ *  during a drag (and never shrinks). Falls back when there's nothing to
+ *  measure (empty table / no DOM). */
+function measureMinWidth(id: ColumnId): number {
+  const el = tableRef.value;
+  if (!el) return COLUMN_MIN_FALLBACK;
+  const label = el.querySelector(
+    `th[data-col="${id}"] .th-label`,
+  ) as HTMLElement | null;
+  const headerW = label ? label.scrollWidth : 0;
+  const cells = el.querySelectorAll<HTMLElement>(`td[data-col="${id}"]`);
+  let maxCell = 0;
+  let count = 0;
+  for (const cell of Array.from(cells)) {
+    if (count++ >= MEASURE_SAMPLE) break;
+    const inner = cell.querySelector<HTMLElement>(MEASURE_SELECTOR[id]);
+    // scrollWidth (not offsetWidth) so an ellipsizing .cell-text reports its
+    // true text width rather than the clipped visible width.
+    const w = inner ? inner.scrollWidth : cell.scrollWidth;
+    if (w > maxCell) maxCell = w;
+  }
+  const reserve = id === "name" ? NAME_RESERVE : 0;
+  const min = Math.max(headerW, maxCell + reserve) + TD_HPAD + MEASURE_BUFFER;
+  return Math.max(min, COLUMN_MIN_FALLBACK);
+}
+
+// Active column-resize drag state. Listeners are attached to `window` for the
+// duration of a drag so the pointer can leave the header while still moving.
+// `dragMinWidth` is the measured resistance minimum; `armedColId` is set when
+// the mouse has over-traveled to the column's left edge (hide on release).
+let dragId: ColumnId | null = null;
+let dragStartX = 0;
+let dragStartWidth = 0;
+let dragMinWidth = COLUMN_MIN_FALLBACK;
+const armedColId = ref<ColumnId | null>(null);
+
+function onResizeMove(event: MouseEvent) {
+  if (dragId === null) return;
+  // Raw width (where the mouse says the right edge should be), ignoring the
+  // minimum clamp. The displayed width freezes at dragMinWidth when raw drops
+  // below it; raw keeps tracking so we can detect the over-travel to hide.
+  const raw = dragStartWidth + (event.clientX - dragStartX);
+  setWidth(dragId, Math.max(dragMinWidth, raw));
+  // Arm hide once the mouse reaches the previous column's right edge (this
+  // column's left edge): raw width <= 0 means the handle crossed the left edge.
+  // Always-visible columns can't hide, so don't arm/dim them (no false cue).
+  armedColId.value =
+    raw <= 0 && !isAlwaysVisible(dragId) ? dragId : null;
+}
+
+function onResizeEnd() {
+  if (dragId !== null) {
+    commitResize(dragId, columns[dragId].width, armedColId.value !== null);
+  }
+  dragId = null;
+  armedColId.value = null;
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  window.removeEventListener("mousemove", onResizeMove);
+  window.removeEventListener("mouseup", onResizeEnd);
+}
+
+function onResizeStart(id: ColumnId, event: MouseEvent) {
+  dragId = id;
+  dragStartX = event.clientX;
+  dragStartWidth = columns[id].width;
+  dragMinWidth = measureMinWidth(id);
+  // If the column somehow sits below its content min, snap it up first.
+  if (dragStartWidth < dragMinWidth) setWidth(id, dragMinWidth);
+  // A col-resize cursor + no text selection across the whole window for the
+  // drag, even when the pointer leaves the header.
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("mousemove", onResizeMove);
+  window.addEventListener("mouseup", onResizeEnd);
+}
 
 /** The three user-facing type categories (文档 / PPT / 表格) for the filter chips. */
 const typeCategories = TYPE_CATEGORIES;
@@ -451,6 +584,18 @@ onMounted(() => {
   pollHandle = setInterval(() => {
     void desktop.refreshModifications();
   }, POLL_INTERVAL_MS);
+  // Track the table wrap width so the filler column can absorb the remaining
+  // space (keeping the table edge-to-edge) without disturbing the explicit
+  // per-column widths that dragging controls.
+  if (tableWrapRef.value && typeof ResizeObserver !== "undefined") {
+    wrapWidth.value = tableWrapRef.value.clientWidth;
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        wrapWidth.value = entry.contentRect.width;
+      }
+    });
+    resizeObserver.observe(tableWrapRef.value);
+  }
 });
 
 // Esc closes whichever right-click menu is open; listener bound only while one
@@ -465,6 +610,15 @@ watch([docMenuOpen, versionMenuOpen], ([d, v]) => {
 
 onBeforeUnmount(() => {
   if (pollHandle !== null) clearInterval(pollHandle);
+  if (resizeObserver !== null) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  // In case a column-resize drag is still in flight when the view unmounts.
+  window.removeEventListener("mousemove", onResizeMove);
+  window.removeEventListener("mouseup", onResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
   window.removeEventListener("keydown", onContextMenuKeydown);
 });
 </script>
@@ -541,69 +695,45 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="table-wrap">
-        <table>
+      <div ref="tableWrapRef" class="table-wrap">
+        <table ref="tableRef" :style="{ width: tableWidth + 'px' }">
+          <colgroup>
+            <col
+              v-for="id in visibleColumns"
+              :key="id"
+              :style="{ width: columns[id].width + 'px' }"
+            />
+            <col class="filler-col" :style="{ width: fillerWidth + 'px' }" />
+          </colgroup>
           <thead>
             <tr>
               <th
+                v-for="id in visibleColumns"
+                :key="id"
+                :data-col="id"
                 class="sortable"
-                :class="{ sorted: sortKey === 'name' }"
-                @click="setSort('name')"
+                :class="{
+                  sorted: sortKey === id,
+                  'col-armed': armedColId === id,
+                }"
+                @click="setSort(id)"
               >
-                {{ t("documents.columns.name") }}
-                <span class="sort-indicator">{{ sortIndicator("name") }}</span>
+                <span class="th-label">{{ t(`documents.columns.${id}`) }}</span>
+                <span class="sort-indicator">{{ sortIndicator(id) }}</span>
+                <!-- Right-edge drag handle: resizes the column to its left.
+                     .stop on click/mousedown keeps a divider grab from sorting. -->
+                <span
+                  class="col-resizer"
+                  @click.stop
+                  @mousedown.prevent.stop="onResizeStart(id, $event)"
+                />
               </th>
-              <th
-                class="sortable"
-                :class="{ sorted: sortKey === 'owner' }"
-                @click="setSort('owner')"
-              >
-                {{ t("documents.columns.owner") }}
-                <span class="sort-indicator">{{ sortIndicator("owner") }}</span>
-              </th>
-              <th
-                class="sortable"
-                :class="{ sorted: sortKey === 'currentVersion' }"
-                @click="setSort('currentVersion')"
-              >
-                {{ t("documents.columns.currentVersion") }}
-                <span class="sort-indicator">{{
-                  sortIndicator("currentVersion")
-                }}</span>
-              </th>
-              <th
-                class="sortable"
-                :class="{ sorted: sortKey === 'status' }"
-                @click="setSort('status')"
-              >
-                {{ t("documents.columns.status") }}
-                <span class="sort-indicator">{{ sortIndicator("status") }}</span>
-              </th>
-              <th
-                class="sortable"
-                :class="{ sorted: sortKey === 'modification' }"
-                @click="setSort('modification')"
-              >
-                {{ t("documents.columns.modification") }}
-                <span class="sort-indicator">{{
-                  sortIndicator("modification")
-                }}</span>
-              </th>
-              <th
-                class="sortable"
-                :class="{ sorted: sortKey === 'updated' }"
-                @click="setSort('updated')"
-              >
-                {{ t("documents.columns.updated") }}
-                <span class="sort-indicator">{{
-                  sortIndicator("updated")
-                }}</span>
-              </th>
+              <th class="filler-th" aria-hidden="true"></th>
             </tr>
           </thead>
           <tbody v-for="group in groupedDocuments" :key="group.key">
             <tr v-if="showGroupHeaders" class="group-header">
-              <td colspan="6">
+              <td :colspan="fullColspan">
                 <div class="group-divider">
                   <span class="group-line" />
                   <span class="group-label">{{ group.label }}</span>
@@ -626,41 +756,49 @@ onBeforeUnmount(() => {
               @dragstart="onDragStartDoc($event, document)"
               @contextmenu.prevent.stop="openDocMenu($event, document)"
             >
-              <td>
-                <div class="name-cell">
-                  <span class="file-type">{{
-                    extOf(document.originalFilename) ?? ""
+              <td v-for="id in visibleColumns" :key="id" :data-col="id">
+                <template v-if="id === 'name'">
+                  <div class="name-cell">
+                    <span class="file-type">{{
+                      extOf(document.originalFilename) ?? ""
+                    }}</span>
+                    <strong :title="document.name">{{ document.name }}</strong>
+                  </div>
+                  <div
+                    v-if="selectedDocumentId === document.id && document.tags?.length"
+                    class="row-tags"
+                  >
+                    <span v-for="tag in document.tags" :key="tag" class="row-tag">{{
+                      tag
+                    }}</span>
+                  </div>
+                </template>
+                <template v-else-if="id === 'owner'">
+                  <span class="cell-text">{{ document.owner }}</span>
+                </template>
+                <template v-else-if="id === 'currentVersion'">
+                  <span class="cell-text">{{ currentVersionLabel(document) }}</span>
+                </template>
+                <template v-else-if="id === 'status'">
+                  <span class="status-pill" :data-status="document.health">{{
+                    t(`status.${document.health}`)
                   }}</span>
-                  <strong :title="document.name">{{ document.name }}</strong>
-                </div>
-                <div
-                  v-if="selectedDocumentId === document.id && document.tags?.length"
-                  class="row-tags"
-                >
-                  <span v-for="tag in document.tags" :key="tag" class="row-tag">{{
-                    tag
-                  }}</span>
-                </div>
+                </template>
+                <template v-else-if="id === 'modification'">
+                  <span
+                    class="mod-pill"
+                    :data-mod="document.modification ?? 'none'"
+                  >{{ t(`modification.${document.modification ?? "none"}`) }}</span>
+                </template>
+                <template v-else-if="id === 'updated'">
+                  <span class="cell-text">{{ document.updatedAt }}</span>
+                </template>
               </td>
-              <td>{{ document.owner }}</td>
-              <td>{{ currentVersionLabel(document) }}</td>
-              <td>
-                <span class="status-pill" :data-status="document.health">{{
-                  t(`status.${document.health}`)
-                }}</span>
-              </td>
-              <td>
-                <span
-                  class="mod-pill"
-                  :data-mod="document.modification ?? 'none'"
-                >{{ t(`modification.${document.modification ?? "none"}`) }}</span>
-              </td>
-              <td>{{ document.updatedAt }}</td>
             </tr>
           </tbody>
           <tbody v-if="filteredDocuments.length === 0">
             <tr>
-              <td colspan="6" class="empty-state">
+              <td :colspan="fullColspan" class="empty-state">
                 <template v-if="documents.length === 0">
                   {{
                     t("documents.emptyNoDocs")
@@ -1268,6 +1406,10 @@ input[type="search"]:focus {
 }
 
 table {
+  /* Fixed layout so each column's width is the explicit <col> width (not
+     content-driven), which makes drag-resizing predictable. The table width is
+     bound inline (= visible widths + filler) so it fills the wrap or scrolls. */
+  table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
 }
@@ -1279,9 +1421,13 @@ td {
   border-bottom: 1px solid var(--border-soft);
   text-align: left;
   white-space: nowrap;
+  /* Clip overflow instead of letting a narrow column blow the row height; the
+     header label ellipsizes via .th-label, cell content clips. */
+  overflow: hidden;
 }
 
 th {
+  position: relative;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -1300,12 +1446,74 @@ th.sortable.sorted {
   color: var(--text-primary);
 }
 
+/* Header label ellipsizes within the column, leaving room for the sort
+   indicator; the resize handle is absolutely positioned so it takes no flow. */
+.th-label {
+  display: inline-block;
+  max-width: calc(100% - 18px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .sort-indicator {
   display: inline-block;
   width: 12px;
   margin-left: 2px;
   color: var(--accent);
   font-size: 11px;
+  vertical-align: middle;
+}
+
+/* Drag handle at each column's right edge. Invisible hit area with a hairline
+   that lights up on hover; grabbing it resizes the column to its left. */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.col-resizer::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 3px;
+  width: 2px;
+  height: calc(100% - 12px);
+  background: transparent;
+}
+
+th.sortable:hover .col-resizer::after,
+.col-resizer:hover::after {
+  background: var(--accent);
+}
+
+/* Trailing filler column (absorbs leftover width) has no header content. */
+.filler-th {
+  border-left: 0;
+}
+
+/* Plain-text cells (owner / version / updated): inline-block so the column can
+   ellipsize overlong values, while scrollWidth still reports the true text width
+   for the content-minimum measurement. */
+.cell-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* A drag has armed this column to hide on release (the mouse over-traveled to
+   the previous column's edge): dim it as the "about to switch off" cue. */
+th.col-armed {
+  opacity: 0.4;
 }
 
 .search-scope {

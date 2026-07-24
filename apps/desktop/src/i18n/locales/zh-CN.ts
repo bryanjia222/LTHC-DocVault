@@ -468,6 +468,10 @@ export const zhCN = {
     doubleClickPreview: "预览",
     doubleClickOpen: "打开",
     doubleClickHint: "双击文档行时执行的操作。",
+    columnsSection: "表格列",
+    columnsHint: "拖动表头右侧分隔线可调整列宽；拖到最小宽度以下松开即隐藏该列。勾选下方可显示该列。",
+    columnsReset: "重置列宽与可见性",
+    columnsAlwaysOn: "始终显示",
   },
   commandPalette: {
     title: "命令面板",
