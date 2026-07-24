@@ -1,0 +1,154 @@
+# One-click cross-platform packaging.
+#
+#   git tag v0.1.0 && git push --tags        # builds everything, drafts a Release
+#   # or run manually from the Actions tab ("Run workflow") with a tag.
+#   # leave the tag empty to just build and download the installers from the run.
+#
+# Matrix (6 installers):
+#   windows x64   -> .msi + .exe(NSIS)        native on windows-latest
+#   windows arm64 -> .exe(NSIS)               cross-compiled on windows-latest
+#                                              (WiX v3 can't produce arm64 .msi)
+#   macos x64     -> .app + .dmg              native on macos-13
+#   macos arm64   -> .app + .dmg              native on macos-latest
+#   linux x64     -> .deb + .rpm + AppImage  native on ubuntu-22.04
+#   linux arm64   -> .deb + .rpm + AppImage  native on ubuntu-22.04-arm
+#
+# restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
+# restic 0.19.1 has no aarch64-windows binary, so the windows-arm64 build
+# bundles the x86_64 restic under Windows-on-ARM x64 emulation (see build.rs).
+#
+# Code signing is opt-in: set APPLE_* / WINDOWS_CERTIFICATE_* secrets to sign;
+# otherwise builds are unsigned (Gatekeeper / SmartScreen will warn). Drafts are
+# never published automatically - review then publish the Release by hand.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build & release (e.g. v0.1.0). Leave empty to build without creating a release - installers are uploaded to the workflow run instead."
+        required: false
+        default: ""
+
+# Re-pushing a tag cancels the stale run; branches don't collide (tag-scoped).
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # Non-empty only on a real tag push, or a dispatch with a tag input.
+      # On a branch dispatch github.ref_name is the branch, so guard with ref_type.
+      RELEASE_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            os: windows-latest
+            rustTarget: x86_64-pc-windows-msvc
+            args: "--target x86_64-pc-windows-msvc"
+          - label: windows-arm64
+            os: windows-latest
+            rustTarget: aarch64-pc-windows-msvc
+            args: "--target aarch64-pc-windows-msvc --bundles nsis"
+          - label: macos-x64
+            os: macos-13
+            rustTarget: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - label: macos-arm64
+            os: macos-latest
+            rustTarget: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - label: linux-x64
+            os: ubuntu-22.04
+            rustTarget: x86_64-unknown-linux-gnu
+            args: "--target x86_64-unknown-linux-gnu"
+          - label: linux-arm64
+            os: ubuntu-22.04-arm
+            rustTarget: aarch64-unknown-linux-gnu
+            args: "--target aarch64-unknown-linux-gnu"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTarget }}
+
+      # Windows-on-ARM is cross-compiled on an x64 host: surface the aarch64
+      # MSVC linker to rustc. No-op for every other cell.
+      - name: Set up MSVC (arm64 cross)
+        if: matrix.rustTarget == 'aarch64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # postinstall fetches the host-arch restic (correct for every native cell,
+      # and for windows-arm64 it fetches the x86_64 restic that build.rs stages).
+      - name: Install desktop deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build (no release)
+        if: env.RELEASE_TAG == ''
+        working-directory: apps/desktop
+        run: npx --no-install tauri build ${{ matrix.args }}
+
+      - name: Build & upload to GitHub Release
+        if: env.RELEASE_TAG != ''
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # --- Optional code signing (leave commented to build unsigned) ---
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "DocVault ${{ env.RELEASE_TAG }}"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload installers to the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DocVault-${{ matrix.label }}
+          path: apps/desktop/src-tauri/target/**/bundle/**
+          if-no-files-found: warn
