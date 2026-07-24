@@ -38,14 +38,28 @@ describe("previewCache", () => {
       expect(previewCacheKey("doc1", version("v2"), false)).toBe("doc1|v:v2");
     });
     it("keys the working copy when modified with no version", () => {
-      expect(previewCacheKey("doc1", null, true)).toBe("doc1|working");
+      expect(previewCacheKey("doc1", null, true, "v4")).toBe("doc1|working:v4");
     });
     it("keys current when unmodified with no version", () => {
-      expect(previewCacheKey("doc1", null, false)).toBe("doc1|current");
+      expect(previewCacheKey("doc1", null, false, "v4")).toBe("doc1|current:v4");
     });
     it("prefers the version key even when modified", () => {
       // A specific historical version is always the committed snapshot.
-      expect(previewCacheKey("doc1", version("v3"), true)).toBe("doc1|v:v3");
+      expect(previewCacheKey("doc1", version("v3"), true, "v4")).toBe("doc1|v:v3");
+    });
+    it("keys the mutable current snapshot by the checked-out version", () => {
+      // A checkout changes which version is "current": the mutable key must
+      // follow it, or the previous current's stale snapshot is reused after a
+      // checkout (the "opens showing V4 then swaps to V2" flicker).
+      expect(previewCacheKey("doc1", null, false, "v4")).toBe("doc1|current:v4");
+      expect(previewCacheKey("doc1", null, false, "v2")).toBe("doc1|current:v2");
+      expect(previewCacheKey("doc1", null, true, "v4")).toBe("doc1|working:v4");
+      expect(previewCacheKey("doc1", null, true, "v2")).toBe("doc1|working:v2");
+    });
+    it("falls back to an empty current-label segment when none is provided", () => {
+      // Backwards-compatible default so a caller that omits it still gets a
+      // stable (if unversioned) mutable key rather than `undefined`.
+      expect(previewCacheKey("doc1", null, false)).toBe("doc1|current:");
     });
   });
 

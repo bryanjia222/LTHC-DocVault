@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { X } from "@lucide/vue";
 import { useVault } from "../composables/useVault";
@@ -68,19 +68,35 @@ const versionLabel = computed(
 );
 
 // Live handles to whatever renderer we started, so onBeforeUnmount can tear it
-// down. `cancelled` lets in-flight render loops bail out if the overlay closes
-// mid-render (e.g. a multi-page PDF still streaming).
-let cancelled = false;
+// down. Each `load()` mints a `RenderGuard`; superseding it (a version switch,
+// re-open, or unmount) flips `.cancelled` so the prior load's pending awaits
+// bail at their next checkpoint instead of racing the new render onto the host.
+interface RenderGuard { cancelled: boolean; }
+let activeGuard: RenderGuard | null = null;
 let pdfLoadingTask: { destroy: () => Promise<void> } | null = null;
 // pptx-renderer's viewer is typed loosely to avoid pulling its types into the
 // hot import path; we only need `destroy()`.
 let pptxViewer: { destroy: () => void } | null = null;
 
 async function load() {
+  // Supersede any in-flight load (version switch, re-open, re-mount) so its
+  // pending awaits bail at their next checkpoint instead of racing this one
+  // onto the host. `guard` is this load's lifetime token.
+  if (activeGuard) activeGuard.cancelled = true;
+  const guard: RenderGuard = { cancelled: false };
+  activeGuard = guard;
+
   loading.value = true;
   error.value = null;
   notSupported.value = false;
   refreshing.value = false;
+  // Tear down any live pptx viewer from the prior render before clearing the
+  // host: it observes its (now-detached) surface, so without this it leaks
+  // across version switches and reopens.
+  if (pptxViewer) {
+    pptxViewer.destroy();
+    pptxViewer = null;
+  }
   if (container.value) container.value.innerHTML = "";
 
   // When previewing the toolbar "current" view of a document with uncommitted
@@ -89,7 +105,18 @@ async function load() {
   // historical version (props.version set) is always the committed snapshot.
   const wantsWorkingCopy =
     props.document.modification === "modified" && props.version == null;
-  const key = previewCacheKey(props.document.id, props.version, wantsWorkingCopy);
+  // Key the mutable current/working-copy snapshot by the currently-checked-out
+  // version's label so a checkout (which changes which version is "current")
+  // produces a fresh key instead of reusing the previous current's stale cached
+  // snapshot - that reuse was the "opens showing V4 then swaps to V2" flicker.
+  const currentLabel =
+    props.document.versions.find((v) => v.status === "current")?.label ?? "";
+  const key = previewCacheKey(
+    props.document.id,
+    props.version,
+    wantsWorkingCopy,
+    currentLabel,
+  );
   const mutable = isMutablePreview(props.version);
 
   // Tier 1: in-memory LRU. Paint instantly; an immutable committed version is
@@ -101,34 +128,34 @@ async function load() {
     if (container.value) container.value.innerHTML = memHit;
     loading.value = false;
     if (!mutable) return;
-    await refreshMutable(wantsWorkingCopy, key);
+    await refreshMutable(wantsWorkingCopy, key, guard);
     return;
   }
 
   // Tier 2: on-disk cache. Backfill the memory LRU so the next lookup hits
   // tier 1, then paint + (for mutable) background-refresh as above.
   const diskHit = await readPreviewCache(key);
-  if (cancelled) return;
+  if (guard.cancelled) return;
   if (diskHit) {
     setPreviewCache(key, diskHit);
     if (container.value) container.value.innerHTML = diskHit;
     loading.value = false;
     if (!mutable) return;
-    await refreshMutable(wantsWorkingCopy, key);
+    await refreshMutable(wantsWorkingCopy, key, guard);
     return;
   }
 
   // Tier 3: no cache - full load with the loading overlay.
   try {
     const bytes = await fetchBytes(wantsWorkingCopy);
-    if (cancelled) return;
+    if (guard.cancelled) return;
     if (!bytes) {
       // No backend (browser dev) - nothing to preview.
       notSupported.value = true;
       return;
     }
     const kind = detectPreviewKind(props.document.type, bytes);
-    if (cancelled) return;
+    if (guard.cancelled) return;
     if (kind === "unsupported") {
       notSupported.value = true;
       return;
@@ -136,12 +163,12 @@ async function load() {
     // Ensure the container ref is mounted (it always is here, but nextTick keeps
     // the renderers safe against any future v-if around it).
     await nextTick();
-    if (cancelled) return;
-    await renderAndShow(bytes, key, kind);
+    if (guard.cancelled) return;
+    await renderAndShow(bytes, key, kind, guard);
   } catch (e) {
-    if (!cancelled) error.value = String(e);
+    if (!guard.cancelled) error.value = String(e);
   } finally {
-    if (!cancelled) loading.value = false;
+    if (!guard.cancelled) loading.value = false;
   }
 }
 
@@ -151,15 +178,15 @@ async function load() {
  * off-screen, restoring the user's scroll position. Failures keep the cached
  * copy visible and just drop the badge.
  */
-async function refreshMutable(wantsWorkingCopy: boolean, key: string) {
+async function refreshMutable(wantsWorkingCopy: boolean, key: string, guard: RenderGuard) {
   refreshing.value = true;
   try {
     const bytes = await fetchBytes(wantsWorkingCopy);
-    if (!cancelled && bytes) await refreshAndSwap(bytes, key);
+    if (!guard.cancelled && bytes) await refreshAndSwap(bytes, key, guard);
   } catch (e) {
-    if (!cancelled) console.error("preview refresh failed", e);
+    if (!guard.cancelled) console.error("preview refresh failed", e);
   } finally {
-    if (!cancelled) refreshing.value = false;
+    if (!guard.cancelled) refreshing.value = false;
   }
 }
 
@@ -182,20 +209,21 @@ async function renderAndShow(
   bytes: ArrayBuffer,
   key: string,
   kind: PreviewKind,
+  guard: RenderGuard,
 ) {
   const el = container.value;
   if (!el) return;
-  await renderInto(el, kind, bytes, bodyRef.value ?? el);
-  if (cancelled) return;
+  await renderInto(el, kind, bytes, bodyRef.value ?? el, guard);
+  if (guard.cancelled) return;
   // Snapshot to cache (best-effort, non-blocking for the visible render).
-  void captureAndCache(el, key);
+  void captureAndCache(el, key, guard);
 }
 
 /** Render a container and write its snapshot to the memory LRU + disk cache. */
-async function captureAndCache(el: HTMLElement, key: string) {
+async function captureAndCache(el: HTMLElement, key: string, guard: RenderGuard) {
   try {
     const html = await captureHtml(el);
-    if (cancelled) return;
+    if (guard.cancelled) return;
     setPreviewCache(key, html);
     void writePreviewCache(key, html).catch((e) =>
       console.error("preview cache write failed", e),
@@ -211,17 +239,23 @@ async function captureAndCache(el: HTMLElement, key: string) {
  * swaps the host to the fresh output and restores the user's scroll position so
  * they land back on the page they were reading.
  */
-async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
+async function refreshAndSwap(bytes: ArrayBuffer, key: string, guard: RenderGuard) {
   const kind = detectPreviewKind(props.document.type, bytes);
-  if (cancelled || kind === "unsupported") return;
-  // Match the preview body's width so `fitMode: "contain"` scales slides the
-  // same off-screen as on-screen (an unsized fixed surface would collapse).
-  const temp = makeOffscreenSurface(bodyRef.value?.clientWidth);
+  if (guard.cancelled || kind === "unsupported") return;
+  // Match the on-screen host's width (the container, not the wider scroll
+  // body) so the off-screen render's slide width equals what renderAndShow
+  // produced on-screen. Otherwise the cached snapshot (host width) and this
+  // refreshed swap (body width) differ and the slide visibly resizes on swap.
+  const temp = makeOffscreenSurface(container.value?.clientWidth);
   try {
-    await renderInto(temp, kind, bytes, temp);
-    if (cancelled) return;
+    await renderInto(temp, kind, bytes, temp, guard);
+    if (guard.cancelled) return;
     const html = await captureHtml(temp);
-    if (cancelled) return;
+    if (guard.cancelled) return;
+    // Belt-and-braces alongside the sync-flush watch: if a newer load() has
+    // claimed `activeGuard` (and cancelled ours) between captureHtml and the
+    // swap, don't overwrite the newer paint with this captured snapshot.
+    if (activeGuard !== guard) return;
     const scrollEl = bodyRef.value;
     const scrollTop = scrollEl?.scrollTop ?? 0;
     if (container.value) container.value.innerHTML = html;
@@ -231,7 +265,7 @@ async function refreshAndSwap(bytes: ArrayBuffer, key: string) {
     );
     if (scrollEl) {
       await nextTick();
-      if (!cancelled) scrollEl.scrollTop = scrollTop;
+      if (!guard.cancelled) scrollEl.scrollTop = scrollTop;
     }
   } finally {
     // The temp's live handles (pdf.js doc / pptx viewer) are done once
@@ -257,25 +291,26 @@ async function renderInto(
   kind: PreviewKind,
   bytes: ArrayBuffer,
   scrollContainer: HTMLElement,
+  guard: RenderGuard,
 ) {
   switch (kind) {
     case "pdf":
-      await renderPdf(bytes, el);
+      await renderPdf(bytes, el, guard);
       break;
     case "md":
-      await renderMd(bytes, el);
+      await renderMd(bytes, el, guard);
       break;
     case "txt":
       renderTxt(bytes, el);
       break;
     case "docx":
-      await renderDocx(bytes, el);
+      await renderDocx(bytes, el, guard);
       break;
     case "xlsx":
-      await renderXlsx(bytes, el);
+      await renderXlsx(bytes, el, guard);
       break;
     case "pptx":
-      await renderPptx(bytes, el, scrollContainer);
+      await renderPptx(bytes, el, scrollContainer, guard);
       break;
   }
 }
@@ -297,18 +332,18 @@ function makeOffscreenSurface(width?: number): HTMLDivElement {
   return el;
 }
 
-async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement) {
+async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
   const pdfjs = await import("pdfjs-dist");
-  if (cancelled) return;
+  if (guard.cancelled) return;
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   const task = pdfjs.getDocument({ data: bytes });
   pdfLoadingTask = task;
   const doc = await task.promise;
-  if (cancelled) return; // onBeforeUnmount already destroyed the loading task.
+  if (guard.cancelled) return; // superseded/unmounted already destroyed the task.
   for (let i = 1; i <= doc.numPages; i++) {
-    if (cancelled) break;
+    if (guard.cancelled) break;
     const page = await doc.getPage(i);
-    if (cancelled) break;
+    if (guard.cancelled) break;
     const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement("canvas");
     canvas.className = "preview-page";
@@ -323,10 +358,10 @@ async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement) {
   }
 }
 
-async function renderMd(bytes: ArrayBuffer, el: HTMLDivElement) {
+async function renderMd(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
   const { marked } = await import("marked");
   const DOMPurify = (await import("dompurify")).default;
-  if (cancelled) return;
+  if (guard.cancelled) return;
   const text = new TextDecoder().decode(bytes);
   const html = DOMPurify.sanitize(marked.parse(text) as string);
   const article = document.createElement("div");
@@ -343,21 +378,21 @@ function renderTxt(bytes: ArrayBuffer, el: HTMLDivElement) {
   el.appendChild(pre);
 }
 
-async function renderDocx(bytes: ArrayBuffer, el: HTMLDivElement) {
+async function renderDocx(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
   const { renderAsync } = await import("docx-preview");
-  if (cancelled) return;
+  if (guard.cancelled) return;
   await renderAsync(bytes, el, undefined, {
     className: "preview-docx",
     inWrapper: true,
   });
 }
 
-async function renderXlsx(bytes: ArrayBuffer, el: HTMLDivElement) {
+async function renderXlsx(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
   const XLSX = await import("xlsx");
-  if (cancelled) return;
+  if (guard.cancelled) return;
   const wb = XLSX.read(bytes, { type: "array" });
   for (const name of wb.SheetNames) {
-    if (cancelled) break;
+    if (guard.cancelled) break;
     const sheet = wb.Sheets[name];
     if (!sheet) continue;
     const section = document.createElement("div");
@@ -377,19 +412,42 @@ async function renderPptx(
   bytes: ArrayBuffer,
   el: HTMLDivElement,
   scrollContainer: HTMLElement,
+  guard: RenderGuard,
 ) {
   const { PptxViewer } = await import("@aiden0z/pptx-renderer");
-  if (cancelled) return;
+  if (guard.cancelled) return;
   // Disable the EMF-as-PDF fallback (rare in modern decks) so preview never
   // reaches for a pdfjs URL we have not configured. `fitMode: "contain"`
   // scales each slide down to the container width (otherwise a 16:9 deck is
   // ~1280px and overflows horizontally); `scrollContainer` is the list-mode
   // IntersectionObserver root so slide tracking follows the preview body.
-  pptxViewer = await PptxViewer.open(bytes, el, {
+  //
+  // open() is async and not cancellable: when it resolves it appends this
+  // version's slides to the element passed in. Render into a fresh child <div>
+  // of the host (width: 100%, so fitMode still measures the host's width) so a
+  // superseding load that repaints the host (e.g. a cached snapshot via
+  // innerHTML) detaches this div - open() then appends to a detached node and we
+  // just discard it, leaving the newer paint intact. This fixes the
+  // stale-paint race (switching V4->V2 mid-open no longer flashes V4) WITHOUT
+  // re-calling load() from here, which would chain reloads into a loop.
+  const surface = document.createElement("div");
+  surface.style.width = "100%";
+  el.appendChild(surface);
+  const viewer = await PptxViewer.open(bytes, surface, {
     pdfjs: false,
     fitMode: "contain",
     scrollContainer,
   });
+  if (guard.cancelled) {
+    // Superseded while open() was in flight: it appended this version's slides
+    // to `surface` (detached if the newer load repainted the host). Discard the
+    // viewer and the surface; the active load's paint is left intact.
+    viewer.destroy();
+    surface.remove();
+    return;
+  }
+  if (pptxViewer) pptxViewer.destroy();
+  pptxViewer = viewer;
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -404,8 +462,38 @@ onMounted(() => {
   void load();
 });
 
+// Re-render when the previewed version (or document) changes while the overlay
+// stays open - e.g. right-clicking a different version in the version history.
+//
+// Two things matter here:
+//  1. Source shape: use an array *of getters*, NOT a single getter returning an
+//     array. `() => [version, id]` builds a fresh array every poll; Vue compares
+//     the return by identity, so the watch fires on every reactivity tick even
+//     when version/id are unchanged. That re-triggered load() -> refreshMutable
+//     -> the "loading latest preview" badge whenever `documents` was recomputed
+//     (DocumentsView's 5s modification-poll rewrites `probes`, regenerating every
+//     document object and thus `selectedDocument`'s reference). Per-getter sources
+//     compare each element by Object.is, so an unchanged id/version no longer fires.
+//  2. flush: "sync": a version switch (e.g. previewing V2 while V4's mutable
+//     background refresh is mid-flight) must cancel that refresh *before* it swaps
+//     its captured V4 snapshot onto the host - otherwise the stale V4 briefly
+//     paints over the just-shown V2. A pre-flush watch is a microtask and races
+//     the refresh's own microtask; sync flush runs load() (which flips
+//     guard.cancelled at its top) synchronously on the prop change, ahead of any
+//     pending swap.
+watch(
+  [() => props.version, () => props.document?.id],
+  () => {
+    void load();
+  },
+  { flush: "sync" },
+);
+
 onBeforeUnmount(() => {
-  cancelled = true;
+  if (activeGuard) {
+    activeGuard.cancelled = true;
+    activeGuard = null;
+  }
   window.removeEventListener("keydown", onKeydown);
   pptxViewer?.destroy();
   pptxViewer = null;
@@ -456,11 +544,7 @@ onBeforeUnmount(() => {
             <h3>{{ t("preview.unsupportedTitle") }}</h3>
             <p>{{ t("preview.notSupported") }}</p>
           </div>
-          <div
-            v-show="!loading && !error && !notSupported"
-            ref="container"
-            class="preview-content"
-          />
+          <div ref="container" class="preview-content" />
         </div>
 
         <div v-if="refreshing" class="preview-refreshing" role="status">
@@ -544,13 +628,22 @@ onBeforeUnmount(() => {
 }
 
 .preview-status {
+  /* Absolutely positioned over the body (out of flow) so the render host below
+     stays laid out - display != none - even while a loading/error status is
+     shown. pptx-renderer measures the host's clientWidth (fitMode "contain");
+     a display:none host (hidden via v-show while loading) reads 0, falls back
+     to a 960px width, then re-renders once shown - that second render is the
+     one-frame scrollbar flash only pptx exhibits. pdf/docx/xlsx don't measure
+     the host, so they never flashed. */
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   gap: 8px;
-  min-height: 100%;
   text-align: center;
   color: var(--text-muted);
   font-size: 14px;
+  background: var(--bg-surface);
 }
 
 .preview-status h3 {

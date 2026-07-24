@@ -13,9 +13,15 @@ export function previewCacheKey(
   docId: string,
   version: Version | null,
   modified: boolean,
+  /** Label of the version that is currently checked out. The mutable
+   *  current/working-copy snapshot is keyed by this so a checkout (which changes
+   *  which version is "current") produces a different key instead of reusing the
+   *  previous current's stale snapshot. Historical versions are keyed by their
+   *  own label, so this only affects the `version == null` path. */
+  currentLabel = "",
 ): string {
   if (version) return `${docId}|v:${version.label}`;
-  return modified ? `${docId}|working` : `${docId}|current`;
+  return modified ? `${docId}|working:${currentLabel}` : `${docId}|current:${currentLabel}`;
 }
 
 export function isMutablePreview(version: Version | null): boolean {
