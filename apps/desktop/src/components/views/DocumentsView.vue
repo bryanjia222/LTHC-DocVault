@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
                   <span class="file-type">{{
                     extOf(document.originalFilename) ?? ""
                   }}</span>
-                  <strong>{{ document.name }}</strong>
+                  <strong :title="document.name">{{ document.name }}</strong>
                 </div>
                 <div
                   v-if="selectedDocumentId === document.id && document.tags?.length"
@@ -956,7 +956,7 @@ onBeforeUnmount(() => {
       <aside class="graph-context surface">
         <div class="panel-header compact">
           <div>
-            <h2>{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
+            <h2 :title="selectedDocument?.name">{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
           </div>
           <div class="action-row">
             <button
@@ -1224,6 +1224,15 @@ onBeforeUnmount(() => {
 .document-panel h2,
 .detail-panel h2 {
   font-size: 18px;
+}
+.detail-panel h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Let the flex item holding the <h2> shrink so the ellipsis can take effect. */
+.panel-header.compact > div {
+  min-width: 0;
 }
 
 .detail-panel {
@@ -1623,6 +1632,9 @@ tbody tr.selected {
 
 .graph-context h2 {
   font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Filter bar */
@@ -1683,10 +1695,19 @@ tbody tr.selected {
   color: var(--danger-text);
 }
 
-/* Table name cell + inline tags */
+/* Table name cell + inline tags. The name is truncated with an ellipsis;
+   the native `title` attribute (on <strong>) surfaces the full name on hover. */
 .name-cell {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+.name-cell > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .row-tags {
