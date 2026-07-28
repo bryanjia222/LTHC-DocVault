@@ -37,12 +37,6 @@ docvault-types = { path = "../../../shared/types" }
 docvault-jobs = { path = "../../../crates/jobs" }
 docvault-ooxml = { path = "../../../crates/ooxml" }
 
-# Linux-only: runtime dlopen of `libEGL.so.1` for the first-run graphics probe
-# in `platform::linux` (detects GPU-less/broken-DRI hosts so we can fall back
-# to software rendering before WebKit2GTK segfaults). Not linked elsewhere.
-[target.'cfg(target_os = "linux")'.dependencies]
-libloading = "0.8"
-
 # Keep this crate out of the root workspace; it is built standalone by tauri.
 [workspace]
 

@@ -1,217 +1,76 @@
-//! Linux graphics-compatibility boot prep.
+//! Linux boot-time graphics adaptation.
 //!
-//! WebKit2GTK segfaults on hosts where EGL can't initialize (no GPU / a broken
-//! DRI driver): the chain is `egl: failed to create dri2 screen` ->
-//! `EGLDisplay Initialization failed: EGL_NOT_INITIALIZED` -> `Cannot create
-//! EGL context` -> SIGSEGV. To run out-of-the-box on such hosts without a
-//! manual env override, this module probes EGL once on first launch, persists
-//! the verdict, and - when hardware EGL is unavailable - injects the
-//! software-rendering env (`LIBGL_ALWAYS_SOFTWARE=1` +
-//! `WEBKIT_DISABLE_DMABUF_RENDERER=1`) before the Tauri builder / webview come
-//! up.
+//! WebKit2GTK's DMA-BUF renderer is the modern zero-copy path for sharing the
+//! rendered buffer between the web and UI processes. It is also the brittle
+//! one: on many GPU/driver combinations its GBM platform display fails to
+//! initialize (`egl: failed to create dri2 screen` -> `EGLDisplay
+//! Initialization failed: EGL_NOT_INITIALIZED` -> `Cannot create EGL context`
+//! -> SIGSEGV), even though the legacy EGL path works fine on the same host.
+//! The two paths are distinct, so probing the legacy path can't tell us
+//! whether the DMA-BUF path will succeed -- a probe is liable to return a
+//! false "hardware" verdict and leave the crash unguarded.
 //!
-//! The probe runs in a throwaway *subprocess* (we re-exec the current binary
-//! with `--probe-egl`), so a segfault during EGL init is contained and can't
-//! kill the main process. That mode dlopens `libEGL.so.1` and calls
-//! `eglGetDisplay` / `eglInitialize`, exiting `0` on success / non-zero (or
-//! signal) on failure.
+//! So instead of probing we disable the DMA-BUF renderer unconditionally and
+//! let WebKit fall back to the broadly-compatible legacy EGL path. The cost is
+//! one GPU->CPU->GPU readback per composited frame, imperceptible for the
+//! static document UI this app shows; GL itself stays hardware-accelerated.
 //!
-//! Mode resolution order: explicit `DOCVAULT_SOFTWARE_RENDERING` env (not
-//! persisted - an operational knob) -> the persisted verdict -> the first-run
-//! probe (whose result is then persisted). The pref lives in a self-contained
-//! `graphics.json` under the XDG config dir, resolved without an `AppHandle`
-//! (this runs before the Tauri builder exists).
+//! For the rare host where even the legacy EGL path can't come up with a
+//! hardware DRI driver (headless server, container, broken driver), the
+//! `DOCVAULT_SOFTWARE_RENDERING` env var forces Mesa's software rasterizer so
+//! EGL initializes via swrast instead.
 //!
 //! All of this is Linux-only and sits behind `platform::prepare_boot()` so the
-//! main flow carries no platform knowledge.
+//! non-Linux build sees nothing of it.
 
-use std::path::PathBuf;
-use std::process::Command;
-
-/// Subprocess arg that selects the EGL probe mode (re-exec'd by the parent).
-const PROBE_ARG: &str = "--probe-egl";
-/// Operational override env: `1|true|yes` forces software, `0|false|no`
-/// forces hardware. Any other value (or unset) falls through to the persisted
-/// verdict / probe. Never persisted.
+/// Env var that forces software GL (Mesa swrast). Accepts `1`/`true`/`yes`
+/// (case-insensitive); anything else (including unset) means "don't force".
+/// Never persisted -- it is a per-launch escape hatch.
 const ENV_OVERRIDE: &str = "DOCVAULT_SOFTWARE_RENDERING";
+
+/// Forces Mesa to use the software rasterizer (llvmpipe/softpipe).
 const ENV_SOFTWARE: &str = "LIBGL_ALWAYS_SOFTWARE";
+
+/// Disables WebKit2GTK's DMA-BUF renderer so it falls back to the legacy EGL
+/// path. Set unconditionally (see module docs).
 const ENV_DMABUF: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-const PREF_FILE: &str = "graphics.json";
-/// Matches Tauri's `app_config_dir` on Linux (`${config_dir}/<identifier>`).
-const APP_CONFIG_SUBDIR: &str = "com.lthc.docvault";
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Mode {
-    Auto,
-    Software,
-    Hardware,
-}
-
-impl Mode {
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "auto" => Some(Mode::Auto),
-            "software" => Some(Mode::Software),
-            "hardware" => Some(Mode::Hardware),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Mode::Auto => "auto",
-            Mode::Software => "software",
-            Mode::Hardware => "hardware",
-        }
-    }
-
-    fn is_software(self) -> bool {
-        matches!(self, Mode::Software)
-    }
-}
-
-/// Entry point from `platform::prepare_boot`. Either serves the probe
-/// subprocess (and exits) or resolves the render mode and injects env.
+/// Entry point from `platform::prepare_boot`. Runs before the Tauri builder so
+/// the env vars are in place before the webview initializes.
 pub(super) fn prepare_boot() {
-    // Probe subprocess: dlopen libEGL, try to init EGL, exit with the verdict.
-    if std::env::args().any(|a| a == PROBE_ARG) {
-        std::process::exit(if egl_probe_ok() { 0 } else { 1 });
-    }
+    // The DMA-BUF renderer is the brittle path on many Linux GPU/driver
+    // setups. Disable it universally; WebKit falls back to the legacy EGL
+    // path, which is far more broadly compatible.
+    set_if_unset(ENV_DMABUF, "1");
 
-    if resolve_mode().is_software() {
+    // Manual escape hatch for hosts where even legacy EGL can't init with a
+    // hardware DRI driver (headless / no-DRI / broken driver): force Mesa
+    // swrast so EGL comes up via the software path.
+    if is_software_forced() {
         set_if_unset(ENV_SOFTWARE, "1");
-        set_if_unset(ENV_DMABUF, "1");
     }
 }
 
-/// Decide the render mode. Override env -> persisted verdict -> first-run probe
-/// (whose result is then persisted).
-fn resolve_mode() -> Mode {
-    if let Some(mode) = override_mode(std::env::var(ENV_OVERRIDE).ok().as_deref()) {
-        return mode;
-    }
-    if let Some(mode) = read_pref()
-        .and_then(|p| Mode::from_str(&p.mode))
-        .filter(|m| *m != Mode::Auto)
-    {
-        return mode;
-    }
-    let probed = if probe_hardware_egl() {
-        Mode::Hardware
-    } else {
-        Mode::Software
-    };
-    write_pref(&Pref {
-        mode: probed.as_str().to_owned(),
-    });
-    probed
+/// Whether the user asked (via `DOCVAULT_SOFTWARE_RENDERING`) to force software
+/// GL this launch.
+fn is_software_forced() -> bool {
+    parse_override(&std::env::var(ENV_OVERRIDE).unwrap_or_default())
 }
 
-/// Parse the `DOCVAULT_SOFTWARE_RENDERING` override value. Pure so it's
-/// unit-testable without touching the real environment.
-fn override_mode(value: Option<&str>) -> Option<Mode> {
-    match value? {
-        "1" | "true" | "yes" => Some(Mode::Software),
-        "0" | "false" | "no" => Some(Mode::Hardware),
-        _ => None,
+/// Parse the `DOCVAULT_SOFTWARE_RENDERING` override value. Pure so it is
+/// unit-testable without touching the process environment.
+fn parse_override(value: &str) -> bool {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" => true,
+        _ => false,
     }
 }
 
-/// Spawn `current_exe --probe-egl` and return whether hardware EGL initialized.
-/// On any failure to locate/spawn self we stay optimistic (return `true`): a
-/// spawn glitch is misconfiguration, not evidence of a GPU-less host, and
-/// forcing software on every healthy host that can't spawn the probe would be
-/// worse than letting the normal path run.
-fn probe_hardware_egl() -> bool {
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
-        Err(_) => return true,
-    };
-    match Command::new(exe).arg(PROBE_ARG).output() {
-        Ok(out) => out.status.success(),
-        Err(_) => true,
-    }
-}
-
-/// dlopen `libEGL.so.1`, call `eglGetDisplay(EGL_DEFAULT_DISPLAY)` +
-/// `eglInitialize`. `true` when EGL initializes; `false` when libEGL is
-/// missing, the display can't be obtained, or init returns `EGL_FALSE`. Runs
-/// in the probe subprocess, so a segfault here is contained.
-fn egl_probe_ok() -> bool {
-    use std::ffi::c_void;
-    // libloading 0.8 made `Library::new` and `Library::get` `unsafe` (dlopen may
-    // run constructor code; the returned symbol is an untyped pointer). Each call
-    // is wrapped. The probe runs in a throwaway subprocess, so any fault is contained.
-    let lib = match unsafe { libloading::Library::new("libEGL.so.1") } {
-        Ok(lib) => lib,
-        Err(_) => return false,
-    };
-    let egl_get_display: libloading::Symbol<unsafe extern "C" fn(*mut c_void) -> *mut c_void> =
-        match unsafe { lib.get(b"eglGetDisplay\0") } {
-            Ok(f) => f,
-            Err(_) => return false,
-        };
-    let egl_initialize: libloading::Symbol<
-        unsafe extern "C" fn(*mut c_void, *mut i32, *mut i32) -> u32,
-    > = match unsafe { lib.get(b"eglInitialize\0") } {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    // EGL_DEFAULT_DISPLAY is NULL on Linux.
-    let display = unsafe { egl_get_display(std::ptr::null_mut()) };
-    if display.is_null() {
-        return false;
-    }
-    let mut major: i32 = 0;
-    let mut minor: i32 = 0;
-    let ok = unsafe { egl_initialize(display, &mut major, &mut minor) };
-    ok != 0
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Pref {
-    #[serde(default)]
-    mode: String,
-}
-
-/// XDG config dir without an `AppHandle` (this runs pre-builder). Mirrors
-/// `dirs::config_dir` / Tauri's Linux `app_config_dir` base: `$XDG_CONFIG_HOME`
-/// if set and absolute, else `$HOME/.config`.
-fn config_dir() -> Option<PathBuf> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() && PathBuf::from(&xdg).is_absolute() {
-            return Some(PathBuf::from(xdg));
-        }
-    }
-    let home = std::env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join(".config"))
-}
-
-fn pref_path() -> Option<PathBuf> {
-    Some(config_dir()?.join(APP_CONFIG_SUBDIR).join(PREF_FILE))
-}
-
-fn read_pref() -> Option<Pref> {
-    let path = pref_path()?;
-    let text = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
-fn write_pref(pref: &Pref) {
-    let Some(path) = pref_path() else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(text) = serde_json::to_string_pretty(pref) {
-        let _ = std::fs::write(&path, text);
-    }
-}
-
-/// Set an env var only when the caller hasn't already, so an explicit user /
-/// launcher value is always respected.
-fn set_if_unset(key: &str, value: &str) {
+/// Set `key=val` only if `key` isn't already set, so an explicit value from the
+/// user's environment always wins over our default.
+fn set_if_unset(key: &str, val: &str) {
     if std::env::var_os(key).is_none() {
-        std::env::set_var(key, value);
+        std::env::set_var(key, val);
     }
 }
 
@@ -220,30 +79,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mode_round_trips() {
-        for m in [Mode::Auto, Mode::Software, Mode::Hardware] {
-            assert_eq!(Mode::from_str(m.as_str()), Some(m));
-        }
-        assert_eq!(Mode::from_str(""), None);
-        assert_eq!(Mode::from_str("gpu"), None);
+    fn override_accepts_affirmative_values() {
+        assert!(parse_override("1"));
+        assert!(parse_override("true"));
+        assert!(parse_override("yes"));
+        // Case-insensitive ...
+        assert!(parse_override("TRUE"));
+        assert!(parse_override("Yes"));
+        // ... and tolerates surrounding whitespace.
+        assert!(parse_override("  1  "));
     }
 
     #[test]
-    fn override_parses_truthy_and_falsy() {
-        for yes in ["1", "true", "yes"] {
-            assert_eq!(override_mode(Some(yes)), Some(Mode::Software), "{yes}");
-        }
-        for no in ["0", "false", "no"] {
-            assert_eq!(override_mode(Some(no)), Some(Mode::Hardware), "{no}");
-        }
-        assert_eq!(override_mode(Some("maybe")), None);
-        assert_eq!(override_mode(None), None);
+    fn override_rejects_other_values() {
+        assert!(!parse_override(""));
+        assert!(!parse_override("0"));
+        assert!(!parse_override("false"));
+        assert!(!parse_override("no"));
+        assert!(!parse_override("hardware"));
+        assert!(!parse_override("auto"));
     }
 
     #[test]
-    fn only_software_is_software() {
-        assert!(Mode::Software.is_software());
-        assert!(!Mode::Hardware.is_software());
-        assert!(!Mode::Auto.is_software());
+    fn set_if_unset_sets_when_absent() {
+        let key = "DOCVAULT_TEST_SET_IF_UNSET_ABSENT";
+        std::env::remove_var(key);
+        set_if_unset(key, "1");
+        assert_eq!(std::env::var(key).unwrap(), "1");
+        std::env::remove_var(key);
+    }
+
+    #[test]
+    fn set_if_unset_respects_existing() {
+        let key = "DOCVAULT_TEST_SET_IF_UNSET_PRESENT";
+        std::env::set_var(key, "0");
+        set_if_unset(key, "1");
+        assert_eq!(std::env::var(key).unwrap(), "0");
+        std::env::remove_var(key);
     }
 }
