@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "蓝天嗨彩文档管理",
+  "productName": "DocVault",
   "version": "0.1.0",
   "identifier": "com.lthc.docvault",
   "build": {
