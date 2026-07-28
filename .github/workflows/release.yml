@@ -62,10 +62,13 @@ jobs:
             os: windows-latest
             rustTarget: aarch64-pc-windows-msvc
             args: "--target aarch64-pc-windows-msvc --bundles nsis"
-          - label: macos-x64
-            os: macos-13
-            rustTarget: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
+          # macos-x64 (macos-13 / x86_64-apple-darwin) is intentionally skipped
+          # for now: the x64 macOS runner is resource-constrained. Restore the
+          # build by uncommenting this cell once capacity returns.
+          # - label: macos-x64
+          #   os: macos-13
+          #   rustTarget: x86_64-apple-darwin
+          #   args: "--target x86_64-apple-darwin"
           - label: macos-arm64
             os: macos-latest
             rustTarget: aarch64-apple-darwin
