@@ -43,7 +43,7 @@ export const enUS = {
   },
   boot: {
     loading: "Connecting to vault…",
-    welcome: "Welcome to DocVault",
+    welcome: "Welcome to 蓝天嗨彩文档管理",
     notInitialized: "Create a new vault or open an existing one. Default location: {root}",
     connect: "Create or select vault",
     initFailed: "Initialization failed: {error}",
@@ -343,7 +343,7 @@ export const enUS = {
   log: {
     title: "Activity Log",
     subtitle: "Records actions and job execution",
-    loaded: "DocVault loaded",
+    loaded: "蓝天嗨彩文档管理 loaded",
     navigate: "Navigate: {section}",
     selectedDocument: "Selected document: {name}",
     selectedVersion: "Selected version: {name} {version}",
@@ -369,7 +369,7 @@ export const enUS = {
     opened: "Opened document: {name}",
     openFailed: "Failed to open document: {name} ({error})",
     openFailedTitle: "Could not open document",
-    openNoDefaultApp: "DocVault could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
+    openNoDefaultApp: "蓝天嗨彩文档管理 could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
     renamed: "Renamed document: {name} -> {newName}",
     noteUpdated: "Updated note: {name} {version}",
     latest: "latest",
@@ -419,7 +419,7 @@ export const enUS = {
     initialized: "Initialized a new vault ({backend})",
     opened: "Attached existing vault ({backend})",
     unrecognized:
-      "Directory is non-empty and is not a recognizable DocVault vault.",
+      "Directory is non-empty and is not a recognizable 蓝天嗨彩文档管理 vault.",
     jobs_running:
       "A job is still running. Wait for it to finish before switching.",
     restic_password_required: "The restic backend requires a password.",
@@ -435,7 +435,7 @@ export const enUS = {
     title: "Archive repository",
     subtitle: "Inspect the active backup backend and repository state.",
     description:
-      "DocVault unpacks OOXML packages and hands them to the backup backend for versioned snapshots and content deduplication. The active backend and repository location are shown below.",
+      "蓝天嗨彩文档管理 unpacks OOXML packages and hands them to the backup backend for versioned snapshots and content deduplication. The active backend and repository location are shown below.",
     currentBackend: "Active backend",
     repositoryDir: "Repository directory",
     dataDir: "Staging directory",

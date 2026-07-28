@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DocVault",
+  "productName": "蓝天嗨彩文档管理",
   "version": "0.1.0",
   "identifier": "com.lthc.docvault",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "DocVault",
+        "title": "蓝天嗨彩文档管理",
         "width": 1320,
         "height": 860,
         "minWidth": 1180,

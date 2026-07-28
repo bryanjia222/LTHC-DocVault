@@ -143,7 +143,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "DocVault ${{ env.RELEASE_TAG }}"
+          releaseName: "蓝天嗨彩文档管理 ${{ env.RELEASE_TAG }}"
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

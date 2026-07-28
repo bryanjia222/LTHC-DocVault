@@ -354,9 +354,9 @@ function indentFor(depth: number): string {
 <template>
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">DV</div>
+      <div class="brand-mark">蓝</div>
       <div>
-        <strong>DocVault</strong>
+        <strong>蓝天嗨彩文档管理</strong>
         <span>{{ t("app.tagline") }}</span>
       </div>
     </div>
