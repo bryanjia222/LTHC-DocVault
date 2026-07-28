@@ -6,7 +6,7 @@
 # Usage (run from anywhere; resolves repo root from this script's location):
 #   scripts/docker-build-linux.sh            # x86_64 (default)
 #   scripts/docker-build-linux.sh --arm64    # aarch64 via qemu on an x64 host
-#   scripts/docker-build-linux.sh --rebuild   # force image rebuild
+#   scripts/docker-build-linux.sh --rebuild   # --no-cache full image rebuild
 #   scripts/docker-build-linux.sh --clean     # rm -rf the target dir first
 #   scripts/docker-build-linux.sh --mirror    # use China mirrors (rsproxy.cn + npmmirror)
 #   scripts/docker-build-linux.sh -- <tauri-args>   # e.g. -- --bundles deb
@@ -85,19 +85,21 @@ if [[ $CLEAN -eq 1 ]]; then
   rm -rf "apps/desktop/src-tauri/target"
 fi
 
-# --- build the image (cached unless --rebuild or missing) ---
-if [[ $REBUILD -eq 1 ]] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo ">> building image $IMAGE"
-  if [[ $USE_BUILDX -eq 1 ]]; then
-    # --load imports the single-platform image into the local docker store so
-    # the subsequent `docker run` can use it.
-    docker buildx build --platform "$PLATFORM" --load "${MIRROR_ARG[@]}" \
-      -f "$DOCKERFILE" -t "$IMAGE" .
-  else
-    docker build "${MIRROR_ARG[@]}" -f "$DOCKERFILE" -t "$IMAGE" .
-  fi
+# --- build the image ---
+# Always invoke `docker build`: Docker's layer cache makes it a near no-op
+# (~2s) when nothing changed, and - unlike an `image inspect` skip - this
+# automatically picks up Dockerfile edits without needing --rebuild. --rebuild
+# forwards --no-cache for a true full rebuild.
+NO_CACHE=()
+[[ $REBUILD -eq 1 ]] && NO_CACHE=(--no-cache)
+echo ">> building image $IMAGE"
+if [[ $USE_BUILDX -eq 1 ]]; then
+  # --load imports the single-platform image into the local docker store so
+  # the subsequent `docker run` can use it.
+  docker buildx build --platform "$PLATFORM" --load "${NO_CACHE[@]}" "${MIRROR_ARG[@]}" \
+    -f "$DOCKERFILE" -t "$IMAGE" .
 else
-  echo ">> image $IMAGE cached (--rebuild to force a rebuild)"
+  docker build "${NO_CACHE[@]}" "${MIRROR_ARG[@]}" -f "$DOCKERFILE" -t "$IMAGE" .
 fi
 
 # --- build the app (frontend + Rust + bundle) ---

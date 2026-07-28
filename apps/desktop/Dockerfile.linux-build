@@ -17,8 +17,16 @@
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Same set as release.yml "Install Linux dependencies".
+# Same set as release.yml "Install Linux dependencies", plus build-essential
+# (the CI ubuntu-22.04 runner ships gcc pre-installed; a bare ubuntu:22.04
+# image does not, so Rust build scripts fail with "linker `cc` not found"),
+# file + libfuse2 (Tauri's AppImage bundler runs appimagetool, which needs
+# `file` and FUSE at build time).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    file \
+    libfuse2 \
     libwebkit2gtk-4.1-dev \
     libssl-dev \
     libayatana-appindicator3-dev \
