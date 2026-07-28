@@ -139,18 +139,21 @@ fn probe_hardware_egl() -> bool {
 /// in the probe subprocess, so a segfault here is contained.
 fn egl_probe_ok() -> bool {
     use std::ffi::c_void;
-    let lib = match libloading::Library::new("libEGL.so.1") {
+    // libloading 0.8 made `Library::new` and `Library::get` `unsafe` (dlopen may
+    // run constructor code; the returned symbol is an untyped pointer). Each call
+    // is wrapped. The probe runs in a throwaway subprocess, so any fault is contained.
+    let lib = match unsafe { libloading::Library::new("libEGL.so.1") } {
         Ok(lib) => lib,
         Err(_) => return false,
     };
     let egl_get_display: libloading::Symbol<unsafe extern "C" fn(*mut c_void) -> *mut c_void> =
-        match lib.get(b"eglGetDisplay\0") {
+        match unsafe { lib.get(b"eglGetDisplay\0") } {
             Ok(f) => f,
             Err(_) => return false,
         };
     let egl_initialize: libloading::Symbol<
         unsafe extern "C" fn(*mut c_void, *mut i32, *mut i32) -> u32,
-    > = match lib.get(b"eglInitialize\0") {
+    > = match unsafe { lib.get(b"eglInitialize\0") } {
         Ok(f) => f,
         Err(_) => return false,
     };
