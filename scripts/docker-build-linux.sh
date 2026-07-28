@@ -8,6 +8,7 @@
 #   scripts/docker-build-linux.sh --arm64    # aarch64 via qemu on an x64 host
 #   scripts/docker-build-linux.sh --rebuild   # force image rebuild
 #   scripts/docker-build-linux.sh --clean     # rm -rf the target dir first
+#   scripts/docker-build-linux.sh --mirror    # use China mirrors (rsproxy.cn + npmmirror)
 #   scripts/docker-build-linux.sh -- <tauri-args>   # e.g. -- --bundles deb
 #
 # Prereqs: Docker. For --arm64 on an x64 host also needs binfmt/qemu:
@@ -29,6 +30,7 @@ TARGET="x86_64-unknown-linux-gnu"
 PLATFORM=""
 REBUILD=0
 CLEAN=0
+MIRROR=0
 TAURI_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -37,16 +39,24 @@ while [[ $# -gt 0 ]]; do
     --x64)    ARCH="x86_64";  TARGET="x86_64-unknown-linux-gnu";  PLATFORM="" ;;
     --rebuild) REBUILD=1 ;;
     --clean)  CLEAN=1 ;;
+    --mirror) MIRROR=1 ;;
+    --no-mirror) MIRROR=0 ;;
     --)       shift; while [[ $# -gt 0 ]]; do TAURI_ARGS+=("$1"); shift; done ;;
     -h|--help)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown arg: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
 
-IMAGE="docvault-linux-builder:${ARCH}"
+MIRROR_SUFFIX=""
+MIRROR_ARG=()
+if [[ $MIRROR -eq 1 ]]; then
+  MIRROR_SUFFIX="-cn"
+  MIRROR_ARG=(--build-arg USE_CN_MIRROR=1)
+fi
+IMAGE="docvault-linux-builder:${ARCH}${MIRROR_SUFFIX}"
 DOCKERFILE="apps/desktop/Dockerfile.linux-build"
 BUNDLE_DIR="apps/desktop/src-tauri/target/${TARGET}/release/bundle"
 
@@ -81,10 +91,10 @@ if [[ $REBUILD -eq 1 ]] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   if [[ $USE_BUILDX -eq 1 ]]; then
     # --load imports the single-platform image into the local docker store so
     # the subsequent `docker run` can use it.
-    docker buildx build --platform "$PLATFORM" --load \
+    docker buildx build --platform "$PLATFORM" --load "${MIRROR_ARG[@]}" \
       -f "$DOCKERFILE" -t "$IMAGE" .
   else
-    docker build -f "$DOCKERFILE" -t "$IMAGE" .
+    docker build "${MIRROR_ARG[@]}" -f "$DOCKERFILE" -t "$IMAGE" .
   fi
 else
   echo ">> image $IMAGE cached (--rebuild to force a rebuild)"

@@ -36,3 +36,33 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Rust stable (matches dtolnay/rust-toolchain@stable). Floating, like CI.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Opt-in China mirrors for cargo + npm - the fetch paths that are painfully slow
+# from China (crates.io crate downloads, the npm registry). Enabled with
+# `docker build --build-arg USE_CN_MIRROR=1` (or scripts/docker-build-linux.sh
+# --mirror); off by default so builds outside China hit upstream.
+#
+# chsrc (https://github.com/RubyMetric/chsrc) was the intended switcher, but its
+# `set`/`get` commands reported every target (cargo, npm, rustup) as
+# "unsupported" inside this container while `list` worked (v0.2.6, 2026-07-25),
+# so the configs are written directly with the same mirror URLs chsrc exposes:
+# rsproxy.cn (ByteDance) for cargo's sparse index, npmmirror for npm. The cargo
+# config is rsproxy.cn's published sparse-index config - verified: a serde fetch
+# completes in ~1s vs minutes on crates.io.
+#
+# Placed last so toggling the arg rebuilds only this layer, reusing the cached
+# apt/node/rust layers below.
+ARG USE_CN_MIRROR=0
+RUN if [ "$USE_CN_MIRROR" = "1" ]; then \
+      printf '%s\n' \
+        '[source.crates-io]' \
+        'replace-with = "rsproxy-sparse"' \
+        '' \
+        '[source.rsproxy-sparse]' \
+        'registry = "sparse+https://rsproxy.cn/index/"' \
+        '' \
+        '[net]' \
+        'git-fetch-with-cli = true' \
+        > /root/.cargo/config.toml && \
+      printf 'registry=https://registry.npmmirror.com\n' > /root/.npmrc ; \
+    fi
