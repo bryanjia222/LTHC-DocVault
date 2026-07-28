@@ -4,14 +4,27 @@
 #   # or run manually from the Actions tab ("Run workflow") with a tag.
 #   # leave the tag empty to just build and download the installers from the run.
 #
-# Matrix (6 installers):
-#   windows x64   -> .msi + .exe(NSIS)        native on windows-latest
-#   windows arm64 -> .exe(NSIS)               cross-compiled on windows-latest
+# Matrix (4 installers; macOS paused):
+#   windows x64   -> .msi + .exe(NSIS)        native on windows-latest         (GHA, 2x)
+#   windows arm64 -> .exe(NSIS)               cross-compiled on windows-latest (GHA, 2x)
 #                                              (WiX v3 can't produce arm64 .msi)
-#   macos x64     -> .app + .dmg              native on macos-13
-#   macos arm64   -> .app + .dmg              native on macos-latest
-#   linux x64     -> .deb + .rpm + AppImage  native on ubuntu-22.04
-#   linux arm64   -> .deb + .rpm + AppImage  native on ubuntu-22.04-arm
+#   linux x64     -> .deb + .rpm + AppImage   native on a self-hosted Linux x64 runner (free)
+#   linux arm64   -> .deb + .rpm + AppImage   native on ubuntu-22.04-arm       (GHA, 1x)
+#   macos arm64   -> PAUSED: no Apple hardware to verify. Restore by uncommenting
+#                    the macos-arm64 matrix cell once a Mac runner exists.
+#   macos x64     -> still skipped (resource-constrained x64 macOS runner).
+#
+# Why self-hosted for linux-x64: self-hosted runners consume zero GHA minutes,
+# and the 10x-multiplier macOS job is now paused -- both cut the bill hard.
+# Windows stays GHA-hosted for now; move it to a self-hosted Windows runner later.
+#
+# Self-hosted runner setup (linux-x64): register the lab server under
+#   Settings > Actions > Runners > New self-hosted runner, and add the custom
+#   label `docvault-linux-x64` (./config.sh --labels self-hosted,linux,x64,docvault-linux-x64
+#   or edit labels in the UI afterwards). The runner account must be able to
+#   `sudo apt-get install` (run as root, or grant NOPASSWD sudo); the workflow
+#   reinstalls the WebKit deps each run (fast no-op if already present).
+#   Rust + Node are installed by the workflow itself.
 #
 # restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
 # restic 0.19.1 has no aarch64-windows binary, so the windows-arm64 build
@@ -69,12 +82,14 @@ jobs:
           #   os: macos-13
           #   rustTarget: x86_64-apple-darwin
           #   args: "--target x86_64-apple-darwin"
-          - label: macos-arm64
-            os: macos-latest
-            rustTarget: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
+          # macos-arm64 PAUSED (2026-07-28): no Apple hardware to verify builds
+          # or signing. Restore by uncommenting once a Mac runner is available.
+          # - label: macos-arm64
+          #   os: macos-latest
+          #   rustTarget: aarch64-apple-darwin
+          #   args: "--target aarch64-apple-darwin"
           - label: linux-x64
-            os: ubuntu-22.04
+            os: docvault-linux-x64
             rustTarget: x86_64-unknown-linux-gnu
             args: "--target x86_64-unknown-linux-gnu"
           - label: linux-arm64
@@ -99,7 +114,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Install Linux dependencies
-        if: startsWith(matrix.os, 'ubuntu')
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
