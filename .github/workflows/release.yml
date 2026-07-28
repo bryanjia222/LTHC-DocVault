@@ -121,6 +121,14 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      # Stamp the tag (sans "v") into src-tauri/Cargo.toml's [package] version so
+      # the bundled app version matches the release tag. tauri.conf.json omits
+      # `version`, so Tauri reads it from here. Skipped on branch dispatches.
+      - name: Set app version from tag
+        if: env.RELEASE_TAG != ''
+        shell: bash
+        run: node apps/desktop/scripts/set-version.mjs "${RELEASE_TAG#v}" apps/desktop/src-tauri/Cargo.toml
+
       - name: Build (no release)
         if: env.RELEASE_TAG == ''
         working-directory: apps/desktop
