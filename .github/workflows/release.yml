@@ -1,23 +1,24 @@
-# Linux x64 packaging only (for now).
+# Linux x64 packaging.
 #
-# We are stabilizing the Linux build -- the WebKitGTK dmabuf/EGL crash handled
-# in src-tauri/src/platform/linux.rs. Every other platform is temporarily
-# disabled so a `workflow_dispatch` build is fast and only exercises the path we
-# are debugging. The other matrix cells are preserved commented below; uncomment
-# to restore once Linux is solid.
+# The WebKitGTK dmabuf/EGL crash is fixed in src-tauri/src/platform/linux.rs
+# (WEBKIT_DISABLE_DMABUF_RENDERER=1 set at boot), so Linux is solid. Other
+# platforms are paused; their matrix cells are preserved commented below --
+# uncomment to restore.
 #
 #   git tag v0.1.x && git push --tags        # build + draft a Release
 #   # or Actions tab > "Run workflow" with an empty tag -> build only, no
 #   # release; installers land in the run's artifacts.
 #
 # Matrix (only linux-x64 active):
-#   linux x64   -> .deb + .rpm + AppImage   native on ubuntu-22.04  (GHA, 1x)
+#   linux x64   -> .deb + .rpm + AppImage   on self-hosted runner cx-1
 #
-# linux-x64 runs on a GitHub-hosted ubuntu-22.04 runner for now so builds work
-# with zero setup while we iterate. The earlier self-hosted `docvault-linux-x64`
-# runner is deferred until (a) the Linux graphics issues are resolved and (b)
-# the host's sudo/Docker access is sorted; flip `os:` back to `docvault-linux-x64`
-# and register the runner to re-enable self-hosting (zero GHA minutes).
+# linux-x64 runs on the self-hosted runner `cx-1` (Docker container
+# `linux-runner-1`, image `self-hosted-runner-linux:local`, label
+# `docvault-linux-x64`) -- zero GHA minutes, China mirrors (rsproxy/npmmirror),
+# warm cargo/rustup/npm caches. Build deps (webkit2gtk-4.1, appindicator, rsvg,
+# patchelf, ...) are baked into the image, so "Install Linux dependencies" is
+# gated to `!self-hosted` and only runs on a GitHub-hosted fallback. Rust is
+# installed at runtime via dtolnay/rust-toolchain (persisted in a volume).
 #
 # restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
 #
@@ -59,7 +60,7 @@ jobs:
       matrix:
         include:
           - label: linux-x64
-            os: ubuntu-22.04
+            os: docvault-linux-x64
             rustTarget: x86_64-unknown-linux-gnu
             args: "--target x86_64-unknown-linux-gnu"
           # --- Paused while we stabilize the Linux build (see header). Each cell
@@ -98,7 +99,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !contains(runner.labels.*.name, 'self-hosted')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
