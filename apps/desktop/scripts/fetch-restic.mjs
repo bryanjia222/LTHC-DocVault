@@ -41,6 +41,20 @@ import crypto from "node:crypto";
 
 import extract from "extract-zip";
 import unbzip2Stream from "unbzip2-stream";
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
+
+// Node's global fetch() (undici) does not read HTTP(S)_PROXY/NO_PROXY env vars
+// by default, so the restic download from github.com would fail on hosts that
+// can only reach the internet through a proxy (e.g. the self-hosted CI runner
+// behind the LAN proxy). When a proxy env var is present, route fetch through
+// undici's EnvHttpProxyAgent, which honors NO_PROXY too. No-op without a proxy,
+// so direct-connected dev machines are unaffected.
+if (
+  process.env.HTTPS_PROXY || process.env.https_proxy ||
+  process.env.HTTP_PROXY || process.env.http_proxy
+) {
+  setGlobalDispatcher(new EnvHttpProxyAgent());
+}
 
 const VERSION = "0.19.1";
 const RELEASE_BASE = `https://github.com/restic/restic/releases/download/v${VERSION}`;
