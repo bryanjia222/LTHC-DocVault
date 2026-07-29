@@ -1,38 +1,29 @@
-# One-click cross-platform packaging.
+# Linux x64 packaging only (for now).
 #
-#   git tag v0.1.0 && git push --tags        # builds everything, drafts a Release
-#   # or run manually from the Actions tab ("Run workflow") with a tag.
-#   # leave the tag empty to just build and download the installers from the run.
+# We are stabilizing the Linux build -- the WebKitGTK dmabuf/EGL crash handled
+# in src-tauri/src/platform/linux.rs. Every other platform is temporarily
+# disabled so a `workflow_dispatch` build is fast and only exercises the path we
+# are debugging. The other matrix cells are preserved commented below; uncomment
+# to restore once Linux is solid.
 #
-# Matrix (4 installers; macOS paused):
-#   windows x64   -> .msi + .exe(NSIS)        native on windows-latest         (GHA, 2x)
-#   windows arm64 -> .exe(NSIS)               cross-compiled on windows-latest (GHA, 2x)
-#                                              (WiX v3 can't produce arm64 .msi)
-#   linux x64     -> .deb + .rpm + AppImage   native on a self-hosted Linux x64 runner (free)
-#   linux arm64   -> .deb + .rpm + AppImage   native on ubuntu-22.04-arm       (GHA, 1x)
-#   macos arm64   -> PAUSED: no Apple hardware to verify. Restore by uncommenting
-#                    the macos-arm64 matrix cell once a Mac runner exists.
-#   macos x64     -> still skipped (resource-constrained x64 macOS runner).
+#   git tag v0.1.x && git push --tags        # build + draft a Release
+#   # or Actions tab > "Run workflow" with an empty tag -> build only, no
+#   # release; installers land in the run's artifacts.
 #
-# Why self-hosted for linux-x64: self-hosted runners consume zero GHA minutes,
-# and the 10x-multiplier macOS job is now paused -- both cut the bill hard.
-# Windows stays GHA-hosted for now; move it to a self-hosted Windows runner later.
+# Matrix (only linux-x64 active):
+#   linux x64   -> .deb + .rpm + AppImage   native on ubuntu-22.04  (GHA, 1x)
 #
-# Self-hosted runner setup (linux-x64): register the lab server under
-#   Settings > Actions > Runners > New self-hosted runner, and add the custom
-#   label `docvault-linux-x64` (./config.sh --labels self-hosted,linux,x64,docvault-linux-x64
-#   or edit labels in the UI afterwards). The runner account must be able to
-#   `sudo apt-get install` (run as root, or grant NOPASSWD sudo); the workflow
-#   reinstalls the WebKit deps each run (fast no-op if already present).
-#   Rust + Node are installed by the workflow itself.
+# linux-x64 runs on a GitHub-hosted ubuntu-22.04 runner for now so builds work
+# with zero setup while we iterate. The earlier self-hosted `docvault-linux-x64`
+# runner is deferred until (a) the Linux graphics issues are resolved and (b)
+# the host's sudo/Docker access is sorted; flip `os:` back to `docvault-linux-x64`
+# and register the runner to re-enable self-hosting (zero GHA minutes).
 #
 # restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
-# restic 0.19.1 has no aarch64-windows binary, so the windows-arm64 build
-# bundles the x86_64 restic under Windows-on-ARM x64 emulation (see build.rs).
 #
 # Code signing is opt-in: set APPLE_* / WINDOWS_CERTIFICATE_* secrets to sign;
-# otherwise builds are unsigned (Gatekeeper / SmartScreen will warn). Drafts are
-# never published automatically - review then publish the Release by hand.
+# otherwise builds are unsigned. Drafts are never published automatically -
+# review then publish the Release by hand.
 
 name: release
 
@@ -67,35 +58,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: windows-x64
-            os: windows-latest
-            rustTarget: x86_64-pc-windows-msvc
-            args: "--target x86_64-pc-windows-msvc"
-          - label: windows-arm64
-            os: windows-latest
-            rustTarget: aarch64-pc-windows-msvc
-            args: "--target aarch64-pc-windows-msvc --bundles nsis"
-          # macos-x64 (macos-13 / x86_64-apple-darwin) is intentionally skipped
-          # for now: the x64 macOS runner is resource-constrained. Restore the
-          # build by uncommenting this cell once capacity returns.
-          # - label: macos-x64
-          #   os: macos-13
-          #   rustTarget: x86_64-apple-darwin
-          #   args: "--target x86_64-apple-darwin"
-          # macos-arm64 PAUSED (2026-07-28): no Apple hardware to verify builds
-          # or signing. Restore by uncommenting once a Mac runner is available.
+          - label: linux-x64
+            os: ubuntu-22.04
+            rustTarget: x86_64-unknown-linux-gnu
+            args: "--target x86_64-unknown-linux-gnu"
+          # --- Paused while we stabilize the Linux build (see header). Each cell
+          # --- is preserved verbatim; uncomment to restore that target. ---
+          # - label: windows-x64
+          #   os: windows-latest
+          #   rustTarget: x86_64-pc-windows-msvc
+          #   args: "--target x86_64-pc-windows-msvc"
+          # - label: windows-arm64
+          #   os: windows-latest
+          #   rustTarget: aarch64-pc-windows-msvc
+          #   args: "--target aarch64-pc-windows-msvc --bundles nsis"
+          # - label: linux-arm64
+          #   os: ubuntu-22.04-arm
+          #   rustTarget: aarch64-unknown-linux-gnu
+          #   args: "--target aarch64-unknown-linux-gnu"
           # - label: macos-arm64
           #   os: macos-latest
           #   rustTarget: aarch64-apple-darwin
           #   args: "--target aarch64-apple-darwin"
-          - label: linux-x64
-            os: docvault-linux-x64
-            rustTarget: x86_64-unknown-linux-gnu
-            args: "--target x86_64-unknown-linux-gnu"
-          - label: linux-arm64
-            os: ubuntu-22.04-arm
-            rustTarget: aarch64-unknown-linux-gnu
-            args: "--target aarch64-unknown-linux-gnu"
 
     steps:
       - uses: actions/checkout@v4
