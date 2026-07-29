@@ -49,6 +49,26 @@ pub(super) fn prepare_boot() {
     if is_software_forced() {
         set_if_unset(ENV_SOFTWARE, "1");
     }
+
+    // Boot diagnostic to stderr. We deliberately use `eprintln!` rather than
+    // `tracing`: the subscriber isn't installed yet (it comes up in `setup`),
+    // and stderr is unbuffered so the line survives the early SIGSEGV we are
+    // diagnosing -- a non-blocking file appender could lose its buffer on the
+    // crash. Run from a terminal and read the line:
+    //   - line absent          -> this binary predates the fix (stale build);
+    //                             rebuild from current main.
+    //   - =1                   -> the var IS set in-process; if it still
+    //                             crashes, dmabuf-disable alone is insufficient
+    //                             on this host (would need COMPOSITING_MODE).
+    //   - =<other, e.g. 0/''>  -> the session pre-set the var and set_if_unset
+    //                             respected it -> switch to unconditional.
+    eprintln!(
+        "[docvault:boot] {}={} {}={}",
+        ENV_DMABUF,
+        std::env::var(ENV_DMABUF).unwrap_or_else(|_| "<unset>".into()),
+        ENV_SOFTWARE,
+        std::env::var(ENV_SOFTWARE).unwrap_or_else(|_| "<unset>".into()),
+    );
 }
 
 /// Whether the user asked (via `DOCVAULT_SOFTWARE_RENDERING`) to force software
