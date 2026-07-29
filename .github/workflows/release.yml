@@ -17,7 +17,9 @@
 # `docvault-linux-x64`) -- zero GHA minutes, China mirrors (rsproxy/npmmirror),
 # warm cargo/rustup/npm caches. Build deps (webkit2gtk-4.1, appindicator, rsvg,
 # patchelf, ...) are baked into the image, so "Install Linux dependencies" is
-# gated to `!self-hosted` and only runs on a GitHub-hosted fallback. Rust is
+# gated to `runner.environment != 'self-hosted'` (the runner context exposes no
+# .labels property; runner.environment is 'github-hosted' or 'self-hosted') and
+# only runs on a GitHub-hosted fallback. Rust is
 # installed at runtime via dtolnay/rust-toolchain (persisted in a volume).
 #
 # restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
@@ -99,7 +101,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux' && !contains(runner.labels.*.name, 'self-hosted')
+        if: runner.os == 'Linux' && runner.environment != 'self-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
