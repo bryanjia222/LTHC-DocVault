@@ -65,6 +65,8 @@ export const enUS = {
     commit: "Commit",
     addDocument: "Add document",
     export: "Export",
+    upload: "Upload",
+    importDocument: "Import new document",
     checkout: "Checkout",
     checkoutAlreadyCurrent: "Already the current version",
     open: "Open",

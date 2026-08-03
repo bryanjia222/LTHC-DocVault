@@ -64,6 +64,8 @@ export const zhCN = {
     commit: "提交",
     addDocument: "添加文档",
     export: "导出",
+    upload: "上传",
+    importDocument: "导入新文档",
     checkout: "切换版本",
     checkoutAlreadyCurrent: "已是当前版本",
     open: "打开",

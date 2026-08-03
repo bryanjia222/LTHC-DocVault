@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import { Download, ExternalLink, Eye, Upload } from "@lucide/vue";
 import { useTableColumns } from "../composables/useTableColumns";
 import { extOf } from "../utils/file";
 import { currentVersionLabel } from "../utils/documentLabel";
@@ -24,6 +25,10 @@ const emit = defineEmits<{
   dblclick: [document: Document];
   dragstart: [event: DragEvent, document: Document];
   contextmenu: [event: MouseEvent, document: Document];
+  open: [document: Document];
+  preview: [document: Document];
+  upload: [document: Document];
+  export: [document: Document];
 }>();
 
 const { t } = useI18n();
@@ -80,6 +85,50 @@ const { visibleColumns } = useTableColumns();
       <template v-else-if="id === 'updated'">
         <span class="cell-text">{{ props.document.updatedAt }}</span>
       </template>
+    </td>
+    <td
+      class="row-actions"
+      data-col="actions"
+      @click.stop
+      @dblclick.stop
+      @dragstart.stop.prevent
+    >
+      <button
+        class="row-action"
+        type="button"
+        :title="t('actions.open')"
+        @click="emit('open', props.document)"
+      >
+        <ExternalLink aria-hidden="true" />
+        <span>{{ t("actions.open") }}</span>
+      </button>
+      <button
+        class="row-action"
+        type="button"
+        :title="t('actions.preview')"
+        @click="emit('preview', props.document)"
+      >
+        <Eye aria-hidden="true" />
+        <span>{{ t("actions.preview") }}</span>
+      </button>
+      <button
+        class="row-action"
+        type="button"
+        :title="t('actions.importDocument')"
+        @click="emit('upload', props.document)"
+      >
+        <Upload aria-hidden="true" />
+        <span>{{ t("actions.upload") }}</span>
+      </button>
+      <button
+        class="row-action"
+        type="button"
+        :title="t('actions.export')"
+        @click="emit('export', props.document)"
+      >
+        <Download aria-hidden="true" />
+        <span>{{ t("actions.export") }}</span>
+      </button>
     </td>
   </tr>
 </template>
@@ -166,5 +215,49 @@ td {
 .mod-pill[data-mod="missing"] {
   background: color-mix(in srgb, var(--danger-text) 16%, var(--bg-surface));
   color: var(--danger-text);
+}
+
+/* Quick-action buttons (open / preview / upload / export), hover-revealed on
+   the row. Reserved footprint so the table does not shift when they appear. */
+.row-actions {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  margin: 0 2px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.row-action:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+tr:hover .row-action,
+tr:focus-within .row-action {
+  opacity: 1;
+}
+
+.row-action svg {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 </style>
