@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChartNetwork, List, Maximize2, RotateCcw } from "@lucide/vue";
+import { ChartNetwork, ChevronDown, List, Maximize2, Pin, PinOff, RotateCcw } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
+import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
 import { useActivityLog } from "../../composables/useActivityLog";
 import {
   getParentLabel,
@@ -41,6 +42,11 @@ const { t } = useI18n();
 // Whether a document is selected (drives the version-count subtitle).
 const { selectedDocument } = useDocuments();
 const { log } = useActivityLog();
+// Global pinned pref: unpinned (default) = the panel tucks away when it loses
+// focus; pinned = always stays open.
+const { pinned, setPinned } = useHistoryPinPref();
+const collapsed = ref(false);
+const panelRef = ref<HTMLElement | null>(null);
 
 const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
 
@@ -48,49 +54,103 @@ function resetGraph() {
   graphRef.value?.resetView();
   log(t("log.graphPanReset"));
 }
+
+// Pinning re-opens a collapsed panel.
+watch(pinned, (isPinned) => {
+  if (isPinned) collapsed.value = false;
+});
+
+function togglePinned() {
+  setPinned(!pinned.value);
+}
+
+/** Clicking the heading re-expands a collapsed (unpinned) panel. */
+function onHeadingClick() {
+  if (collapsed.value) collapsed.value = false;
+}
+
+/** Unpinned: collapse when focus leaves the panel entirely (moving between the
+ *  panel's own controls keeps it open - relatedTarget stays inside). */
+function onPanelFocusOut(event: FocusEvent) {
+  if (pinned.value) return;
+  const next = event.relatedTarget as Node | null;
+  if (!next || !panelRef.value?.contains(next)) {
+    collapsed.value = true;
+  }
+}
 </script>
 
 <template>
   <section
+    ref="panelRef"
     class="version-list"
-    :class="props.viewMode === 'tree' ? 'tree-mode' : 'list-mode'"
+    :class="[
+      props.viewMode === 'tree' ? 'tree-mode' : 'list-mode',
+      { collapsed },
+    ]"
     :aria-label="t('details.versionHistoryLabel')"
+    @focusout="onPanelFocusOut"
   >
-    <div class="section-heading">
+    <div class="section-heading" @click="onHeadingClick">
       <div class="heading-title">
         <h3>{{ t("details.versionHistory") }}</h3>
         <small v-if="selectedDocument" class="heading-meta">{{
           t("details.totalVersions", { count: props.versions.length })
         }}</small>
       </div>
-      <div class="segmented-control">
+      <div class="heading-actions">
         <button
           type="button"
-          :class="{ active: props.viewMode === 'list' }"
-          :title="t('details.listView')"
-          :aria-label="t('details.listView')"
-          @click="emit('update:view-mode', 'list')"
-        >
-          <List aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          :class="{ active: props.viewMode === 'tree' }"
-          :disabled="!props.hasBranching"
-          :title="
-            props.hasBranching
-              ? t('details.treeView')
-              : t('details.noBranchingTooltip')
+          class="icon-button"
+          :title="pinned ? t('details.unpinHistory') : t('details.pinHistory')"
+          :aria-label="
+            pinned ? t('details.unpinHistory') : t('details.pinHistory')
           "
-          :aria-label="t('details.treeView')"
-          @click="emit('update:view-mode', 'tree')"
+          @click.stop="togglePinned"
         >
-          <ChartNetwork aria-hidden="true" />
+          <Pin v-if="pinned" aria-hidden="true" />
+          <PinOff v-else aria-hidden="true" />
         </button>
+        <button
+          v-if="collapsed"
+          type="button"
+          class="icon-button"
+          :title="t('details.expandHistory')"
+          :aria-label="t('details.expandHistory')"
+          @click.stop="collapsed = false"
+        >
+          <ChevronDown aria-hidden="true" />
+        </button>
+        <div v-else class="segmented-control">
+          <button
+            type="button"
+            :class="{ active: props.viewMode === 'list' }"
+            :title="t('details.listView')"
+            :aria-label="t('details.listView')"
+            @click="emit('update:view-mode', 'list')"
+          >
+            <List aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            :class="{ active: props.viewMode === 'tree' }"
+            :disabled="!props.hasBranching"
+            :title="
+              props.hasBranching
+                ? t('details.treeView')
+                : t('details.noBranchingTooltip')
+            "
+            :aria-label="t('details.treeView')"
+            @click="emit('update:view-mode', 'tree')"
+          >
+            <ChartNetwork aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </div>
 
     <div
+      v-if="!collapsed"
       class="version-history-scroll"
       :class="{ 'tree-mode': props.viewMode === 'tree' }"
     >
@@ -194,6 +254,27 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heading-actions .icon-button {
+  width: 30px;
+  height: 30px;
+}
+
+/* Collapsed (unpinned) drawer state: the heading becomes the click-to-expand
+   target, so it reads as interactive. */
+.section-heading.collapsed {
+  cursor: pointer;
+}
+
+.section-heading.collapsed:hover h3 {
+  color: var(--text-primary);
 }
 
 .heading-title {
