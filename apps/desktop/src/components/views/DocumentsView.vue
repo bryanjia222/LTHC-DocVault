@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUpDown, ChevronDown, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
+import { ArrowUpDown, ChevronLeft, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -212,11 +212,6 @@ watch(pinned, (isPinned) => {
 
 function togglePanelPinned() {
   setPinned(!pinned.value);
-}
-
-/** Clicking the collapsed header re-expands the panel. */
-function onDetailHeaderClick() {
-  if (panelCollapsed.value) panelCollapsed.value = false;
 }
 
 /** Unpinned: collapse when focus leaves the panel entirely (moving between the
@@ -612,16 +607,13 @@ onBeforeUnmount(() => {
     </section>
 
     <aside
+      v-if="!panelCollapsed"
       ref="detailPanelRef"
       class="detail-panel surface"
       :aria-label="t('details.label')"
       @focusout="onDetailPanelFocusOut"
     >
-      <div
-        class="panel-header compact"
-        :class="{ collapsed: panelCollapsed }"
-        @click="onDetailHeaderClick"
-      >
+      <div class="panel-header compact">
         <div>
           <h2 :title="selectedDocument?.name ?? ''">
             {{ selectedDocument?.name ?? t("log.noDocument") }}
@@ -648,41 +640,41 @@ onBeforeUnmount(() => {
             <Pin v-if="pinned" aria-hidden="true" />
             <PinOff v-else aria-hidden="true" />
           </button>
-          <button
-            v-if="panelCollapsed"
-            class="icon-action-button panel-pin"
-            type="button"
-            :title="t('details.expandPanel')"
-            :aria-label="t('details.expandPanel')"
-            @click.stop="panelCollapsed = false"
-          >
-            <ChevronDown aria-hidden="true" />
-          </button>
         </div>
       </div>
 
-      <template v-if="!panelCollapsed">
-        <DocumentMetaSection />
+      <DocumentMetaSection />
 
-        <VersionHistoryPanel
-          :versions="versions"
-          :view-mode="versionViewMode"
-          :has-branching="hasBranching"
-          :selected-version-id="selectedVersionId"
-          :maximized="isGraphMaximized"
-          @update:view-mode="setViewMode"
-          @select="chooseVersion"
-          @contextmenu="onGraphContextMenu"
-          @maximize="setGraphMaximized(true)"
-        />
+      <VersionHistoryPanel
+        :versions="versions"
+        :view-mode="versionViewMode"
+        :has-branching="hasBranching"
+        :selected-version-id="selectedVersionId"
+        :maximized="isGraphMaximized"
+        @update:view-mode="setViewMode"
+        @select="chooseVersion"
+        @contextmenu="onGraphContextMenu"
+        @maximize="setGraphMaximized(true)"
+      />
 
-        <VersionDetailSection
-          :version="selectedVersion"
-          @edit-note="openNoteEdit"
-        />
-      </template>
+      <VersionDetailSection
+        :version="selectedVersion"
+        @edit-note="openNoteEdit"
+      />
     </aside>
   </section>
+
+  <!-- Floating re-expand control shown while the (unpinned) card is hidden. -->
+  <button
+    v-if="panelCollapsed"
+    class="detail-panel-toggle"
+    type="button"
+    :title="t('details.expandPanel')"
+    :aria-label="t('details.expandPanel')"
+    @click="panelCollapsed = false"
+  >
+    <ChevronLeft aria-hidden="true" />
+  </button>
 
   <GraphMaximized
     v-if="isGraphMaximized"
@@ -743,14 +735,38 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* Collapsed (unpinned) drawer state: the whole panel is just the header, which
-   becomes the click-to-expand target. */
-.panel-header.compact.collapsed {
+/* Floating re-expand control: shown at the right edge while the (unpinned)
+   detail panel is fully hidden, so the table can reclaim the whole width. */
+.detail-panel-toggle {
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  box-shadow: var(--overlay-shadow);
   cursor: pointer;
 }
 
-.panel-header.compact.collapsed:hover h2 {
+.detail-panel-toggle:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.detail-panel-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 
 .detail-panel {
