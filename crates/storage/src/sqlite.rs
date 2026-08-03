@@ -192,9 +192,7 @@ impl VaultStorage {
         let placeholders = std::iter::repeat_n("?", version_ids.len())
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!(
-            "DELETE FROM versions WHERE document_id = ? AND id IN ({placeholders})"
-        );
+        let sql = format!("DELETE FROM versions WHERE document_id = ? AND id IN ({placeholders})");
         // document_id first, then each version id, as the bound params.
         let mut params: Vec<String> = Vec::with_capacity(version_ids.len() + 1);
         params.push(document_id.to_owned());

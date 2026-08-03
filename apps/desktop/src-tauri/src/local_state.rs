@@ -326,10 +326,7 @@ mod tests {
         assert_eq!(slice.projects.len(), 1);
         assert_eq!(slice.projects[0].id, "proj1");
         assert_eq!(slice.projects[0].name, "诉讼案");
-        assert_eq!(
-            slice.assignments.get("docA").unwrap(),
-            &"proj1".to_owned()
-        );
+        assert_eq!(slice.assignments.get("docA").unwrap(), &"proj1".to_owned());
         let sort = slice.sort_prefs.get("proj1").unwrap();
         assert_eq!(sort.key, "name");
         assert_eq!(sort.direction, "asc");

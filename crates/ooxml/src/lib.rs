@@ -544,12 +544,18 @@ mod tests {
             create_empty_package(format, None, &path).unwrap();
 
             // Structurally a valid OOXML package (ZIP + [Content_Types].xml).
-            assert!(is_ooxml_package(&path), "{format} should be an OOXML package");
+            assert!(
+                is_ooxml_package(&path),
+                "{format} should be an OOXML package"
+            );
 
             // Contains the content-types marker and the format's root part.
             let manifest = package_manifest(&path).unwrap();
             let paths: Vec<&str> = manifest.entries.iter().map(|e| e.path.as_str()).collect();
-            assert!(paths.contains(&"[Content_Types].xml"), "{format} lists [Content_Types].xml");
+            assert!(
+                paths.contains(&"[Content_Types].xml"),
+                "{format} lists [Content_Types].xml"
+            );
             let root = match format {
                 "docx" => "word/document.xml",
                 "xlsx" => "xl/workbook.xml",
@@ -582,8 +588,14 @@ mod tests {
         unpack_package(&wide, &unpacked).unwrap();
         let presentation =
             fs::read_to_string(unpacked.join("ppt").join("presentation.xml")).unwrap();
-        assert!(presentation.contains(r#"type="screen16x9""#), "16:9 slide type");
-        assert!(presentation.contains(r#"cx="12192000""#), "16:9 slide width");
+        assert!(
+            presentation.contains(r#"type="screen16x9""#),
+            "16:9 slide type"
+        );
+        assert!(
+            presentation.contains(r#"cx="12192000""#),
+            "16:9 slide width"
+        );
 
         // None -> 4:3 default (unchanged behavior).
         let standard = root.join("standard.pptx");
@@ -592,7 +604,10 @@ mod tests {
         unpack_package(&standard, &unpacked2).unwrap();
         let presentation2 =
             fs::read_to_string(unpacked2.join("ppt").join("presentation.xml")).unwrap();
-        assert!(presentation2.contains(r#"type="screen4x3""#), "4:3 slide type");
+        assert!(
+            presentation2.contains(r#"type="screen4x3""#),
+            "4:3 slide type"
+        );
         assert!(presentation2.contains(r#"cx="9144000""#), "4:3 slide width");
     }
 }

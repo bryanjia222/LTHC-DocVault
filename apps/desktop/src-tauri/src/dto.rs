@@ -164,9 +164,7 @@ pub struct SortPref {
 /// `Vec<String>` is collapsed to its first element, and a single `String` passes
 /// through. So files written before single-membership load transparently (the
 /// dropped extra memberships are recoverable by re-assigning in the UI).
-fn deserialize_assignments<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<String, String>, D::Error>
+fn deserialize_assignments<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

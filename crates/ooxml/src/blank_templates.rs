@@ -134,10 +134,7 @@ pub(crate) const PPTX: &[Part] = &[
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
 </Relationships>"#,
     ),
-    (
-        "ppt/presentation.xml",
-        PRESENTATION_4_3,
-    ),
+    ("ppt/presentation.xml", PRESENTATION_4_3),
     (
         "ppt/_rels/presentation.xml.rels",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -248,8 +245,7 @@ pub(crate) fn presentation_xml(aspect_ratio: Option<&str>) -> &'static str {
 /// stay on their static slices.
 pub(crate) fn pptx_parts(aspect_ratio: Option<&str>) -> Vec<(String, String)> {
     let presentation = presentation_xml(aspect_ratio);
-    PPTX
-        .iter()
+    PPTX.iter()
         .map(|&(path, content)| {
             let content = if path == "ppt/presentation.xml" {
                 presentation

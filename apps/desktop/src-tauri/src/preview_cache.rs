@@ -118,10 +118,7 @@ pub async fn write_preview_cache(
 /// other vaults' caches are left alone). No-op when no vault is open or the dir
 /// does not yet exist.
 #[tauri::command]
-pub async fn clear_preview_cache(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn clear_preview_cache(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let Some(vault_key) = current_vault_root(&state) else {
         return Ok(());
     };
