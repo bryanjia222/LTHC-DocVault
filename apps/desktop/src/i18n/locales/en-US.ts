@@ -11,6 +11,16 @@ export const enUS = {
     settings: "Settings",
     trash: "Recycle bin",
   },
+  quickLinks: {
+    title: "Quick links",
+    add: "Add link",
+    urlPlaceholder: "Enter a URL, press Enter",
+    titlePlaceholder: "Link name",
+    open: "Open",
+    edit: "Edit",
+    delete: "Delete",
+    empty: "No quick links yet",
+  },
   sidebar: {
     vault: "Vault",
     documents: "Documents",

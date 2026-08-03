@@ -429,6 +429,31 @@ async function listPreviewCache(): Promise<{ key: string; html: string }[]> {
 }
 
 /**
+ * Fetch a web page's `<title>` + favicon for the sidebar quick-links add flow.
+ * The backend returns `{ title, favicon }` with null fields on any failure
+ * (the link can still be added, falling back to a generic icon). Null outside
+ * Tauri (browser dev has no backend fetch).
+ */
+async function fetchUrlMeta(
+  url: string,
+): Promise<{ title: string | null; favicon: string | null } | null> {
+  if (!isTauri()) return null;
+  return invoke<{ title: string | null; favicon: string | null }>(
+    "fetch_url_meta",
+    { url },
+  );
+}
+
+/**
+ * Open a web link in the system default browser (http/https only). No-op
+ * outside Tauri.
+ */
+async function openUrl(url: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("open_url", { url });
+}
+
+/**
  * Remove the library copy for a document (the tool-owned working file). Used on
  * delete so the working copy does not outlive its document. Missing file/dir is
  * a no-op. Synchronous.
@@ -628,6 +653,8 @@ export function useVault() {
     writePreviewCache,
     clearPreviewCache,
     listPreviewCache,
+    fetchUrlMeta,
+    openUrl,
     removeLibraryCopy,
     ensureLibraryCopies,
     cancelJob,

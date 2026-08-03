@@ -5,13 +5,16 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  ExternalLink,
   FilePlus,
   FileText,
   FileUp,
   Folder,
   FolderPlus,
+  Link,
   MoreVertical,
   Pencil,
+  Plus,
   Settings,
   Trash2,
 } from "@lucide/vue";
@@ -21,7 +24,8 @@ import { useVaultActions } from "../composables/useVaultActions";
 import { useDocuments } from "../composables/useDocuments";
 import { useDesktopState } from "../composables/useDesktopState";
 import { useDialogs } from "../composables/useDialogs";
-import { confirmDialog } from "../composables/useVault";
+import { confirmDialog, useVault } from "../composables/useVault";
+import { useQuickLinks, type QuickLink } from "../composables/useQuickLinks";
 import { useContextMenu } from "../composables/useContextMenu";
 import type { ProjectDef } from "../data/mock";
 
@@ -31,6 +35,85 @@ const { navigate, startImport } = useVaultActions();
 const { activeProjectId, selectAll, selectProject } = useDocuments();
 const desktop = useDesktopState();
 const { openNewDocument } = useDialogs();
+
+// --- quick links (sidebar web bookmarks) ---
+const { quickLinks, addQuickLink, updateQuickLink, removeQuickLink } =
+  useQuickLinks();
+const { fetchUrlMeta, openUrl } = useVault();
+
+const addingLink = ref(false);
+const newLinkUrl = ref("");
+const addUrlInput = ref<HTMLInputElement | null>(null);
+const editingLinkId = ref<string | null>(null);
+const editTitle = ref("");
+const editUrl = ref("");
+const editTitleInput = ref<HTMLInputElement | null>(null);
+
+/** Prepend https:// when the user typed a bare domain, so an enter-to-add URL
+ *  always opens as a web link. */
+function normalizeUrl(input: string): string {
+  const trimmed = input.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function startAddLink() {
+  addingLink.value = true;
+  newLinkUrl.value = "";
+  void nextTick(() => addUrlInput.value?.focus());
+}
+
+function cancelAddLink() {
+  addingLink.value = false;
+  newLinkUrl.value = "";
+}
+
+/** Enter a URL: auto-fetch its title + favicon (best-effort), then add the link.
+ *  A failed fetch falls back to the raw URL as the title + no favicon. */
+async function commitAddLink() {
+  const url = normalizeUrl(newLinkUrl.value);
+  if (!url || url === "https://") return;
+  let title = url;
+  let favicon: string | undefined;
+  const meta = await fetchUrlMeta(url);
+  if (meta?.title) title = meta.title;
+  if (meta?.favicon) favicon = meta.favicon;
+  addQuickLink({ title, url, favicon });
+  cancelAddLink();
+}
+
+function openQuickLink(link: QuickLink) {
+  void openUrl(link.url);
+}
+
+function startEditLink(link: QuickLink) {
+  editingLinkId.value = link.id;
+  editTitle.value = link.title;
+  editUrl.value = link.url;
+  void nextTick(() => editTitleInput.value?.focus());
+}
+
+function cancelEditLink() {
+  editingLinkId.value = null;
+}
+
+/** Close the inline edit row when focus leaves it entirely (moving between the
+ *  two inputs keeps it open - relatedTarget stays inside the row). */
+function onEditRowFocusOut(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  const row = event.currentTarget as HTMLElement;
+  if (!next || !row.contains(next)) cancelEditLink();
+}
+
+function commitEditLink() {
+  if (!editingLinkId.value) return;
+  const url = normalizeUrl(editUrl.value);
+  updateQuickLink(editingLinkId.value, {
+    title: editTitle.value.trim() || url,
+    url,
+  });
+  cancelEditLink();
+}
 
 const projects = computed(() => desktop.projects.value);
 
@@ -177,7 +260,10 @@ function cancelRename() {
 // One menu instance serves both the hover kebab button and the right-click on a
 // project row. Positioning shares useContextMenu so a menu near a window edge
 // flips on-screen. The target ({ all } | { project, id }) decides the items.
-type MenuTarget = { kind: "all" } | { kind: "project"; id: string };
+type MenuTarget =
+  | { kind: "all" }
+  | { kind: "project"; id: string }
+  | { kind: "link"; id: string };
 const {
   open: menuOpen,
   pos: menuPos,
@@ -260,6 +346,27 @@ async function actDelete() {
   desktop.deleteProject(id);
   // Deleting the active project falls back to "all documents".
   if (activeProjectId.value === id) selectAll();
+}
+
+// --- quick-link kebab actions (open / edit / delete) ---
+function actOpenLink() {
+  const id = menuTarget.value?.kind === "link" ? menuTarget.value.id : null;
+  const link = id ? quickLinks.value.find((l) => l.id === id) : undefined;
+  closeMenu();
+  if (link) openQuickLink(link);
+}
+
+function actEditLink() {
+  const id = menuTarget.value?.kind === "link" ? menuTarget.value.id : null;
+  const link = id ? quickLinks.value.find((l) => l.id === id) : undefined;
+  closeMenu();
+  if (link) startEditLink(link);
+}
+
+function actDeleteLink() {
+  const id = menuTarget.value?.kind === "link" ? menuTarget.value.id : null;
+  closeMenu();
+  if (id) removeQuickLink(id);
 }
 
 function onDocumentsClick() {
@@ -371,6 +478,90 @@ function indentFor(depth: number): string {
     </div>
 
     <div class="nav-section" :aria-label="t('nav.primary')">
+      <!-- 常用链接: pinned web links with auto-fetched title + favicon -->
+      <div class="quick-links" :aria-label="t('quickLinks.title')">
+        <div class="quick-links-heading">
+          <span class="quick-links-title">{{ t("quickLinks.title") }}</span>
+          <button
+            class="icon-btn"
+            type="button"
+            :title="t('quickLinks.add')"
+            :aria-label="t('quickLinks.add')"
+            @click="startAddLink"
+          >
+            <Plus class="nav-icon" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div v-if="addingLink" class="quick-link-add-row">
+          <input
+            ref="addUrlInput"
+            v-model="newLinkUrl"
+            type="text"
+            class="project-input"
+            :placeholder="t('quickLinks.urlPlaceholder')"
+            @keydown.enter="commitAddLink"
+            @keydown.escape="cancelAddLink"
+            @blur="cancelAddLink"
+          />
+        </div>
+
+        <template v-for="link in quickLinks" :key="link.id">
+          <div
+            v-if="editingLinkId === link.id"
+            class="quick-link-edit-row"
+            @focusout="onEditRowFocusOut"
+          >
+            <input
+              ref="editTitleInput"
+              v-model="editTitle"
+              type="text"
+              class="project-input"
+              :placeholder="t('quickLinks.titlePlaceholder')"
+              @keydown.enter="commitEditLink"
+              @keydown.escape="cancelEditLink"
+            />
+            <input
+              v-model="editUrl"
+              type="text"
+              class="project-input"
+              placeholder="https://…"
+              @keydown.enter="commitEditLink"
+              @keydown.escape="cancelEditLink"
+            />
+          </div>
+          <div v-else class="quick-link-row" :title="link.url">
+            <button
+              class="nav-main"
+              type="button"
+              @click="openQuickLink(link)"
+            >
+              <img
+                v-if="link.favicon"
+                class="quick-link-favicon"
+                :src="link.favicon"
+                alt=""
+              />
+              <Link v-else class="nav-icon sub-icon" aria-hidden="true" />
+              <span class="quick-link-name">{{ link.title }}</span>
+            </button>
+            <button
+              class="icon-btn kebab-btn"
+              type="button"
+              :title="t('sidebar.moreActions')"
+              :aria-label="t('sidebar.moreActions')"
+              @click.stop.prevent="openKebab($event, { kind: 'link', id: link.id })"
+            >
+              <MoreVertical class="nav-icon" aria-hidden="true" />
+            </button>
+          </div>
+        </template>
+
+        <p v-if="quickLinks.length === 0 && !addingLink" class="empty-hint">
+          {{ t("quickLinks.empty") }}
+        </p>
+      </div>
+
       <!-- 文档 (all documents) row + kebab (replaces the old + button) -->
       <div
         class="nav-row"
@@ -589,7 +780,7 @@ function indentFor(depth: number): string {
               </button>
             </li>
           </template>
-          <template v-else>
+          <template v-else-if="menuTarget?.kind === 'project'">
             <li>
               <button type="button" @click="actAddSubproject">
                 <FolderPlus class="nav-icon" aria-hidden="true" />
@@ -619,6 +810,27 @@ function indentFor(depth: number): string {
               <button type="button" class="danger" @click="actDelete">
                 <Trash2 class="nav-icon" aria-hidden="true" />
                 {{ t("sidebar.deleteProject") }}
+              </button>
+            </li>
+          </template>
+          <template v-else-if="menuTarget?.kind === 'link'">
+            <li>
+              <button type="button" @click="actOpenLink">
+                <ExternalLink class="nav-icon" aria-hidden="true" />
+                {{ t("quickLinks.open") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actEditLink">
+                <Pencil class="nav-icon" aria-hidden="true" />
+                {{ t("quickLinks.edit") }}
+              </button>
+            </li>
+            <li class="ctx-divider" />
+            <li>
+              <button type="button" class="danger" @click="actDeleteLink">
+                <Trash2 class="nav-icon" aria-hidden="true" />
+                {{ t("quickLinks.delete") }}
               </button>
             </li>
           </template>
@@ -850,6 +1062,66 @@ function indentFor(depth: number): string {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+/* --- quick links (sidebar web bookmarks) --- */
+.quick-links {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.quick-links-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 8px 2px 12px;
+}
+
+.quick-links-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.quick-link-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding-right: 8px;
+}
+
+.quick-link-row:hover .kebab-btn,
+.quick-link-row:focus-within .kebab-btn {
+  opacity: 1;
+}
+
+.quick-link-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-link-favicon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.quick-link-add-row,
+.quick-link-edit-row {
+  display: grid;
+  gap: 4px;
+  padding: 4px 12px 6px;
 }
 
 .ctx-backdrop {

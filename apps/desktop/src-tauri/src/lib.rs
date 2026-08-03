@@ -9,6 +9,7 @@ mod platform;
 mod prefs;
 mod preview_cache;
 mod state;
+mod web;
 
 use std::path::{Path, PathBuf};
 
@@ -120,6 +121,8 @@ pub fn run() {
             preview_cache::write_preview_cache,
             preview_cache::clear_preview_cache,
             preview_cache::list_preview_cache,
+            web::fetch_url_meta,
+            web::open_url,
             devtools::reset_to_stage,
         ])
         .run(tauri::generate_context!())

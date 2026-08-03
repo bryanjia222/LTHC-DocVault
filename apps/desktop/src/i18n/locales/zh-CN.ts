@@ -11,6 +11,16 @@ export const zhCN = {
     settings: "设置",
     trash: "回收站",
   },
+  quickLinks: {
+    title: "常用链接",
+    add: "添加链接",
+    urlPlaceholder: "输入网址，回车添加",
+    titlePlaceholder: "链接名称",
+    open: "打开",
+    edit: "编辑",
+    delete: "删除",
+    empty: "暂无常用链接",
+  },
   sidebar: {
     vault: "仓库",
     documents: "文档",
