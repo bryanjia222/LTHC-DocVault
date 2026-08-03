@@ -31,8 +31,10 @@ tracing-appender = "0.2"
 open = "5"
 # Fetch page titles/favicons for the sidebar quick-links add flow. rustls-tls so
 # HTTPS works with bundled webpki roots (no OS cert store / OpenSSL dependency);
-# system-proxy so HTTP(S)_PROXY env vars are honored (like the restic fetch).
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# system-proxy so HTTP(S)_PROXY env vars are honored (like the restic fetch);
+# gzip/deflate/brotli so compressed bodies (the default for most sites over
+# https) are decompressed - otherwise the <title> scan sees raw gzip bytes.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "system-proxy", "gzip", "deflate", "brotli"] }
 base64 = "0.22"
 encoding_rs = "0.8"
 # Scratch dir for preview_version's export-then-read-bytes dance (auto-cleaned).

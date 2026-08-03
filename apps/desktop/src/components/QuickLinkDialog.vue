@@ -46,10 +46,13 @@ watch(
   },
 );
 
-/** Prepend https:// when the user typed a bare domain. */
+/** Prepend https:// when the user typed a bare domain; leave any URL that
+ *  already carries a scheme alone (an unsupported scheme is rejected by the
+ *  backend fetch/open rather than being mangled into a garbage https URL). */
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.includes("://")) return trimmed;
   return `https://${trimmed}`;
 }
 

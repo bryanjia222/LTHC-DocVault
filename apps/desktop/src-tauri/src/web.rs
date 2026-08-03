@@ -41,6 +41,11 @@ fn is_openable_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
 }
 
+/// Upper bound on meta-refresh redirect hops. Some sites (e.g. baidu) serve a
+/// tiny `<noscript><meta http-equiv="refresh">` stub that downgrades https ->
+/// http; the fetcher does not run JS, so it follows the refresh itself.
+const MAX_META_REFRESH_HOPS: usize = 3;
+
 async fn fetch_meta(url: &str) -> UrlMeta {
     if !is_openable_url(url) {
         return UrlMeta::default();
@@ -52,28 +57,80 @@ async fn fetch_meta(url: &str) -> UrlMeta {
     else {
         return UrlMeta::default();
     };
-    let Ok(resp) = client.get(url).send().await else {
-        return UrlMeta::default();
-    };
-    if resp
-        .content_length()
-        .map(|l| l as usize > PAGE_BODY_LIMIT)
-        .unwrap_or(false)
-    {
-        return UrlMeta::default();
+    let mut current = url.to_string();
+    let mut visited = std::collections::HashSet::new();
+    for _ in 0..MAX_META_REFRESH_HOPS {
+        if !visited.insert(current.clone()) {
+            return UrlMeta::default(); // refresh loop
+        }
+        let Ok(resp) = client.get(&current).send().await else {
+            return UrlMeta::default();
+        };
+        if resp
+            .content_length()
+            .map(|l| l as usize > PAGE_BODY_LIMIT)
+            .unwrap_or(false)
+        {
+            return UrlMeta::default();
+        }
+        let final_url = resp.url().clone();
+        let Ok(bytes) = resp.bytes().await else {
+            return UrlMeta::default();
+        };
+        let bytes = &bytes[..bytes.len().min(PAGE_BODY_LIMIT)];
+        let html = decode_html(bytes);
+        let (title, icon_href) = extract_page_meta(&html, final_url.as_str());
+        // A real <title> is authoritative - stop (a refresh would be redundant).
+        if title.is_some() {
+            let favicon = match icon_href {
+                Some(href) => fetch_favicon(&client, &href).await,
+                None => None,
+            };
+            return UrlMeta { title, favicon };
+        }
+        // Otherwise follow a meta-refresh (e.g. baidu's https -> http stub).
+        if let Some(next) = extract_refresh_url(&html, final_url.as_str()) {
+            current = next;
+            continue;
+        }
+        return UrlMeta { title: None, favicon: None };
     }
-    let final_url = resp.url().clone();
-    let Ok(bytes) = resp.bytes().await else {
-        return UrlMeta::default();
-    };
-    let bytes = &bytes[..bytes.len().min(PAGE_BODY_LIMIT)];
-    let html = decode_html(bytes);
-    let (title, icon_href) = extract_page_meta(&html, final_url.as_str());
-    let favicon = match icon_href {
-        Some(href) => fetch_favicon(&client, &href).await,
-        None => None,
-    };
-    UrlMeta { title, favicon }
+    UrlMeta::default()
+}
+
+/// Extract the target of the first `<meta http-equiv="refresh" content="N;url=...">`.
+fn extract_refresh_url(html: &str, base_url: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut search_from = 0usize;
+    while search_from < lower.len() {
+        let lt = lower[search_from..].find("<meta")? + search_from;
+        let gt = lower[lt..].find('>')? + lt;
+        let tag = &html[lt..gt];
+        if let Some(equiv) = attr_value(tag, "http-equiv") {
+            if equiv.to_ascii_lowercase().trim() == "refresh" {
+                if let Some(content) = attr_value(tag, "content") {
+                    if let Some(target) = extract_url_from_refresh_content(&content) {
+                        return resolve_url(base_url, &target);
+                    }
+                }
+            }
+        }
+        search_from = gt + 1;
+    }
+    None
+}
+
+fn extract_url_from_refresh_content(content: &str) -> Option<String> {
+    let lower = content.to_ascii_lowercase();
+    let pos = lower.find("url=")?;
+    let rest = content[pos + 4..]
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'' || c == ';' || c == ' ');
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
 }
 
 async fn fetch_favicon(client: &reqwest::Client, href: &str) -> Option<String> {
@@ -307,5 +364,31 @@ mod tests {
         assert!(!is_openable_url("javascript:alert(1)"));
         assert!(is_openable_url("https://example.com"));
         assert!(is_openable_url("http://example.com"));
+    }
+
+    #[test]
+    fn meta_refresh_url_extracted_and_resolved() {
+        let html = r#"<html><head><noscript><meta http-equiv="refresh" content="0;url=http://www.baidu.com/"></noscript></head></html>"#;
+        assert_eq!(
+            extract_refresh_url(html, "https://www.baidu.com").as_deref(),
+            Some("http://www.baidu.com/")
+        );
+    }
+
+    #[test]
+    fn meta_refresh_relative_url_resolved() {
+        let html = r#"<meta http-equiv="refresh" content="2; URL=/next">"#;
+        assert_eq!(
+            extract_refresh_url(html, "https://example.com/a/b").as_deref(),
+            Some("https://example.com/next")
+        );
+    }
+
+    #[test]
+    fn no_meta_refresh_returns_none() {
+        assert_eq!(
+            extract_refresh_url("<html><head><title>x</title></head></html>", "https://e.com"),
+            None
+        );
     }
 }
