@@ -10,7 +10,6 @@ import {
   Info,
   List,
   Maximize2,
-  Minimize2,
   Pencil,
   Plus,
   RefreshCw,
@@ -46,6 +45,8 @@ import type { SearchScope } from "../../utils/filter";
 import type { Document, ModificationStatus, Version } from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
 import DocumentRow from "../DocumentRow.vue";
+import GraphMaximized from "./GraphMaximized.vue";
+import VersionDetailSection from "./VersionDetailSection.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
@@ -963,142 +964,21 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section
-        class="version-detail"
-        :aria-label="t('details.selectedVersionLabel')"
-      >
-        <h3>{{ t("details.selectedVersion") }}</h3>
-        <dl>
-          <div>
-            <dt>{{ t("details.author") }}</dt>
-            <dd>{{ selectedVersion?.author ?? "-" }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("details.size") }}</dt>
-            <dd>{{ selectedVersion?.size ?? "-" }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("details.note") }}</dt>
-            <dd>
-              <span class="note-text">{{
-                selectedVersion ? selectedVersion.note : t("details.noNote")
-              }}</span>
-              <button
-                class="note-edit-hint"
-                type="button"
-                :disabled="!selectedVersion"
-                :title="t('details.noteEditHint')"
-                :aria-label="t('details.noteEditHint')"
-                @click="openNoteEdit"
-              >
-                <Pencil aria-hidden="true" />
-              </button>
-            </dd>
-          </div>
-        </dl>
-      </section>
+      <VersionDetailSection
+        :version="selectedVersion"
+        @edit-note="openNoteEdit"
+      />
     </aside>
   </section>
 
-  <Teleport to="body">
-    <div v-if="isGraphMaximized" class="graph-maximized">
-      <section
-        class="graph-stage surface"
-        :aria-label="t('details.versionHistoryLabel')"
-      >
-        <header class="graph-stage-header">
-          <div>
-            <h2>{{ t("details.versionHistory") }}</h2>
-            <p>{{ t("details.dragHint") }}</p>
-          </div>
-          <div class="toolbar">
-            <button
-              type="button"
-              class="icon-button secondary"
-              :title="t('actions.resetView')"
-              :aria-label="t('actions.resetView')"
-              @click="resetGraph"
-            >
-              <RotateCcw aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              class="icon-button primary"
-              :title="t('actions.minimize')"
-              :aria-label="t('actions.minimize')"
-              @click="setGraphMaximized(false)"
-            >
-              <Minimize2 aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-
-        <VersionGraph
-          ref="graphRef"
-          maximized
-          :versions="versions"
-          :selected-version-id="selectedVersionId"
-          @select="chooseVersion"
-          @contextmenu="onGraphContextMenu"
-        />
-      </section>
-
-      <aside class="graph-context surface">
-        <div class="panel-header compact">
-          <div>
-            <h2 :title="selectedDocument?.name">{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
-          </div>
-          <div class="action-row">
-            <button
-              class="icon-action-button"
-              type="button"
-              :disabled="!selectedVersion || selectedVersion.status === 'current'"
-              :title="selectedVersion?.status === 'current' ? t('actions.checkoutAlreadyCurrent') : t('actions.checkout')"
-              :aria-label="t('actions.checkout')"
-              @click="runAction('actionLogs.checkout')"
-            >
-              <ArrowRightLeft aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        <section
-          class="version-detail"
-          :aria-label="t('details.selectedVersionLabel')"
-        >
-          <h3>{{ t("details.selectedVersion") }}</h3>
-          <dl>
-            <div>
-              <dt>{{ t("details.author") }}</dt>
-              <dd>{{ selectedVersion?.author ?? "-" }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("details.size") }}</dt>
-              <dd>{{ selectedVersion?.size ?? "-" }}</dd>
-            </div>
-            <div>
-              <dt>{{ t("details.note") }}</dt>
-              <dd>
-                <span class="note-text">{{
-                  selectedVersion ? selectedVersion.note : t("details.noNote")
-                }}</span>
-                <button
-                  class="note-edit-hint"
-                  type="button"
-                  :disabled="!selectedVersion"
-                  :title="t('details.noteEditHint')"
-                  :aria-label="t('details.noteEditHint')"
-                  @click="openNoteEdit"
-                >
-                  <Pencil aria-hidden="true" />
-                </button>
-              </dd>
-            </div>
-          </dl>
-        </section>
-      </aside>
-    </div>
-  </Teleport>
+  <GraphMaximized
+    v-if="isGraphMaximized"
+    :versions="versions"
+    :selected-version-id="selectedVersionId"
+    @minimize="setGraphMaximized(false)"
+    @select="chooseVersion"
+    @contextmenu="onGraphContextMenu"
+  />
 
   <Teleport to="body">
     <div
@@ -1670,25 +1550,6 @@ tbody tr.selected {
   color: var(--text-muted);
 }
 
-.version-detail {
-  margin-top: auto;
-  display: grid;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.version-detail dl {
-  display: grid;
-  gap: 10px;
-}
-
-.version-detail dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .action-row {
   display: grid;
   grid-template-columns: 34px;
@@ -1725,64 +1586,6 @@ tbody tr.selected {
   fill: none;
   stroke: currentcolor;
   stroke-width: 2;
-}
-
-.graph-maximized {
-  position: fixed;
-  inset: 18px;
-  z-index: 20;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 16px;
-  min-height: 0;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-app);
-  box-shadow: var(--overlay-shadow);
-}
-
-.graph-stage {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  padding: 16px;
-}
-
-.graph-stage h2 {
-  font-size: 18px;
-}
-
-.graph-stage-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.graph-stage-header p {
-  margin-top: 2px;
-  color: var(--text-muted);
-}
-
-.graph-context {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-}
-
-.graph-context h2 {
-  font-size: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Filter bar */
@@ -1977,39 +1780,6 @@ tbody tr.selected {
 .icon-action-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-/* Note pen - opens the version note editor */
-.note-edit-hint {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  margin-left: 4px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  vertical-align: middle;
-  cursor: pointer;
-}
-
-.note-edit-hint:hover:not(:disabled) {
-  color: var(--text-primary);
-}
-
-.note-edit-hint:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.note-edit-hint svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2;
 }
 
 /* Right-click source context menu */
