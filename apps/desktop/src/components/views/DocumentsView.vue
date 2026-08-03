@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUpDown, ChevronLeft, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
+import { ArrowUpDown, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -223,6 +223,24 @@ function onDetailPanelFocusOut(event: FocusEvent) {
     panelCollapsed.value = true;
   }
 }
+
+/** Unpinned: pressing anywhere outside the card (the filter bar, a header, an
+ *  empty area...) reclaims its space. A document-row press is excluded - the
+ *  row's click re-selects and re-shows the card, so collapsing here would make
+ *  it flicker off then on. */
+function onOutsidePointerDown(event: PointerEvent) {
+  if (pinned.value) return;
+  const target = event.target as Element;
+  if (detailPanelRef.value?.contains(target)) return;
+  if (target.closest?.("tr[role='button']")) return;
+  panelCollapsed.value = true;
+}
+
+// Selecting a document (row click, right-click menu, command palette) shows the
+// unpinned card again; focus leaving it reclaims the space.
+watch(selectedDocumentId, () => {
+  panelCollapsed.value = false;
+});
 // Two right-click context menus (document table rows / version-history rows),
 // each owned by its own component's useContextMenu instance so menus near the
 // window's edge flip on-screen. The view selects the target document/version,
@@ -266,6 +284,8 @@ const hasBranching = computed(() => hasBranchingHistory(versions.value));
 
 function chooseDocument(document: Document) {
   selectDocument(document);
+  // A row click (even re-clicking the selected row) shows the unpinned card.
+  panelCollapsed.value = false;
   versionViewMode.value = "list";
   isGraphMaximized.value = false;
   log(t("log.selectedDocument", { name: document.name }));
@@ -413,6 +433,7 @@ let pollHandle: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
   void desktop.refreshModifications();
+  window.addEventListener("pointerdown", onOutsidePointerDown);
   pollHandle = setInterval(() => {
     void desktop.refreshModifications();
   }, POLL_INTERVAL_MS);
@@ -432,6 +453,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (pollHandle !== null) clearInterval(pollHandle);
+  window.removeEventListener("pointerdown", onOutsidePointerDown);
   if (resizeObserver !== null) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -445,7 +467,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="content-grid">
+  <section
+    class="content-grid"
+    :class="{ 'single-col': panelCollapsed }"
+  >
     <section class="document-panel surface" :aria-label="t('documents.label')">
       <div class="panel-header">
         <div>
@@ -664,18 +689,6 @@ onBeforeUnmount(() => {
     </aside>
   </section>
 
-  <!-- Floating re-expand control shown while the (unpinned) card is hidden. -->
-  <button
-    v-if="panelCollapsed"
-    class="detail-panel-toggle"
-    type="button"
-    :title="t('details.expandPanel')"
-    :aria-label="t('details.expandPanel')"
-    @click="panelCollapsed = false"
-  >
-    <ChevronLeft aria-hidden="true" />
-  </button>
-
   <GraphMaximized
     v-if="isGraphMaximized"
     :versions="versions"
@@ -712,6 +725,13 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* Unpinned + collapsed: the card is unmounted, so a single column lets the table
+   reclaim the whole width - a fixed two-column grid would keep an empty 356px
+   track that the left panel cannot use. */
+.content-grid.single-col {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .document-panel,
 .detail-panel {
   display: flex;
@@ -733,40 +753,6 @@ onBeforeUnmount(() => {
 /* Let the flex item holding the <h2> shrink so the ellipsis can take effect. */
 .panel-header.compact > div {
   min-width: 0;
-}
-
-/* Floating re-expand control: shown at the right edge while the (unpinned)
-   detail panel is fully hidden, so the table can reclaim the whole width. */
-.detail-panel-toggle {
-  position: fixed;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 48px;
-  padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  box-shadow: var(--overlay-shadow);
-  cursor: pointer;
-}
-
-.detail-panel-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.detail-panel-toggle svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2;
 }
 
 .detail-panel {
