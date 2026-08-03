@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowRightLeft, ChevronDown, Download, ExternalLink, Eye, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
+import { ArrowUpDown, ChevronDown, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -409,22 +409,6 @@ function onRowExport(document: Document) {
   runAction("actionLogs.export");
 }
 
-/** Detail-panel header quick actions act on the selected document. */
-function onPanelOpen() {
-  const doc = selectedDocument.value;
-  if (doc) void openDocument(doc.id);
-}
-function onPanelPreview() {
-  openPreview();
-}
-function onPanelReplaceCommit() {
-  const doc = selectedDocument.value;
-  if (doc) void replaceCommitDocument(doc.id);
-}
-function onPanelExport() {
-  runAction("actionLogs.export");
-}
-
 // Background modification detection: poll tracked source files every 5s so the
 // "modified" / "missing" badges stay current without a manual refresh. The
 // two-tier probe (stat first, sha256 only on change) keeps this cheap. Mocked
@@ -645,46 +629,6 @@ onBeforeUnmount(() => {
         </div>
         <div class="action-row">
           <button
-            class="icon-action-button panel-action"
-            type="button"
-            :disabled="!selectedDocument"
-            :title="t('actions.open')"
-            :aria-label="t('actions.open')"
-            @click="onPanelOpen"
-          >
-            <ExternalLink aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button panel-action"
-            type="button"
-            :disabled="!selectedDocument"
-            :title="t('actions.preview')"
-            :aria-label="t('actions.preview')"
-            @click="onPanelPreview"
-          >
-            <Eye aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button panel-action"
-            type="button"
-            :disabled="!selectedDocument"
-            :title="t('source.replaceCommit')"
-            :aria-label="t('source.replaceCommit')"
-            @click="onPanelReplaceCommit"
-          >
-            <ArrowRightLeft aria-hidden="true" />
-          </button>
-          <button
-            class="icon-action-button panel-action"
-            type="button"
-            :disabled="!selectedDocument"
-            :title="t('actions.export')"
-            :aria-label="t('actions.export')"
-            @click="onPanelExport"
-          >
-            <Download aria-hidden="true" />
-          </button>
-          <button
             class="icon-action-button"
             type="button"
             :disabled="!selectedVersion || selectedVersion.status === 'current'"
@@ -692,7 +636,7 @@ onBeforeUnmount(() => {
             :aria-label="t('actions.checkout')"
             @click="runAction('actionLogs.checkout')"
           >
-            <ArrowRightLeft aria-hidden="true" />
+            <ArrowUpDown aria-hidden="true" />
           </button>
           <button
             class="icon-action-button panel-pin"
@@ -1020,21 +964,6 @@ tbody tr.selected {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-/* The four quick actions (open / preview / import / export) in the detail-panel
-   header are icon-only and hover-revealed; checkout stays always visible. They
-   reserve their footprint so the header does not shift when they appear. */
-.icon-action-button.panel-action {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-.panel-header:hover .icon-action-button.panel-action,
-.panel-header:focus-within .icon-action-button.panel-action {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .filter-action-btn {
