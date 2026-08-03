@@ -51,8 +51,8 @@ function reloadApp() {
 }
 
 const tabs: { id: SettingsTab; labelKey: string }[] = [
-  { id: "status", labelKey: "settings.tabs.status" },
   { id: "appearance", labelKey: "settings.tabs.appearance" },
+  { id: "status", labelKey: "settings.tabs.status" },
 ];
 </script>
 

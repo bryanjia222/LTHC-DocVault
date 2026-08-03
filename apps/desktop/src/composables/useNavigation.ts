@@ -13,7 +13,9 @@ export type NavigationId = "documents" | "settings" | "trash";
 export type SettingsTab = "status" | "appearance";
 
 const activeSection = ref<NavigationId>("documents");
-const settingsTab = ref<SettingsTab>("status");
+// Appearance is the first (default) tab; "status" is opened explicitly by the
+// sidebar/command-palette 状态 action.
+const settingsTab = ref<SettingsTab>("appearance");
 
 export function useNavigation() {
   function setSection(id: NavigationId) {
