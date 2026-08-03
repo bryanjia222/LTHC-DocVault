@@ -450,7 +450,6 @@ export const enUS = {
     restic_password_required: "The restic backend requires a password.",
   },
   contextMenu: {
-    reload: "Reload",
     inspect: "Inspect",
   },
   dialog: {
@@ -489,6 +488,8 @@ export const enUS = {
     dbPath: "Database path",
     logLevel: "Log level",
     logFile: "Log file",
+    reloadApp: "Reload app",
+    reloadAppHint: "A reload resets the UI and caches and takes a while; use only when needed.",
     theme: "Theme",
     themeLight: "Light",
     themeDark: "Dark",

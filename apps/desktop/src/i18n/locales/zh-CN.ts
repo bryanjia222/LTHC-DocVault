@@ -442,7 +442,6 @@ export const zhCN = {
     restic_password_required: "Restic 后端需要设置密码。",
   },
   contextMenu: {
-    reload: "重新加载",
     inspect: "检查元素",
   },
   dialog: {
@@ -480,6 +479,8 @@ export const zhCN = {
     dbPath: "数据库路径",
     logLevel: "日志级别",
     logFile: "日志文件",
+    reloadApp: "重新加载应用",
+    reloadAppHint: "重新加载会重置界面与缓存，耗时较长；仅在需要时使用。",
     theme: "主题",
     themeLight: "浅色",
     themeDark: "深色",

@@ -4,18 +4,22 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import { useDevMode } from "../composables/useDevMode";
 import { useContextMenu } from "../composables/useContextMenu";
+import { useVaultActions } from "../composables/useVaultActions";
 
 /*
  * Global custom context menu. Replaces the native webview menu (so the native
- * "Inspect" entry never leaks) with an i18n-localized one. "Reload" is always
- * available; "Inspect" (opens devtools) only when developer mode is on, gating
- * the inspect capability behind the Settings toggle. Positioning (keeping the
- * menu fully on-screen when opened near an edge) is shared with every other
- * right-click menu via useContextMenu.
+ * "Inspect" entry never leaks) with an i18n-localized one. "刷新" (a light
+ * refresh with a flash cue) is always available; "Inspect" (opens devtools)
+ * only when developer mode is on, gating the inspect capability behind the
+ * Settings toggle. The full "重新加载" (page reload) is no longer a right-click
+ * item - it lives in Settings. Positioning (keeping the menu fully on-screen
+ * when opened near an edge) is shared with every other right-click menu via
+ * useContextMenu.
  */
 
 const { t } = useI18n();
 const { isDevMode } = useDevMode();
+const { refreshAll } = useVaultActions();
 
 const { open: visible, pos, menuRef, openAt, close } = useContextMenu();
 
@@ -43,9 +47,9 @@ async function inspect() {
   }
 }
 
-function reload() {
+function refresh() {
   close();
-  location.reload();
+  void refreshAll();
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -78,8 +82,8 @@ onBeforeUnmount(() => {
       :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
       @click.stop
     >
-      <button type="button" class="context-item" @click="reload">
-        {{ t("contextMenu.reload") }}
+      <button type="button" class="context-item" @click="refresh">
+        {{ t("actions.refresh") }}
       </button>
       <button
         v-if="isDevMode"

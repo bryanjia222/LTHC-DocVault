@@ -29,9 +29,11 @@ import { useToasts } from "./composables/useToasts";
 import { useDialogs } from "./composables/useDialogs";
 import { bulkSetPreviewCache } from "./utils/previewCache";
 import { filterDocumentPaths } from "./utils/file";
+import { useFlash } from "./composables/useFlash";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
+const { active: flashActive } = useFlash();
 const { toggle } = useCommandPalette();
 const { log } = useActivityLog();
 const desktop = useDesktopState();
@@ -251,6 +253,9 @@ onBeforeUnmount(() => {
     <NewDocumentDialog />
     <AppContextMenu />
     <ToastHost />
+    <!-- Refresh feedback: a brief full-surface fade so a manual 刷新 is felt
+         without a navigation. pointer-events none - purely visual. -->
+    <div v-if="flashActive" class="flash-overlay" aria-hidden="true"></div>
   </div>
 </template>
 
@@ -315,5 +320,23 @@ onBeforeUnmount(() => {
 .init-error {
   color: var(--danger-text);
   font-size: 13px;
+}
+
+.flash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  background: var(--bg-surface);
+  animation: flash-fade 320ms ease-out forwards;
+}
+
+@keyframes flash-fade {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+  }
 }
 </style>

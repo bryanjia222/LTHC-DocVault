@@ -44,6 +44,12 @@ async function onLogLevelChange(event: Event) {
   }
 }
 
+/** Full app reload - deliberately not a right-click item (it is expensive); it
+ *  lives here under Settings so a stale UI / config can be reset deliberately. */
+function reloadApp() {
+  location.reload();
+}
+
 const tabs: { id: SettingsTab; labelKey: string }[] = [
   { id: "status", labelKey: "settings.tabs.status" },
   { id: "appearance", labelKey: "settings.tabs.appearance" },
@@ -112,6 +118,14 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
             <dd class="mono break">{{ config.logFile }}</dd>
           </div>
         </dl>
+      </div>
+
+      <div class="surface settings-card">
+        <h3>{{ t("settings.reloadApp") }}</h3>
+        <p class="field-hint">{{ t("settings.reloadAppHint") }}</p>
+        <button type="button" class="columns-reset" @click="reloadApp">
+          {{ t("settings.reloadApp") }}
+        </button>
       </div>
     </div>
 

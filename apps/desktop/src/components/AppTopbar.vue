@@ -7,7 +7,7 @@ import { useCommandPalette } from "../composables/useCommandPalette";
 
 const { t } = useI18n();
 const { isDark } = useTheme();
-const { runAction, toggleCurrentTheme } = useVaultActions();
+const { toggleCurrentTheme } = useVaultActions();
 const { open } = useCommandPalette();
 </script>
 
@@ -28,13 +28,6 @@ const { open } = useCommandPalette();
       >
         <Moon v-if="!isDark" aria-hidden="true" />
         <Sun v-else aria-hidden="true" />
-      </button>
-      <button
-        class="secondary"
-        type="button"
-        @click="runAction('actionLogs.refresh')"
-      >
-        {{ t("actions.refresh") }}
       </button>
       <button class="secondary" type="button" @click="open">
         {{ t("actions.commandPalette") }}

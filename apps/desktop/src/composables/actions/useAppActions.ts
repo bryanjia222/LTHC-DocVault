@@ -5,6 +5,7 @@ import { useDocuments } from "../useDocuments";
 import { useDesktopState } from "../useDesktopState";
 import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "../useVault";
 import { useTheme } from "../../theme";
+import { useFlash } from "../useFlash";
 
 /*
  * App-level actions that are not about a specific document or version:
@@ -19,6 +20,7 @@ export function useAppActions() {
   const { selectedDocument } = useDocuments();
   const { loadDocuments, resetToStage } = useVault();
   const desktop = useDesktopState();
+  const { flash } = useFlash();
 
   /**
    * Full manual refresh for the context-menu "刷新" entry: reloads the document
@@ -26,6 +28,7 @@ export function useAppActions() {
    * runAction refresh log line. No-op outside Tauri (both underlying calls are).
    */
   async function refreshAll() {
+    flash(); // brief full-surface fade so the refresh is visibly "felt"
     const name = selectedDocument.value
       ? selectedDocument.value.name
       : t("log.noDocument");
