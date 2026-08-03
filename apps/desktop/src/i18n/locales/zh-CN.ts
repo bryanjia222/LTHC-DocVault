@@ -330,6 +330,7 @@ export const zhCN = {
     unsupportedTitle: "暂不支持预览",
     close: "关闭预览",
     refreshing: "正在加载最新预览…",
+    reload: "重新加载",
   },
   jobs: {
     title: "任务",

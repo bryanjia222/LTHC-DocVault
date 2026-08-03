@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
-import { X } from "@lucide/vue";
+import { RefreshCw, X } from "@lucide/vue";
 import { useVault } from "../composables/useVault";
+import { useContextMenu } from "../composables/useContextMenu";
 import { detectPreviewKind, type PreviewKind } from "../utils/previewDispatch";
 import {
   previewCacheKey,
@@ -63,6 +64,41 @@ const bodyRef = ref<HTMLDivElement | null>(null);
 // bottom-right "loading…" badge.
 const refreshing = ref(false);
 
+// Set by the preview context-menu "重新加载": the next load() bypasses both
+// cache tiers and re-fetches + re-renders from the backend (then re-caches).
+const bypassCache = ref(false);
+
+// Right-click "重新加载" - a preview-specific reload, deliberately separate
+// from the app-wide right-click menu (whose reload now lives in Settings). The
+// menu handler on the modal suppresses the global menu inside the preview and
+// re-renders only this preview's content.
+const {
+  open: menuOpen,
+  pos: menuPos,
+  menuRef: menuElRef,
+  openAt: openMenuAt,
+  close: closeMenu,
+} = useContextMenu();
+
+function onPreviewContextMenu(event: MouseEvent) {
+  openMenuAt(event);
+}
+
+function forceReload() {
+  closeMenu();
+  bypassCache.value = true;
+  void load();
+}
+
+// Esc closes the menu (not the preview) while the menu is open.
+function onMenuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") closeMenu();
+}
+watch(menuOpen, (isOpen) => {
+  if (isOpen) window.addEventListener("keydown", onMenuKeydown);
+  else window.removeEventListener("keydown", onMenuKeydown);
+});
+
 const versionLabel = computed(
   () => props.version?.label ?? t("log.latest"),
 );
@@ -119,30 +155,44 @@ async function load() {
   );
   const mutable = isMutablePreview(props.version);
 
+  // A cache hit for the mutable current/working copy is trusted (no background
+  // re-fetch) when the source file matches the committed baseline - the
+  // snapshot key already flips to `working:` on a real edit, so an unchanged
+  // file never shows a stale snapshot. A right-click "重新加载" sets
+  // `bypassCache` to skip both tiers and force a fresh render.
+  const skipCache = bypassCache.value;
+  bypassCache.value = false;
+  const shouldRefresh = mutable && props.document.modification === "modified";
+
   // Tier 1: in-memory LRU. Paint instantly; an immutable committed version is
-  // authoritative (done), the mutable current/working copy refreshes in the
-  // background so edits since the last open are eventually shown (the cached
-  // copy stays visible with a badge until the fresh render swaps in).
-  const memHit = getPreviewCache(key);
-  if (memHit) {
-    if (container.value) container.value.innerHTML = memHit;
-    loading.value = false;
-    if (!mutable) return;
-    await refreshMutable(wantsWorkingCopy, key, guard);
-    return;
+  // authoritative (done); a modified working copy refreshes in the background
+  // so edits since the last open are eventually shown (the cached copy stays
+  // visible with a badge until the fresh render swaps in). Unmodified files
+  // skip the refresh entirely - the snapshot is authoritative.
+  if (!skipCache) {
+    const memHit = getPreviewCache(key);
+    if (memHit) {
+      if (container.value) container.value.innerHTML = memHit;
+      loading.value = false;
+      if (!mutable) return;
+      if (shouldRefresh) await refreshMutable(wantsWorkingCopy, key, guard);
+      return;
+    }
   }
 
   // Tier 2: on-disk cache. Backfill the memory LRU so the next lookup hits
   // tier 1, then paint + (for mutable) background-refresh as above.
-  const diskHit = await readPreviewCache(key);
-  if (guard.cancelled) return;
-  if (diskHit) {
-    setPreviewCache(key, diskHit);
-    if (container.value) container.value.innerHTML = diskHit;
-    loading.value = false;
-    if (!mutable) return;
-    await refreshMutable(wantsWorkingCopy, key, guard);
-    return;
+  if (!skipCache) {
+    const diskHit = await readPreviewCache(key);
+    if (guard.cancelled) return;
+    if (diskHit) {
+      setPreviewCache(key, diskHit);
+      if (container.value) container.value.innerHTML = diskHit;
+      loading.value = false;
+      if (!mutable) return;
+      if (shouldRefresh) await refreshMutable(wantsWorkingCopy, key, guard);
+      return;
+    }
   }
 
   // Tier 3: no cache - full load with the loading overlay.
@@ -452,6 +502,7 @@ async function renderPptx(
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
+    if (menuOpen.value) return; // the context menu handles Escape first
     event.preventDefault();
     emit("close");
   }
@@ -495,6 +546,7 @@ onBeforeUnmount(() => {
     activeGuard = null;
   }
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("keydown", onMenuKeydown);
   pptxViewer?.destroy();
   pptxViewer = null;
   if (pdfLoadingTask) {
@@ -513,6 +565,7 @@ onBeforeUnmount(() => {
         aria-modal="true"
         :aria-label="t('preview.title')"
         @click.stop
+        @contextmenu.prevent.stop="onPreviewContextMenu"
       >
         <header class="preview-header">
           <div class="preview-heading">
@@ -551,6 +604,33 @@ onBeforeUnmount(() => {
           <span class="preview-spinner" aria-hidden="true" />
           {{ t("preview.refreshing") }}
         </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="menuOpen"
+      class="ctx-backdrop"
+      @click="closeMenu"
+      @contextmenu.prevent.stop="closeMenu"
+    >
+      <div
+        ref="menuElRef"
+        class="ctx-menu surface"
+        role="menu"
+        :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }"
+        @click.stop
+      >
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          @click="forceReload"
+        >
+          <RefreshCw aria-hidden="true" />
+          {{ t("preview.reload") }}
+        </button>
       </div>
     </div>
   </Teleport>
@@ -797,5 +877,52 @@ onBeforeUnmount(() => {
 .preview-sheet-table :deep(tr:first-child td) {
   background: var(--bg-subtle);
   font-weight: 700;
+}
+
+/* Preview right-click menu ("重新加载") - same surface language as the other
+   context menus. Sits above the preview overlay (z-index 70). */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.ctx-menu {
+  position: absolute;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--overlay-shadow);
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ctx-item svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
 }
 </style>

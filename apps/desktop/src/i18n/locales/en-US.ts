@@ -333,6 +333,7 @@ export const enUS = {
     unsupportedTitle: "Preview not supported",
     close: "Close preview",
     refreshing: "Loading latest preview…",
+    reload: "Reload preview",
   },
   jobs: {
     title: "Jobs",
