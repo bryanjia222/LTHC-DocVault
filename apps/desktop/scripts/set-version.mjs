@@ -21,15 +21,15 @@ const src = readFileSync(cargoPath, 'utf8');
 // Match the first `version = "..."` that follows [package] (always the package
 // version, since [package] is the first table). Non-greedy so it won't reach into
 // [dependencies]. Everything else is preserved byte-for-byte.
-const replaced = src.replace(
-  /(\[package\][\s\S]*?\nversion\s*=\s*)"[^"]*"/,
-  (_m, prefix) => `${prefix}"${version}"`
-);
+const pattern = /(\[package\][\s\S]*?\nversion\s*=\s*)"[^"]*"/;
 
-if (replaced === src) {
+if (!pattern.test(src)) {
   console.error(`set-version: no [package] version field found in ${cargoPath}`);
   process.exit(1);
 }
 
+// If the committed version already equals the tag version the replace is a no-op
+// (the file is already correct) - that is success, not a missing version field.
+const replaced = src.replace(pattern, (_m, prefix) => `${prefix}"${version}"`);
 writeFileSync(cargoPath, replaced);
 console.log(`set-version: ${cargoPath} [package].version -> ${version}`);
