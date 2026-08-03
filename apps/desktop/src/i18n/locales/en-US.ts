@@ -498,6 +498,7 @@ export const enUS = {
     reloadAppHint: "A reload resets the UI and caches and takes a while; use only when needed.",
     theme: "Theme",
     themeLight: "Light",
+    themeSystem: "System",
     themeDark: "Dark",
     language: "Language",
     devMode: "Developer mode",

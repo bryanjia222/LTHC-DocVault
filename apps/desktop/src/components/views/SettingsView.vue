@@ -17,7 +17,7 @@ import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
 
 const { t, locale } = useI18n();
-const { isDark, setTheme } = useTheme();
+const { theme, setTheme } = useTheme();
 const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
@@ -138,17 +138,24 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
             <div>
               <dt>{{ t("settings.theme") }}</dt>
               <dd>
-                <div class="segmented-control">
+                <div class="segmented-control theme-control">
                   <button
                     type="button"
-                    :class="{ active: !isDark }"
+                    :class="{ active: theme === 'light' }"
                     @click="setTheme('light')"
                   >
                     {{ t("settings.themeLight") }}
                   </button>
                   <button
                     type="button"
-                    :class="{ active: isDark }"
+                    :class="{ active: theme === 'system' }"
+                    @click="setTheme('system')"
+                  >
+                    {{ t("settings.themeSystem") }}
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: theme === 'dark' }"
                     @click="setTheme('dark')"
                   >
                     {{ t("settings.themeDark") }}
@@ -383,6 +390,11 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
 
 .segmented-control {
   grid-template-columns: repeat(2, auto);
+}
+
+/* The theme control has three modes (light / system / dark). */
+.segmented-control.theme-control {
+  grid-template-columns: repeat(3, auto);
 }
 
 .segmented-control button {

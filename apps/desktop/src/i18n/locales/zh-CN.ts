@@ -489,6 +489,7 @@ export const zhCN = {
     reloadAppHint: "重新加载会重置界面与缓存，耗时较长；仅在需要时使用。",
     theme: "主题",
     themeLight: "浅色",
+    themeSystem: "跟随系统",
     themeDark: "深色",
     language: "语言",
     devMode: "开发者模式",
