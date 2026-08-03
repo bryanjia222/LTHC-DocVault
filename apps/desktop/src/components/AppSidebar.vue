@@ -27,6 +27,7 @@ import { useDialogs } from "../composables/useDialogs";
 import { confirmDialog, useVault } from "../composables/useVault";
 import { useQuickLinks, type QuickLink } from "../composables/useQuickLinks";
 import { useContextMenu } from "../composables/useContextMenu";
+import QuickLinkDialog from "./QuickLinkDialog.vue";
 import type { ProjectDef } from "../data/mock";
 
 const { t } = useI18n();
@@ -39,80 +40,42 @@ const { openNewDocument } = useDialogs();
 // --- quick links (sidebar web bookmarks) ---
 const { quickLinks, addQuickLink, updateQuickLink, removeQuickLink } =
   useQuickLinks();
-const { fetchUrlMeta, openUrl } = useVault();
+const { openUrl } = useVault();
 
-const addingLink = ref(false);
-const newLinkUrl = ref("");
-const addUrlInput = ref<HTMLInputElement | null>(null);
-const editingLinkId = ref<string | null>(null);
-const editTitle = ref("");
-const editUrl = ref("");
-const editTitleInput = ref<HTMLInputElement | null>(null);
+// Add / edit go through a dialog (auto-fetches title + favicon); opening a link
+// launches the system browser. `linkDialogTarget` is the link being edited
+// (null = add mode).
+const linkDialogOpen = ref(false);
+const linkDialogMode = ref<"add" | "edit">("add");
+const linkDialogTarget = ref<QuickLink | null>(null);
 
-/** Prepend https:// when the user typed a bare domain, so an enter-to-add URL
- *  always opens as a web link. */
-function normalizeUrl(input: string): string {
-  const trimmed = input.trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
+function openAddLinkDialog() {
+  linkDialogTarget.value = null;
+  linkDialogMode.value = "add";
+  linkDialogOpen.value = true;
 }
 
-function startAddLink() {
-  addingLink.value = true;
-  newLinkUrl.value = "";
-  void nextTick(() => addUrlInput.value?.focus());
+function openEditLinkDialog(link: QuickLink) {
+  linkDialogTarget.value = link;
+  linkDialogMode.value = "edit";
+  linkDialogOpen.value = true;
 }
 
-function cancelAddLink() {
-  addingLink.value = false;
-  newLinkUrl.value = "";
-}
-
-/** Enter a URL: auto-fetch its title + favicon (best-effort), then add the link.
- *  A failed fetch falls back to the raw URL as the title + no favicon. */
-async function commitAddLink() {
-  const url = normalizeUrl(newLinkUrl.value);
-  if (!url || url === "https://") return;
-  let title = url;
-  let favicon: string | undefined;
-  const meta = await fetchUrlMeta(url);
-  if (meta?.title) title = meta.title;
-  if (meta?.favicon) favicon = meta.favicon;
-  addQuickLink({ title, url, favicon });
-  cancelAddLink();
+function onLinkDialogSave(payload: {
+  title: string;
+  url: string;
+  favicon?: string;
+}) {
+  if (linkDialogMode.value === "edit" && linkDialogTarget.value) {
+    updateQuickLink(linkDialogTarget.value.id, payload);
+  } else {
+    addQuickLink(payload);
+  }
+  linkDialogOpen.value = false;
 }
 
 function openQuickLink(link: QuickLink) {
   void openUrl(link.url);
-}
-
-function startEditLink(link: QuickLink) {
-  editingLinkId.value = link.id;
-  editTitle.value = link.title;
-  editUrl.value = link.url;
-  void nextTick(() => editTitleInput.value?.focus());
-}
-
-function cancelEditLink() {
-  editingLinkId.value = null;
-}
-
-/** Close the inline edit row when focus leaves it entirely (moving between the
- *  two inputs keeps it open - relatedTarget stays inside the row). */
-function onEditRowFocusOut(event: FocusEvent) {
-  const next = event.relatedTarget as Node | null;
-  const row = event.currentTarget as HTMLElement;
-  if (!next || !row.contains(next)) cancelEditLink();
-}
-
-function commitEditLink() {
-  if (!editingLinkId.value) return;
-  const url = normalizeUrl(editUrl.value);
-  updateQuickLink(editingLinkId.value, {
-    title: editTitle.value.trim() || url,
-    url,
-  });
-  cancelEditLink();
 }
 
 const projects = computed(() => desktop.projects.value);
@@ -360,7 +323,7 @@ function actEditLink() {
   const id = menuTarget.value?.kind === "link" ? menuTarget.value.id : null;
   const link = id ? quickLinks.value.find((l) => l.id === id) : undefined;
   closeMenu();
-  if (link) startEditLink(link);
+  if (link) openEditLinkDialog(link);
 }
 
 function actDeleteLink() {
@@ -487,80 +450,55 @@ function indentFor(depth: number): string {
             type="button"
             :title="t('quickLinks.add')"
             :aria-label="t('quickLinks.add')"
-            @click="startAddLink"
+            @click="openAddLinkDialog"
           >
             <Plus class="nav-icon" aria-hidden="true" />
           </button>
         </div>
 
-        <div v-if="addingLink" class="quick-link-add-row">
-          <input
-            ref="addUrlInput"
-            v-model="newLinkUrl"
-            type="text"
-            class="project-input"
-            :placeholder="t('quickLinks.urlPlaceholder')"
-            @keydown.enter="commitAddLink"
-            @keydown.escape="cancelAddLink"
-            @blur="cancelAddLink"
-          />
+        <div
+          v-for="link in quickLinks"
+          :key="link.id"
+          class="quick-link-row"
+          :title="link.url"
+        >
+          <button
+            class="nav-main"
+            type="button"
+            @click="openQuickLink(link)"
+          >
+            <img
+              v-if="link.favicon"
+              class="quick-link-favicon"
+              :src="link.favicon"
+              alt=""
+            />
+            <Link v-else class="nav-icon sub-icon" aria-hidden="true" />
+            <span class="quick-link-name">{{ link.title }}</span>
+          </button>
+          <button
+            class="icon-btn kebab-btn"
+            type="button"
+            :title="t('sidebar.moreActions')"
+            :aria-label="t('sidebar.moreActions')"
+            @click.stop.prevent="openKebab($event, { kind: 'link', id: link.id })"
+          >
+            <MoreVertical class="nav-icon" aria-hidden="true" />
+          </button>
         </div>
 
-        <template v-for="link in quickLinks" :key="link.id">
-          <div
-            v-if="editingLinkId === link.id"
-            class="quick-link-edit-row"
-            @focusout="onEditRowFocusOut"
-          >
-            <input
-              ref="editTitleInput"
-              v-model="editTitle"
-              type="text"
-              class="project-input"
-              :placeholder="t('quickLinks.titlePlaceholder')"
-              @keydown.enter="commitEditLink"
-              @keydown.escape="cancelEditLink"
-            />
-            <input
-              v-model="editUrl"
-              type="text"
-              class="project-input"
-              placeholder="https://…"
-              @keydown.enter="commitEditLink"
-              @keydown.escape="cancelEditLink"
-            />
-          </div>
-          <div v-else class="quick-link-row" :title="link.url">
-            <button
-              class="nav-main"
-              type="button"
-              @click="openQuickLink(link)"
-            >
-              <img
-                v-if="link.favicon"
-                class="quick-link-favicon"
-                :src="link.favicon"
-                alt=""
-              />
-              <Link v-else class="nav-icon sub-icon" aria-hidden="true" />
-              <span class="quick-link-name">{{ link.title }}</span>
-            </button>
-            <button
-              class="icon-btn kebab-btn"
-              type="button"
-              :title="t('sidebar.moreActions')"
-              :aria-label="t('sidebar.moreActions')"
-              @click.stop.prevent="openKebab($event, { kind: 'link', id: link.id })"
-            >
-              <MoreVertical class="nav-icon" aria-hidden="true" />
-            </button>
-          </div>
-        </template>
-
-        <p v-if="quickLinks.length === 0 && !addingLink" class="empty-hint">
+        <p v-if="quickLinks.length === 0" class="empty-hint">
           {{ t("quickLinks.empty") }}
         </p>
       </div>
+
+      <QuickLinkDialog
+        :open="linkDialogOpen"
+        :mode="linkDialogMode"
+        :link="linkDialogTarget ?? undefined"
+        @close="linkDialogOpen = false"
+        @save="onLinkDialogSave"
+      />
 
       <!-- 文档 (all documents) row + kebab (replaces the old + button) -->
       <div
@@ -1115,13 +1053,6 @@ function indentFor(depth: number): string {
   flex-shrink: 0;
   border-radius: 3px;
   object-fit: contain;
-}
-
-.quick-link-add-row,
-.quick-link-edit-row {
-  display: grid;
-  gap: 4px;
-  padding: 4px 12px 6px;
 }
 
 .ctx-backdrop {
