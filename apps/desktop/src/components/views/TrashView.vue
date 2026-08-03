@@ -4,7 +4,7 @@ import { RotateCcw, Trash2 } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { extOf } from "../../utils/file";
-import type { Document } from "../../data/mock";
+import { currentVersionLabel } from "../../utils/documentLabel";
 
 /*
  * Recycle bin view. Documents soft-deleted from the document list (the
@@ -25,10 +25,6 @@ const {
   permanentlyDeleteVersion,
   emptyTrash,
 } = useVaultActions();
-
-function currentVersionLabel(document: Document): string {
-  return document.versions.find((v) => v.status === "current")?.label ?? "-";
-}
 
 function onRestore(docId: string) {
   restoreDocument(docId);

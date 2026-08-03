@@ -40,12 +40,12 @@ import {
   descendantsOf,
 } from "../../utils/versionTree";
 import { TYPE_CATEGORIES } from "../../utils/typeCategory";
-import { extOf } from "../../utils/file";
 import { groupDocumentsByProject } from "../../utils/projectGrouping";
 import type { SortKey } from "../../utils/sort";
 import type { SearchScope } from "../../utils/filter";
 import type { Document, ModificationStatus, Version } from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
+import DocumentRow from "../DocumentRow.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
@@ -303,10 +303,6 @@ const versionDeleteDisabled = computed(() => {
 const modificationStatus = computed<ModificationStatus>(
   () => selectedDocument.value?.modification ?? "none",
 );
-
-function currentVersionLabel(document: Document): string {
-  return document.versions.find((v) => v.status === "current")?.label ?? "-";
-}
 
 function chooseDocument(document: Document) {
   selectDocument(document);
@@ -741,60 +737,16 @@ onBeforeUnmount(() => {
                 </div>
               </td>
             </tr>
-            <tr
+            <DocumentRow
               v-for="document in group.docs"
               :key="`${group.key}::${document.id}`"
-              :class="{ selected: selectedDocumentId === document.id }"
-              tabindex="0"
-              role="button"
-              draggable="true"
-              :aria-label="document.name"
-              @click="chooseDocument(document)"
-              @dblclick="onDocDoubleClick(document)"
-              @keydown.enter="chooseDocument(document)"
-              @keydown.space.prevent="chooseDocument(document)"
-              @dragstart="onDragStartDoc($event, document)"
-              @contextmenu.prevent.stop="openDocMenu($event, document)"
-            >
-              <td v-for="id in visibleColumns" :key="id" :data-col="id">
-                <template v-if="id === 'name'">
-                  <div class="name-cell">
-                    <span class="file-type">{{
-                      extOf(document.originalFilename) ?? ""
-                    }}</span>
-                    <strong :title="document.name">{{ document.name }}</strong>
-                  </div>
-                  <div
-                    v-if="selectedDocumentId === document.id && document.tags?.length"
-                    class="row-tags"
-                  >
-                    <span v-for="tag in document.tags" :key="tag" class="row-tag">{{
-                      tag
-                    }}</span>
-                  </div>
-                </template>
-                <template v-else-if="id === 'owner'">
-                  <span class="cell-text">{{ document.owner }}</span>
-                </template>
-                <template v-else-if="id === 'currentVersion'">
-                  <span class="cell-text">{{ currentVersionLabel(document) }}</span>
-                </template>
-                <template v-else-if="id === 'status'">
-                  <span class="status-pill" :data-status="document.health">{{
-                    t(`status.${document.health}`)
-                  }}</span>
-                </template>
-                <template v-else-if="id === 'modification'">
-                  <span
-                    class="mod-pill"
-                    :data-mod="document.modification ?? 'none'"
-                  >{{ t(`modification.${document.modification ?? "none"}`) }}</span>
-                </template>
-                <template v-else-if="id === 'updated'">
-                  <span class="cell-text">{{ document.updatedAt }}</span>
-                </template>
-              </td>
-            </tr>
+              :document="document"
+              :is-selected="selectedDocumentId === document.id"
+              @select="chooseDocument"
+              @dblclick="onDocDoubleClick"
+              @dragstart="onDragStartDoc"
+              @contextmenu="openDocMenu"
+            />
           </tbody>
           <tbody v-if="filteredDocuments.length === 0">
             <tr>
@@ -1498,18 +1450,6 @@ th.sortable:hover .col-resizer::after,
   border-left: 0;
 }
 
-/* Plain-text cells (owner / version / updated): inline-block so the column can
-   ellipsize overlong values, while scrollWidth still reports the true text width
-   for the content-minimum measurement. */
-.cell-text {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
-}
-
 /* A drag has armed this column to hide on release (the mouse over-traveled to
    the previous column's edge): dim it as the "about to switch off" cue. */
 th.col-armed {
@@ -1900,65 +1840,6 @@ tbody tr.selected {
 }
 
 .chip.clear {
-  color: var(--danger-text);
-}
-
-/* Table name cell + inline tags. The name is truncated with an ellipsis;
-   the native `title` attribute (on <strong>) surfaces the full name on hover. */
-.name-cell {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  min-width: 0;
-}
-.name-cell > strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.row-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.row-tag {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-/* Modification pill (source-file status) */
-.mod-pill {
-  display: inline-flex;
-  height: 22px;
-  align-items: center;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.mod-pill[data-mod="unchanged"] {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-
-.mod-pill[data-mod="modified"] {
-  background: var(--warning-bg);
-  color: var(--warning-text);
-}
-
-.mod-pill[data-mod="missing"] {
-  background: color-mix(in srgb, var(--danger-text) 16%, var(--bg-surface));
   color: var(--danger-text);
 }
 
