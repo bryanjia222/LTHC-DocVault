@@ -1,42 +1,31 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import {
-  ArrowRightLeft,
-  Download,
-  Eye,
-  ExternalLink,
-  FolderMinus,
-  Info,
-  Pencil,
-  RefreshCw,
-  Trash2,
-  Upload,
-} from "@lucide/vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
+import { ArrowRightLeft, Eye } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
 import { useDialogs } from "../../composables/useDialogs";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
-import { useContextMenu } from "../../composables/useContextMenu";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import {
   useTableColumns,
   COLUMN_MIN_FALLBACK,
   type ColumnId,
 } from "../../composables/useTableColumns";
-import { descendantsOf, hasBranchingHistory } from "../../utils/versionTree";
+import { hasBranchingHistory } from "../../utils/versionTree";
 import { TYPE_CATEGORIES } from "../../utils/typeCategory";
 import { groupDocumentsByProject } from "../../utils/projectGrouping";
-import { getProjectName } from "../../utils/projectName";
 import type { SortKey } from "../../utils/sort";
 import type { SearchScope } from "../../utils/filter";
-import type { Document, ModificationStatus, Version } from "../../data/mock";
+import type { Document, Version } from "../../data/mock";
 import DocumentRow from "../DocumentRow.vue";
 import GraphMaximized from "./GraphMaximized.vue";
 import VersionDetailSection from "./VersionDetailSection.vue";
 import DocumentMetaSection from "./DocumentMetaSection.vue";
 import VersionHistoryPanel from "./VersionHistoryPanel.vue";
+import DocRowContextMenu from "./DocRowContextMenu.vue";
+import VersionContextMenu from "./VersionContextMenu.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
@@ -66,11 +55,9 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
-const { openCommitModified, openDocumentStatus, openRename, openNoteEdit } =
-  useDialogs();
+const { openNoteEdit } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, openDocument, refreshAll, deleteDocument, exportVersionAction, replaceCommitDocument, deleteVersion } =
-  useVaultActions();
+const { runAction, openDocument } = useVaultActions();
 const { doubleClickAction } = useDoubleClickPref();
 
 /*
@@ -205,34 +192,18 @@ function onResizeStart(id: ColumnId, event: MouseEvent) {
 const typeCategories = TYPE_CATEGORIES;
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
-// Two right-click context menus, both positioned via useContextMenu so a menu
-// opened near the window's right/bottom edge flips on-screen instead of being
-// clipped (the version-history rows sit at the right edge, so this matters most
-// there). `.stop` keeps the global AppContextMenu (window-level) from firing.
-//  - Document menu (left table rows): open / rename / document status / export
-//    / refresh - acts on the right-clicked document (selected on open).
-//  - Version menu (right version-history rows): export this version / refresh -
-//    acts on the right-clicked version (selected on open).
-const {
-  open: docMenuOpen,
-  pos: docMenuPos,
-  menuRef: docMenuRef,
-  openAt: openDocMenuAt,
-  close: closeDocMenu,
-} = useContextMenu();
-const {
-  open: versionMenuOpen,
-  pos: versionMenuPos,
-  menuRef: versionMenuRef,
-  openAt: openVersionMenuAt,
-  close: closeVersionMenu,
-} = useContextMenu();
+// Two right-click context menus (document table rows / version-history rows),
+// each owned by its own component's useContextMenu instance so menus near the
+// window's edge flip on-screen. The view selects the target document/version,
+// then opens the menu through the component ref.
+const docMenuRef = ref<InstanceType<typeof DocRowContextMenu> | null>(null);
+const versionMenuRef = ref<InstanceType<typeof VersionContextMenu> | null>(null);
 
 function openDocMenu(event: MouseEvent, document: Document) {
   selectDocument(document);
   const current = document.versions.find((v) => v.status === "current");
   if (current) selectVersion(current);
-  openDocMenuAt(event);
+  docMenuRef.value?.openAt(event);
 }
 
 /**
@@ -241,7 +212,7 @@ function openDocMenu(event: MouseEvent, document: Document) {
  */
 function onGraphContextMenu(payload: { version: Version; event: MouseEvent }) {
   selectVersion(payload.version);
-  openVersionMenuAt(payload.event);
+  versionMenuRef.value?.openAt(payload.event);
 }
 const previewOpen = ref(false);
 /**
@@ -261,30 +232,6 @@ const versions = computed(() => {
   return doc.versions.filter((v) => !desktop.isVersionTrashed(doc.id, v.id));
 });
 const hasBranching = computed(() => hasBranchingHistory(versions.value));
-/**
- * Whether the version-menu "delete" item is enabled. Mirrors the action's
- * guards: the current version (directly or anywhere in this version's subtree)
- * and the document's whole history are never deletable here. The action still
- * defends, so this only controls the greyed-out state + tooltip. Uses the
- * UNFILTERED version list (`selectedDocument.versions`) so a trashed descendant
- * doesn't hide a current-version-in-subtree block.
- */
-const versionDeleteDisabled = computed(() => {
-  const doc = selectedDocument.value;
-  const ver = selectedVersion.value;
-  if (!doc || !ver) return true;
-  const subtreeIds = [
-    ver.id,
-    ...descendantsOf(doc.versions, ver.id).map((d) => d.id),
-  ];
-  const current = doc.versions.find((v) => v.status === "current");
-  if (current && subtreeIds.includes(current.id)) return true;
-  if (subtreeIds.length >= doc.versions.length) return true;
-  return false;
-});
-const modificationStatus = computed<ModificationStatus>(
-  () => selectedDocument.value?.modification ?? "none",
-);
 
 function chooseDocument(document: Document) {
   selectDocument(document);
@@ -354,11 +301,6 @@ function onScopeChange(value: string) {
   searchScope.value = value as SearchScope;
 }
 
-/** Resolve a project id to its display name (falls back to the raw id). */
-function projectName(id: string | null | undefined): string {
-  return getProjectName(id, desktop.projects.value);
-}
-
 /** Documents bucketed by their project's full path, for the per-group divider
  *  headers. Each doc appears under its single (in-scope) project; unassigned docs
  *  (all-documents view only) land in a trailing bucket. */
@@ -385,9 +327,9 @@ function onDragStartDoc(event: DragEvent, document: Document) {
   event.dataTransfer.effectAllowed = "copy";
 }
 
-/** Preview the right-clicked document's current version in-app (read-only). */
-function docMenuPreview() {
-  closeDocMenu();
+/** Preview the right-clicked document's current version in-app (from the doc
+ *  row context menu; the preview overlay is owned by this view). */
+function onDocMenuPreview() {
   openPreview();
 }
 
@@ -405,110 +347,11 @@ function onDocDoubleClick(document: Document) {
   }
 }
 
-function docMenuOpenDocument() {
-  closeDocMenu();
-  const doc = selectedDocument.value;
-  if (doc) void openDocument(doc.id);
-}
-
-function docMenuStatus() {
-  closeDocMenu();
-  openDocumentStatus();
-}
-
-function docMenuExport() {
-  closeDocMenu();
-  runAction("actionLogs.export");
-}
-
-/** Commit the right-clicked document's tracked source as a new version. Only
- *  meaningful when the tracker reports "modified"; the menu item is disabled
- *  otherwise so the user can't request a no-op commit. */
-function docMenuCommit() {
-  closeDocMenu();
-  openCommitModified();
-}
-
-/** Replace the right-clicked document's file with a user-picked file and commit
- *  it as a new version. If the working copy has uncommitted changes, the action
- *  confirms and commits them first (see replaceCommitDocument) so they aren't
- *  lost. Always enabled - unlike 提交修改 it is meaningful whenever the user
- *  wants to swap in a new file, modified or not. */
-function docMenuReplaceCommit() {
-  closeDocMenu();
-  const doc = selectedDocument.value;
-  if (doc) void replaceCommitDocument(doc.id);
-}
-
-function docMenuRefresh() {
-  closeDocMenu();
-  void refreshAll();
-}
-
-function docMenuRename() {
-  closeDocMenu();
-  openRename();
-}
-
-function docMenuDelete() {
-  closeDocMenu();
-  void deleteDocument();
-}
-
-/**
- * Remove the right-clicked document from its project (it becomes unassigned;
- * the document itself is kept). Only meaningful when scoped to a project.
- */
-function docMenuRemoveFromProject() {
-  const doc = selectedDocument.value;
-  const pid = activeProjectId.value;
-  closeDocMenu();
-  if (!doc || !pid) return;
-  desktop.clearDocumentProject(doc.id);
-}
-
-function versionMenuCheckout() {
-  closeVersionMenu();
-  runAction("actionLogs.checkout");
-}
-
-/** Preview the right-clicked version in-app (read-only - no checkout). */
-function versionMenuPreview() {
+/** Preview the right-clicked version in-app (from the version context menu;
+ *  the preview overlay is owned by this view). */
+function onVersionMenuPreview() {
   const version = selectedVersion.value;
-  closeVersionMenu();
   if (version) openPreview(version);
-}
-
-/** Export the right-clicked committed version to a file (archive snapshot). */
-function versionMenuExport() {
-  const version = selectedVersion.value;
-  closeVersionMenu();
-  if (version) void exportVersionAction(version.label);
-}
-
-function versionMenuRefresh() {
-  closeVersionMenu();
-  void refreshAll();
-}
-
-/**
- * Soft-delete the right-clicked version to the recycle bin (with its
- * descendants). The handler is disabled when the guards would block it, but
- * `deleteVersion` re-checks and surfaces a message if invoked anyway.
- */
-function versionMenuDelete() {
-  const doc = selectedDocument.value;
-  const version = selectedVersion.value;
-  closeVersionMenu();
-  if (!doc || !version) return;
-  void deleteVersion(doc.id, version.id);
-}
-
-function onContextMenuKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    closeDocMenu();
-    closeVersionMenu();
-  }
 }
 
 // Background modification detection: poll tracked source files every 5s so the
@@ -537,16 +380,6 @@ onMounted(() => {
   }
 });
 
-// Esc closes whichever right-click menu is open; listener bound only while one
-// is open.
-watch([docMenuOpen, versionMenuOpen], ([d, v]) => {
-  if (d || v) {
-    window.addEventListener("keydown", onContextMenuKeydown);
-  } else {
-    window.removeEventListener("keydown", onContextMenuKeydown);
-  }
-});
-
 onBeforeUnmount(() => {
   if (pollHandle !== null) clearInterval(pollHandle);
   if (resizeObserver !== null) {
@@ -558,7 +391,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("mouseup", onResizeEnd);
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
-  window.removeEventListener("keydown", onContextMenuKeydown);
 });
 </script>
 
@@ -759,190 +591,15 @@ onBeforeUnmount(() => {
     @contextmenu="onGraphContextMenu"
   />
 
-  <Teleport to="body">
-    <div
-      v-if="docMenuOpen"
-      class="ctx-backdrop"
-      @click="closeDocMenu"
-      @contextmenu.prevent.stop="closeDocMenu"
-    >
-      <div
-        ref="docMenuRef"
-        class="ctx-menu surface"
-        role="menu"
-        :style="{ left: `${docMenuPos.x}px`, top: `${docMenuPos.y}px` }"
-        @click.stop
-      >
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuPreview"
-        >
-          <Eye aria-hidden="true" />
-          {{ t("source.preview") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuOpenDocument"
-        >
-          <ExternalLink aria-hidden="true" />
-          {{ t("source.open") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuExport"
-        >
-          <Download aria-hidden="true" />
-          {{ t("actions.export") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          :disabled="modificationStatus !== 'modified'"
-          :title="
-            modificationStatus === 'modified'
-              ? ''
-              : t('source.commitModifiedDisabled')
-          "
-          @click="docMenuCommit"
-        >
-          <Upload aria-hidden="true" />
-          {{ t("source.commitModified") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuReplaceCommit"
-        >
-          <ArrowRightLeft aria-hidden="true" />
-          {{ t("source.replaceCommit") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuRename"
-        >
-          <Pencil aria-hidden="true" />
-          {{ t("source.rename") }}
-        </button>
-        <button
-          v-if="activeProjectId"
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuRemoveFromProject"
-        >
-          <FolderMinus aria-hidden="true" />
-          {{ t("source.removeFromProject", { project: projectName(activeProjectId) }) }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item danger"
-          role="menuitem"
-          @click="docMenuDelete"
-        >
-          <Trash2 aria-hidden="true" />
-          {{ t("source.delete") }}
-        </button>
-        <div class="ctx-divider"></div>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuRefresh"
-        >
-          <RefreshCw aria-hidden="true" />
-          {{ t("actions.refresh") }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="docMenuStatus"
-        >
-          <Info aria-hidden="true" />
-          {{ t("source.properties") }}
-        </button>
-      </div>
-    </div>
-  </Teleport>
+  <DocRowContextMenu
+    ref="docMenuRef"
+    @preview="onDocMenuPreview"
+  />
 
-  <Teleport to="body">
-    <div
-      v-if="versionMenuOpen"
-      class="ctx-backdrop"
-      @click="closeVersionMenu"
-      @contextmenu.prevent.stop="closeVersionMenu"
-    >
-      <div
-        ref="versionMenuRef"
-        class="ctx-menu surface"
-        role="menu"
-        :style="{ left: `${versionMenuPos.x}px`, top: `${versionMenuPos.y}px` }"
-        @click.stop
-      >
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="versionMenuPreview"
-        >
-          <Eye aria-hidden="true" />
-          {{ t("versionMenu.preview", { label: selectedVersion?.label ?? "" }) }}
-        </button>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="versionMenuExport"
-        >
-          <Download aria-hidden="true" />
-          {{ t("versionMenu.export", { label: selectedVersion?.label ?? "" }) }}
-        </button>
-        <div class="ctx-divider"></div>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          :disabled="selectedVersion?.status === 'current'"
-          @click="versionMenuCheckout"
-        >
-          <ArrowRightLeft aria-hidden="true" />
-          {{ t("versionMenu.checkout", { label: selectedVersion?.label ?? "" }) }}
-        </button>
-        <div class="ctx-divider"></div>
-        <button
-          type="button"
-          class="ctx-item danger"
-          role="menuitem"
-          :disabled="versionDeleteDisabled"
-          :title="versionDeleteDisabled ? t('versionMenu.deleteBlockedCurrent') : ''"
-          @click="versionMenuDelete"
-        >
-          <Trash2 aria-hidden="true" />
-          {{ t("versionMenu.delete", { label: selectedVersion?.label ?? "" }) }}
-        </button>
-        <div class="ctx-divider"></div>
-        <button
-          type="button"
-          class="ctx-item"
-          role="menuitem"
-          @click="versionMenuRefresh"
-        >
-          <RefreshCw aria-hidden="true" />
-          {{ t("actions.refresh") }}
-        </button>
-      </div>
-    </div>
-  </Teleport>
+  <VersionContextMenu
+    ref="versionMenuRef"
+    @preview="onVersionMenuPreview"
+  />
 
   <DocumentPreview
     v-if="previewOpen && selectedDocument"
@@ -986,12 +643,6 @@ onBeforeUnmount(() => {
 
 .detail-panel {
   gap: 14px;
-}
-
-h3 {
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
 }
 
 input[type="search"] {
@@ -1250,10 +901,6 @@ tbody tr.selected {
   gap: 6px;
 }
 
-.filter-tags {
-  flex-basis: 100%;
-}
-
 .filter-label {
   color: var(--text-muted);
   font-size: 12px;
@@ -1297,85 +944,5 @@ tbody tr.selected {
 .icon-action-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-/* Right-click source context menu */
-.ctx-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-}
-
-.ctx-menu {
-  position: absolute;
-  min-width: 200px;
-  max-width: 280px;
-  padding: 4px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  box-shadow: var(--overlay-shadow);
-}
-
-.ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ctx-item:hover:not(.ctx-info):not(:disabled) {
-  background: var(--bg-hover);
-}
-
-.ctx-item:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ctx-item.danger {
-  color: var(--danger-text);
-}
-
-.ctx-info {
-  flex-wrap: wrap;
-  cursor: default;
-}
-
-.ctx-label {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.ctx-path {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono-font);
-  font-size: 12px;
-}
-
-.ctx-divider {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--border-soft);
-}
-
-.ctx-item svg {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2;
 }
 </style>
