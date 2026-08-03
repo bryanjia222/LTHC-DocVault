@@ -11,15 +11,12 @@ import {
   List,
   Maximize2,
   Pencil,
-  Plus,
   RefreshCw,
   RotateCcw,
   Trash2,
   Upload,
-  X,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { nextTick } from "vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
 import { useDialogs } from "../../composables/useDialogs";
@@ -40,6 +37,7 @@ import {
 } from "../../utils/versionTree";
 import { TYPE_CATEGORIES } from "../../utils/typeCategory";
 import { groupDocumentsByProject } from "../../utils/projectGrouping";
+import { getProjectName } from "../../utils/projectName";
 import type { SortKey } from "../../utils/sort";
 import type { SearchScope } from "../../utils/filter";
 import type { Document, ModificationStatus, Version } from "../../data/mock";
@@ -47,6 +45,7 @@ import VersionGraph from "../VersionGraph.vue";
 import DocumentRow from "../DocumentRow.vue";
 import GraphMaximized from "./GraphMaximized.vue";
 import VersionDetailSection from "./VersionDetailSection.vue";
+import DocumentMetaSection from "./DocumentMetaSection.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
@@ -216,9 +215,6 @@ const typeCategories = TYPE_CATEGORIES;
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
 const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
-const newTag = ref("");
-const tagInputOpen = ref(false);
-const tagInputRef = ref<HTMLInputElement | null>(null);
 // Two right-click context menus, both positioned via useContextMenu so a menu
 // opened near the window's right/bottom edge flips on-screen instead of being
 // clipped (the version-history rows sit at the right edge, so this matters most
@@ -367,32 +363,6 @@ function setGraphMaximized(maximized: boolean) {
   log(t(maximized ? "log.graphMaximized" : "log.graphMinimized"));
 }
 
-function addTagForSelected() {
-  const doc = selectedDocument.value;
-  const value = newTag.value.trim();
-  if (!doc || !value) return;
-  desktop.addTag(doc.id, value);
-  newTag.value = "";
-}
-
-function openTagInput() {
-  tagInputOpen.value = true;
-  void nextTick(() => {
-    tagInputRef.value?.focus();
-  });
-}
-
-function closeTagInput() {
-  tagInputOpen.value = false;
-  newTag.value = "";
-}
-
-function removeTagFromSelected(tag: string) {
-  const doc = selectedDocument.value;
-  if (!doc) return;
-  desktop.removeTag(doc.id, tag);
-}
-
 /** ▲/▼ indicator for a sortable column header; "" when the column is inactive. */
 function sortIndicator(key: SortKey): string {
   if (sortKey.value !== key) return "";
@@ -406,8 +376,7 @@ function onScopeChange(value: string) {
 
 /** Resolve a project id to its display name (falls back to the raw id). */
 function projectName(id: string | null | undefined): string {
-  if (!id) return "";
-  return desktop.projects.value.find((p) => p.id === id)?.name ?? id;
+  return getProjectName(id, desktop.projects.value);
 }
 
 /** Documents bucketed by their project's full path, for the per-group divider
@@ -427,13 +396,6 @@ const groupedDocuments = computed(() =>
  *  project (or leaf) view stays clean while all-docs / parent-with-children
  *  views get the per-path separators. */
 const showGroupHeaders = computed(() => groupedDocuments.value.length > 1);
-
-/** Remove the selected document from its project (it becomes unassigned). */
-function removeProjectFromSelected() {
-  const doc = selectedDocument.value;
-  if (!doc) return;
-  desktop.clearDocumentProject(doc.id);
-}
 
 /** Drag a document row onto a sidebar project to set its project (a classified
  *  doc is confirmed before moving). */
@@ -787,75 +749,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section class="doc-section" :aria-label="t('tags.title')">
-        <h3>{{ t("tags.title") }}</h3>
-        <div class="tag-chips">
-          <span
-            v-for="tag in selectedDocument?.tags ?? []"
-            :key="tag"
-            class="tag-chip"
-          >
-            {{ tag }}
-            <button
-              type="button"
-              class="tag-remove"
-              :aria-label="t('actions.clear')"
-              :title="t('actions.clear')"
-              @click="removeTagFromSelected(tag)"
-            >
-              <X aria-hidden="true" />
-            </button>
-          </span>
-          <span
-            v-if="!selectedDocument?.tags?.length && !tagInputOpen"
-            class="muted"
-          >{{ t("tags.empty") }}</span>
-          <button
-            v-if="!tagInputOpen"
-            type="button"
-            class="tag-add-btn"
-            :disabled="!selectedDocument"
-            :title="t('tags.addPlaceholder')"
-            :aria-label="t('tags.addPlaceholder')"
-            @click="openTagInput"
-          >
-            <Plus aria-hidden="true" />
-          </button>
-          <input
-            v-else
-            ref="tagInputRef"
-            v-model="newTag"
-            type="text"
-            class="tag-input"
-            :placeholder="t('tags.addPlaceholder')"
-            @keydown.enter.prevent="addTagForSelected"
-            @keydown.esc="closeTagInput"
-            @blur="closeTagInput"
-          />
-        </div>
-      </section>
-
-      <section class="doc-section" :aria-label="t('projects.label')">
-        <h3>{{ t("projects.title") }}</h3>
-        <div class="tag-chips">
-          <span
-            v-if="selectedDocument?.project"
-            class="tag-chip"
-          >
-            {{ projectName(selectedDocument.project) }}
-            <button
-              type="button"
-              class="tag-remove"
-              :aria-label="t('actions.clear')"
-              :title="t('actions.clear')"
-              @click="removeProjectFromSelected()"
-            >
-              <X aria-hidden="true" />
-            </button>
-          </span>
-          <span v-else class="muted">{{ t("projects.empty") }}</span>
-        </div>
-      </section>
+      <DocumentMetaSection />
 
       <section
         class="version-list"
@@ -1644,136 +1538,6 @@ tbody tr.selected {
 
 .chip.clear {
   color: var(--danger-text);
-}
-
-/* Detail-panel sections (tags + source tracking) */
-.doc-section {
-  display: grid;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.doc-section dl {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.doc-section dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.doc-section dt {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.doc-section dd {
-  margin: 0;
-  text-align: right;
-}
-
-.muted {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-/* Tag chips + inline add ("+") */
-.tag-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 4px 0 8px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.tag-remove {
-  display: inline-grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-muted);
-}
-
-.tag-remove:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.tag-remove svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2.5;
-}
-
-.tag-add-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px dashed var(--border-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.tag-add-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-
-.tag-add-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.tag-add-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 2;
-}
-
-.tag-input {
-  flex: 1;
-  min-width: 80px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.tag-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Disabled commit button (only active when source is "modified") */
