@@ -5,9 +5,19 @@ import { useDialogs } from "./useDialogs";
 import { useNavigation, type NavigationId } from "./useNavigation";
 import { useDocuments } from "./useDocuments";
 import { useDesktopState } from "./useDesktopState";
-import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "./useVault";
+import {
+  confirmDialog,
+  useVault,
+  type ResetStage,
+  type ResetBackend,
+} from "./useVault";
 import { useTheme } from "../theme";
-import { extOf, pickDocumentFile } from "../utils/file";
+import {
+  deriveNameFromPath,
+  extOf,
+  pickDocumentFile,
+  pickDocumentFiles,
+} from "../utils/file";
 import { descendantsOf, ancestorsOf } from "../utils/versionTree";
 
 /*
@@ -30,6 +40,7 @@ export function useVaultActions() {
     selectedVersion,
     documents,
     selectFirstVisible,
+    activeProjectId,
   } = useDocuments();
   const {
     commit,
@@ -52,7 +63,7 @@ export function useVaultActions() {
 
   function runAction(actionKey: string) {
     if (actionKey === "actionLogs.addDocument") {
-      openAddDocument();
+      void startImport();
       return;
     }
     if (actionKey === "actionLogs.commit") {
@@ -79,6 +90,65 @@ export function useVaultActions() {
     if (actionKey === "actionLogs.refresh") {
       void loadDocuments();
     }
+  }
+
+  /**
+   * Pick-first import entry point. Opens the native multi-select picker, then
+   * hands the chosen files to the add-document dialog. The default import
+   * directory is the active sidebar project unless an explicit project is
+   * passed (project-kebab menu). No-op outside Tauri.
+   */
+  async function startImport(projectId?: string | null) {
+    if (!isTauri()) return;
+    const files = await pickDocumentFiles();
+    if (files.length === 0) return; // cancelled
+    openAddDocument(files, projectId ?? activeProjectId.value ?? null);
+  }
+
+  /**
+   * Import a batch of files as new documents. Core, testable loop: one Phase-A
+   * commit at a time, reloading + snapshot-diffing to find each created doc (so
+   * name collisions never mis-match), baselining its library copy, and
+   * assigning it to `projectId` (null = unassigned). Per-file failures are
+   * collected and do not abort the rest of the batch. `onProgress` reports the
+   * number of files attempted (done + failed) as the loop advances.
+   */
+  async function importDocuments(
+    files: Array<{ path: string; name?: string; author?: string }>,
+    projectId: string | null,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ ok: number; failed: Array<{ path: string; error: string }> }> {
+    const failed: Array<{ path: string; error: string }> = [];
+    let ok = 0;
+    for (const file of files) {
+      try {
+        // Per-file snapshot: the only doc not in it after THIS commit is the
+        // one just imported, so the name-collision fallback stays unambiguous.
+        const snapshotIds = documents.value.map((d) => d.id);
+        const resolvedName = file.name?.trim() || deriveNameFromPath(file.path);
+        await commit({
+          path: file.path,
+          new_name: resolvedName,
+          author: file.author?.trim() || undefined,
+        });
+        await loadDocuments();
+        const created =
+          documents.value.find(
+            (d) => !snapshotIds.includes(d.id) && d.name === resolvedName,
+          ) ?? documents.value.find((d) => !snapshotIds.includes(d.id));
+        if (created) {
+          const libPath = await libraryPath({ document_id: created.id });
+          const baseline = await desktop.probeAndBaseline(created.id, libPath);
+          desktop.setTracked(baseline);
+          if (projectId) desktop.setDocumentProject(created.id, projectId);
+        }
+        ok += 1;
+      } catch (e) {
+        failed.push({ path: file.path, error: String(e) });
+      }
+      onProgress?.(ok + failed.length, files.length);
+    }
+    return { ok, failed };
   }
 
   /**
@@ -269,7 +339,11 @@ export function useVaultActions() {
         version: ver.label,
         output_path: libPath,
       });
-      desktop.registerPendingTrack(id, { kind: "known", docId: doc.id, path: libPath });
+      desktop.registerPendingTrack(id, {
+        kind: "known",
+        docId: doc.id,
+        path: libPath,
+      });
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
       log(t("log.actionFailed", { action: t(actionKey), error: String(e) }));
@@ -351,11 +425,17 @@ export function useVaultActions() {
       return;
     }
     if (!isTauri()) return;
-    if (!(await confirmDialog(t("confirm.permanentDelete", { name: doc.name })))) {
+    if (
+      !(await confirmDialog(t("confirm.permanentDelete", { name: doc.name })))
+    ) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    if (!(await confirmDialog(t("confirm.permanentDeleteAgain", { name: doc.name })))) {
+    if (
+      !(await confirmDialog(
+        t("confirm.permanentDeleteAgain", { name: doc.name }),
+      ))
+    ) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -398,7 +478,10 @@ export function useVaultActions() {
       if (list) list.push(entry.versionId);
       else versionsByDoc.set(entry.documentId, [entry.versionId]);
     }
-    const versionCount = [...versionsByDoc.values()].reduce((n, v) => n + v.length, 0);
+    const versionCount = [...versionsByDoc.values()].reduce(
+      (n, v) => n + v.length,
+      0,
+    );
     const total = docIds.length + versionCount;
     log(
       t("log.actionRequested", {
@@ -416,7 +499,9 @@ export function useVaultActions() {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
-    if (!(await confirmDialog(t("confirm.emptyTrashAgain", { count: total })))) {
+    if (
+      !(await confirmDialog(t("confirm.emptyTrashAgain", { count: total })))
+    ) {
       log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
@@ -441,7 +526,10 @@ export function useVaultActions() {
     }
     for (const [docId, versionIds] of versionsByDoc) {
       try {
-        await sendDeleteVersions({ document_id: docId, version_ids: versionIds });
+        await sendDeleteVersions({
+          document_id: docId,
+          version_ids: versionIds,
+        });
         for (const versionId of versionIds) {
           desktop.clearVersion(docId, versionId);
         }
@@ -659,7 +747,10 @@ export function useVaultActions() {
     } else {
       if (
         !(await confirmDialog(
-          t("confirm.permanentDeleteVersion", { name: doc.name, version: ver.label }),
+          t("confirm.permanentDeleteVersion", {
+            name: doc.name,
+            version: ver.label,
+          }),
         ))
       ) {
         log(t("log.actionCancelled", { action: t(actionKey) }));
@@ -941,11 +1032,16 @@ export function useVaultActions() {
       log(t("log.opened", { name: doc?.name ?? t("log.noDocument") }));
     } catch (e) {
       const error = String(e);
-      log(t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error }));
+      log(
+        t("log.openFailed", { name: doc?.name ?? t("log.noDocument"), error }),
+      );
       // No default app (or it failed to launch) - surface a visible, actionable
       // prompt; the activity log alone is easy to miss.
       await message(
-        t("log.openNoDefaultApp", { name: doc?.name ?? t("log.noDocument"), error }),
+        t("log.openNoDefaultApp", {
+          name: doc?.name ?? t("log.noDocument"),
+          error,
+        }),
         { title: t("log.openFailedTitle"), kind: "error" },
       );
     }
@@ -992,7 +1088,11 @@ export function useVaultActions() {
     try {
       await resetToStage(stage, backend, resticPassword);
       await desktop.loadDesktopState();
-      log(t("dev.resetDone", { stage: t("dev.stageLabel", { n: stageNumber(stage) }) }));
+      log(
+        t("dev.resetDone", {
+          stage: t("dev.stageLabel", { n: stageNumber(stage) }),
+        }),
+      );
     } catch (e) {
       log(t("log.actionFailed", { action: actionKey, error: String(e) }));
     }
@@ -1007,9 +1107,7 @@ export function useVaultActions() {
   /** Open Settings on the 状态 (status) tab - the unified tasks/archive view. */
   function openStatus() {
     openSettingsTab("status");
-    log(
-      t("actionLogs.navigate", { section: t("settings.tabs.status") }),
-    );
+    log(t("actionLogs.navigate", { section: t("settings.tabs.status") }));
   }
 
   function toggleCurrentTheme() {
@@ -1023,6 +1121,8 @@ export function useVaultActions() {
 
   return {
     runAction,
+    startImport,
+    importDocuments,
     navigate,
     openStatus,
     toggleCurrentTheme,

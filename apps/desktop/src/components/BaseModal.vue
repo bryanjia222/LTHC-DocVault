@@ -10,7 +10,13 @@ import { onBeforeUnmount, watch } from "vue";
  * (cancel, reset, etc.). Mirrors the overlay pattern used by CommandPalette.
  */
 
-const props = defineProps<{ open: boolean; title: string; subtitle?: string }>();
+const props = defineProps<{
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  /** Widen the panel (e.g. for the batch-import card list). Defaults to 480px. */
+  wide?: boolean;
+}>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 
@@ -42,6 +48,7 @@ onBeforeUnmount(() => {
     <div v-if="open" class="modal-overlay" @click="emit('close')">
       <div
         class="modal-panel"
+        :class="{ 'modal-wide': props.wide }"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
@@ -96,6 +103,10 @@ onBeforeUnmount(() => {
   border-radius: var(--radius);
   background: var(--bg-surface);
   box-shadow: var(--overlay-shadow);
+}
+
+.modal-panel.modal-wide {
+  width: min(720px, 92vw);
 }
 
 .modal-header {

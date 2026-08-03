@@ -74,7 +74,7 @@ export const enUS = {
   },
   addDocument: {
     title: "Add document",
-    subtitle: "Pick a document file to archive as a new document.",
+    subtitle: "Import one or more document files as new documents.",
     fileLabel: "File",
     filePlaceholder: "Select a file…",
     browse: "Browse…",
@@ -83,6 +83,19 @@ export const enUS = {
     authorLabel: "Author (optional)",
     authorPlaceholder: "Author",
     submit: "Add",
+    projectLabel: "Import to",
+    unassigned: "Not in a project",
+    count: "{count} files",
+    importAll: "Import all {count}",
+    bulkTitle: "Import {count} documents",
+    bulkHint:
+      "All {count} files will be imported into \"{project}\" with their existing names. No per-file adjustments are shown for large batches.",
+    progress: "Importing {done}/{total}…",
+    removeFile: "Remove",
+    dropHint:
+      "Tip: you can also drag document files onto the window to import them.",
+    imported: "Imported {count} document(s)",
+    importPartial: "Imported {ok} document(s); {failed} failed",
   },
   commitModified: {
     title: "Commit modification",
@@ -355,6 +368,7 @@ export const enUS = {
     graphPanReset: "Version graph focus reset",
     actionRequested: "{action} requested for {name} ({version})",
     actionCancelled: "Cancelled: {action}",
+    dropIgnored: "Ignored dropped file(s): unsupported type",
     jobStarted: "{action} started (job {id})",
     jobSucceeded: "{action} succeeded: {target}",
     jobFailed: "{action} failed: {target} ({error})",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
 import AppTopbar from "./components/AppTopbar.vue";
@@ -23,9 +24,11 @@ import { useActivityLog } from "./composables/useActivityLog";
 import { useVault } from "./composables/useVault";
 import type { RawJob } from "./composables/useVault";
 import { useDesktopState } from "./composables/useDesktopState";
+import { useDocuments } from "./composables/useDocuments";
 import { useToasts } from "./composables/useToasts";
 import { useDialogs } from "./composables/useDialogs";
 import { bulkSetPreviewCache } from "./utils/previewCache";
+import { filterDocumentPaths } from "./utils/file";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
@@ -33,7 +36,8 @@ const { toggle } = useCommandPalette();
 const { log } = useActivityLog();
 const desktop = useDesktopState();
 const { onJobUpdate } = useToasts();
-const { openSwitchBackend } = useDialogs();
+const { openSwitchBackend, openAddDocument, anyDialogOpen } = useDialogs();
+const { activeProjectId } = useDocuments();
 const {
   documents,
   initialized,
@@ -48,10 +52,37 @@ const {
   libraryPath,
   ensureLibraryCopies,
   listPreviewCache,
+  isTauri,
 } = useVault();
 
 const booting = ref(true);
 let unsubJobs: UnlistenFn | null = null;
+let unsubDragDrop: UnlistenFn | null = null;
+
+/**
+ * Register the webview's native file-drop listener. OS file drops anywhere on
+ * the window open the import dialog pre-filled with the dropped documents;
+ * non-document drops are ignored with an activity-log line. Drops are skipped
+ * while any modal is open so a drop never stacks a second dialog. No-op
+ * outside Tauri (`dragDropEnabled` is a window config flag).
+ */
+async function setupDragDrop(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    unsubDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return; // ignore enter/over/leave
+      if (anyDialogOpen.value) return;
+      const valid = filterDocumentPaths(event.payload.paths);
+      if (valid.length > 0) {
+        openAddDocument(valid, activeProjectId.value);
+      } else if (event.payload.paths.length > 0) {
+        log(t("log.dropIgnored"));
+      }
+    });
+  } catch (e) {
+    console.warn("drag-drop registration failed", e);
+  }
+}
 
 function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -88,7 +119,10 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
   if (!pending || raw.status !== "succeeded") return;
   try {
     if (pending.kind === "known") {
-      const baseline = await desktop.probeAndBaseline(pending.docId, pending.path);
+      const baseline = await desktop.probeAndBaseline(
+        pending.docId,
+        pending.path,
+      );
       desktop.setTracked(baseline);
     } else {
       // Newly imported document: ensure the new doc is in the list, then find
@@ -97,8 +131,7 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
       const created =
         documents.value.find(
           (d) => !pending.snapshotIds.includes(d.id) && d.name === pending.name,
-        ) ??
-        documents.value.find((d) => !pending.snapshotIds.includes(d.id));
+        ) ?? documents.value.find((d) => !pending.snapshotIds.includes(d.id));
       if (created) {
         // Baseline the tool-owned library copy (materialized by the commit
         // executor), not the user's original source file.
@@ -122,7 +155,12 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
  */
 let setupDone = false;
 async function runPostConnectSetup(): Promise<void> {
-  await Promise.all([loadDocuments(), loadConfig(), loadJobs(), loadRepoSize(true)]);
+  await Promise.all([
+    loadDocuments(),
+    loadConfig(),
+    loadJobs(),
+    loadRepoSize(true),
+  ]);
   await desktop.loadDesktopState();
   await ensureLibraryCopies();
   await desktop.loadDesktopState();
@@ -166,11 +204,13 @@ onMounted(async () => {
   booting.value = false;
   log(t("log.loaded"));
   window.addEventListener("keydown", onGlobalKeydown);
+  void setupDragDrop();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onGlobalKeydown);
   unsubJobs?.();
+  unsubDragDrop?.();
 });
 </script>
 

@@ -9,6 +9,8 @@ import { useDesktopState } from "./useDesktopState";
 import { useDialogs } from "./useDialogs";
 import { withI18nContext } from "../test/compose";
 import type { Document } from "../data/mock";
+import type { RawDocumentWithVersions } from "../utils/mappers";
+import { DOCUMENT_EXTENSIONS } from "../utils/documentTypes";
 
 /*
  * useVaultActions centralizes the commit/export/checkout/open handlers and
@@ -75,10 +77,16 @@ beforeEach(() => {
   docs.selectedDocumentId.value = docA.id;
   docs.selectedVersionId.value = docA.versions[0].id;
   docs.searchQuery.value = "";
+  docs.activeProjectId.value = null;
   desktop.tags.value = {};
   desktop.tracked.value = [];
   desktop.probes.value = {};
   desktop.trashed.value = [];
+  desktop.assignments.value = {};
+  desktop.projects.value = [];
+  dialogs.addDocumentOpen.value = false;
+  dialogs.addDocumentFiles.value = [];
+  dialogs.addDocumentProjectId.value = null;
   vi.mocked(invoke).mockClear();
   vi.mocked(open).mockClear();
   vi.mocked(save).mockClear();
@@ -97,9 +105,22 @@ afterEach(() => {
 });
 
 describe("useVaultActions - runAction routing", () => {
-  it("opens the add-document dialog for actionLogs.addDocument", () => {
+  it("picks files and opens the add-document dialog for actionLogs.addDocument", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx", "C:/docs/b.md"]);
     actions.runAction("actionLogs.addDocument");
-    expect(dialogs.addDocumentOpen.value).toBe(true);
+    await vi.waitFor(() => {
+      expect(dialogs.addDocumentOpen.value).toBe(true);
+    });
+    expect(open).toHaveBeenCalledWith({
+      multiple: true,
+      filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+    });
+    expect(dialogs.addDocumentFiles.value).toEqual([
+      "C:/docs/a.docx",
+      "C:/docs/b.md",
+    ]);
+    expect(dialogs.addDocumentProjectId.value).toBeNull();
   });
 
   it("reloads documents for actionLogs.refresh under Tauri", async () => {
@@ -161,7 +182,10 @@ describe("useVaultActions - checkout", () => {
     });
     actions.runAction("actionLogs.checkout");
     await flush();
-    expect(invoke).not.toHaveBeenCalledWith("checkout_version", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "checkout_version",
+      expect.anything(),
+    );
     expect(invoke).not.toHaveBeenCalledWith("library_path", expect.anything());
   });
 
@@ -203,7 +227,10 @@ describe("useVaultActions - export", () => {
       expect.objectContaining({ defaultPath: "Alpha.docx" }),
     );
     // A committed-version export is NOT used for the working copy.
-    expect(invoke).not.toHaveBeenCalledWith("export_version", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "export_version",
+      expect.anything(),
+    );
   });
 
   it("exports the uncommitted state even when the document is modified", async () => {
@@ -212,7 +239,13 @@ describe("useVaultActions - export", () => {
     // source so the doc reports "modified". The working-copy export must still
     // proceed (it copies the live edits) rather than prompting or skipping.
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/src.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     desktop.probes.value = {
       [docA.id]: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
@@ -321,7 +354,13 @@ describe("useVaultActions - commit modified document", () => {
   it("commits the tracked source path directly with no file dialog", async () => {
     asTauri();
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/tracked.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     vi.mocked(invoke).mockResolvedValue("job-mod");
     await actions.commitModifiedDocument(docA.id);
@@ -337,7 +376,13 @@ describe("useVaultActions - commit modified document", () => {
   it("baselines the library copy immediately and registers no pending track", async () => {
     asTauri();
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/tracked.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "library_path") return "/tracked.docx";
@@ -376,7 +421,13 @@ describe("useVaultActions - commit modified document", () => {
 
   it("does not invoke when not running under Tauri", async () => {
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/tracked.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     await actions.commitModifiedDocument(docA.id);
     await flush();
@@ -386,7 +437,13 @@ describe("useVaultActions - commit modified document", () => {
   it("forwards the optional note to the commit command", async () => {
     asTauri();
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/tracked.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/tracked.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     vi.mocked(invoke).mockResolvedValue("job-note");
     await actions.commitModifiedDocument(docA.id, "updated copy");
@@ -420,8 +477,24 @@ describe("useVaultActions - open document", () => {
       ...docA,
       id: "docB",
       versions: [
-        { id: "b1", label: "b1", author: "Alice", note: "", size: "", createdAt: "", status: "archived" },
-        { id: "b2", label: "b2", author: "Alice", note: "", size: "", createdAt: "", status: "current" },
+        {
+          id: "b1",
+          label: "b1",
+          author: "Alice",
+          note: "",
+          size: "",
+          createdAt: "",
+          status: "archived",
+        },
+        {
+          id: "b2",
+          label: "b2",
+          author: "Alice",
+          note: "",
+          size: "",
+          createdAt: "",
+          status: "current",
+        },
       ],
     };
     documents.value = [docB];
@@ -452,7 +525,9 @@ describe("useVaultActions - open document", () => {
 
   it("shows an error prompt when opening fails (e.g. no default app)", async () => {
     asTauri();
-    vi.mocked(invoke).mockRejectedValue("failed to open editor: no association");
+    vi.mocked(invoke).mockRejectedValue(
+      "failed to open editor: no association",
+    );
     vi.mocked(message).mockClear();
     await actions.openDocument(docA.id);
     await flush();
@@ -564,7 +639,10 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
     // Soft-delete is a desktop-local hide: the doc lands in the bin, not gone.
     expect(desktop.isTrashed(docA.id)).toBe(true);
     // No irreversible backend delete is spawned from the list's delete action.
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
     expect(invoke).not.toHaveBeenCalledWith(
       "remove_library_copy",
       expect.anything(),
@@ -580,7 +658,10 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
     await flush();
 
     expect(desktop.isTrashed(docA.id)).toBe(false);
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("does not trash when no document is selected", async () => {
@@ -593,7 +674,10 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
     await flush();
 
     expect(desktop.isTrashed(docA.id)).toBe(false);
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("still soft-deletes outside Tauri (the hide is desktop-local, needs no backend)", async () => {
@@ -606,7 +690,10 @@ describe("useVaultActions - delete document (soft-delete to recycle bin)", () =>
     await flush();
 
     expect(desktop.isTrashed(docA.id)).toBe(true);
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 });
 
@@ -619,7 +706,10 @@ describe("useVaultActions - restore document", () => {
     actions.restoreDocument(docA.id);
 
     expect(desktop.isTrashed(docA.id)).toBe(false);
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when the document id is unknown", async () => {
@@ -628,7 +718,10 @@ describe("useVaultActions - restore document", () => {
 
     actions.restoreDocument("nope");
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 });
 
@@ -645,7 +738,13 @@ describe("useVaultActions - permanently delete document", () => {
     vi.mocked(confirm).mockResolvedValue(true);
     desktop.tags.value = { [docA.id]: ["t1"] };
     desktop.tracked.value = [
-      { documentId: docA.id, path: "/src.docx", size: 1, mtimeMs: 1, sha256: "a" },
+      {
+        documentId: docA.id,
+        path: "/src.docx",
+        size: 1,
+        mtimeMs: 1,
+        sha256: "a",
+      },
     ];
     vi.mocked(invoke).mockResolvedValue("job-del");
 
@@ -672,21 +771,25 @@ describe("useVaultActions - permanently delete document", () => {
     await actions.permanentlyDeleteDocument(docA.id);
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("requires both confirms - cancels on the second with no backend call", async () => {
     asTauri();
     // First passes, second is cancelled -> abort before the backend delete.
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.permanentlyDeleteDocument(docA.id);
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when the document id is unknown", async () => {
@@ -697,7 +800,10 @@ describe("useVaultActions - permanently delete document", () => {
     await actions.permanentlyDeleteDocument("nope");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when not running under Tauri", async () => {
@@ -709,7 +815,10 @@ describe("useVaultActions - permanently delete document", () => {
     await actions.permanentlyDeleteDocument(docA.id);
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 });
 
@@ -755,7 +864,10 @@ describe("useVaultActions - empty recycle bin", () => {
     await actions.emptyTrash();
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
   });
 
   it("requires both confirms - cancels on the first with no backend call", async () => {
@@ -768,7 +880,10 @@ describe("useVaultActions - empty recycle bin", () => {
     await actions.emptyTrash();
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
     // Still trashed - the bin was not emptied.
     expect(desktop.isTrashed(docA.id)).toBe(true);
   });
@@ -776,16 +891,17 @@ describe("useVaultActions - empty recycle bin", () => {
   it("requires both confirms - cancels on the second with no backend call", async () => {
     asTauri();
     // First passes, second cancelled -> abort before deleting anything.
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     desktop.trashDoc(docA.id);
     vi.mocked(invoke).mockResolvedValue("job-del");
 
     await actions.emptyTrash();
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
     expect(desktop.isTrashed(docA.id)).toBe(true);
   });
 
@@ -799,7 +915,10 @@ describe("useVaultActions - empty recycle bin", () => {
     await actions.emptyTrash();
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_document",
+      expect.anything(),
+    );
     // Soft-delete membership is untouched (only the backend delete was skipped).
     expect(desktop.isTrashed(docA.id)).toBe(true);
   });
@@ -842,7 +961,10 @@ describe("useVaultActions - rename document", () => {
     await actions.renameDocument(docA.name);
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "rename_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when the name is blank", async () => {
@@ -852,7 +974,10 @@ describe("useVaultActions - rename document", () => {
     await actions.renameDocument("   ");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "rename_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when no document is selected", async () => {
@@ -863,7 +988,10 @@ describe("useVaultActions - rename document", () => {
     await actions.renameDocument("Beta");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "rename_document",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when not running under Tauri", async () => {
@@ -872,7 +1000,10 @@ describe("useVaultActions - rename document", () => {
     await actions.renameDocument("Beta");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("rename_document", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "rename_document",
+      expect.anything(),
+    );
   });
 });
 
@@ -935,7 +1066,10 @@ describe("useVaultActions - edit version note", () => {
     await actions.editVersionNote("same");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "set_version_note",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when no version is selected", async () => {
@@ -946,7 +1080,10 @@ describe("useVaultActions - edit version note", () => {
     await actions.editVersionNote("new note");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "set_version_note",
+      expect.anything(),
+    );
   });
 
   it("does not invoke when not running under Tauri", async () => {
@@ -955,7 +1092,10 @@ describe("useVaultActions - edit version note", () => {
     await actions.editVersionNote("new note");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("set_version_note", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "set_version_note",
+      expect.anything(),
+    );
   });
 });
 
@@ -979,10 +1119,45 @@ const docTree: Document = {
   backend: "local-copy",
   health: "synced",
   versions: [
-    { id: "v1", label: "v1", author: "Alice", note: "", size: "", createdAt: "", status: "archived" },
-    { id: "v2", label: "v2", author: "Alice", note: "", size: "", createdAt: "", status: "current", parentId: "v1" },
-    { id: "v3", label: "v3", author: "Alice", note: "", size: "", createdAt: "", status: "archived", parentId: "v1" },
-    { id: "v3a", label: "v3a", author: "Alice", note: "", size: "", createdAt: "", status: "archived", parentId: "v3" },
+    {
+      id: "v1",
+      label: "v1",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "archived",
+    },
+    {
+      id: "v2",
+      label: "v2",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "current",
+      parentId: "v1",
+    },
+    {
+      id: "v3",
+      label: "v3",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "archived",
+      parentId: "v1",
+    },
+    {
+      id: "v3a",
+      label: "v3a",
+      author: "Alice",
+      note: "",
+      size: "",
+      createdAt: "",
+      status: "archived",
+      parentId: "v3",
+    },
   ],
 };
 
@@ -1002,7 +1177,10 @@ describe("useVaultActions - delete version (to recycle bin)", () => {
 
     expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(true);
     // Trash is desktop-local - the backend is never touched.
-    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
   });
 
   it("trashes a version together with its descendants, listing them in the confirm", async () => {
@@ -1015,7 +1193,9 @@ describe("useVaultActions - delete version (to recycle bin)", () => {
     expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
     expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(true);
     // The descendants confirm text names the descendant label.
-    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v3a"));
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(
+      expect.stringContaining("v3a"),
+    );
   });
 
   it("cancels the whole delete (keeps version + descendants) when declined", async () => {
@@ -1084,7 +1264,10 @@ describe("useVaultActions - restore version", () => {
     expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
     expect(vi.mocked(confirm)).not.toHaveBeenCalled();
     // Restore is desktop-local - only the state save fires, never a vault delete.
-    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
   });
 
   it("restores a version together with its trashed ancestors on confirm", async () => {
@@ -1104,8 +1287,12 @@ describe("useVaultActions - restore version", () => {
     expect(desktop.isVersionTrashed(docTree.id, "v1")).toBe(false);
     // The confirm names the trashed ancestors (nearest-first: v3, v1).
     expect(vi.mocked(confirm)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v3"));
-    expect(vi.mocked(confirm)).toHaveBeenCalledWith(expect.stringContaining("v1"));
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(
+      expect.stringContaining("v3"),
+    );
+    expect(vi.mocked(confirm)).toHaveBeenCalledWith(
+      expect.stringContaining("v1"),
+    );
   });
 
   it("cancels the whole restore (keeps version + ancestors trashed) when declined", async () => {
@@ -1178,7 +1365,10 @@ describe("useVaultActions - permanently delete version", () => {
     await actions.permanentlyDeleteVersion(docTree.id, "v3");
     await flush();
 
-    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
     // Still trashed - the bin was not touched.
     expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
   });
@@ -1222,7 +1412,174 @@ describe("useVaultActions - empty recycle bin (versions)", () => {
     expect(invoke).toHaveBeenCalledWith("delete_document", {
       document_id: docTree.id,
     });
-    expect(invoke).not.toHaveBeenCalledWith("delete_versions", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
   });
 });
 
+describe("useVaultActions - startImport", () => {
+  it("does nothing outside Tauri", async () => {
+    await actions.startImport();
+    expect(open).not.toHaveBeenCalled();
+    expect(dialogs.addDocumentOpen.value).toBe(false);
+  });
+
+  it("leaves the dialog closed when the picker is cancelled", async () => {
+    asTauri();
+    vi.mocked(open).mockResolvedValueOnce(null);
+    await actions.startImport();
+    expect(dialogs.addDocumentOpen.value).toBe(false);
+  });
+
+  it("opens the dialog with the picked files, defaulting to the active project", async () => {
+    asTauri();
+    docs.selectProject("projX");
+    vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx", "C:/docs/b.md"]);
+    await actions.startImport();
+    expect(open).toHaveBeenCalledWith({
+      multiple: true,
+      filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+    });
+    expect(dialogs.addDocumentOpen.value).toBe(true);
+    expect(dialogs.addDocumentFiles.value).toEqual([
+      "C:/docs/a.docx",
+      "C:/docs/b.md",
+    ]);
+    expect(dialogs.addDocumentProjectId.value).toBe("projX");
+  });
+
+  it("honours an explicit project argument over the active project", async () => {
+    asTauri();
+    docs.selectProject("projA");
+    vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx"]);
+    await actions.startImport("projB");
+    expect(dialogs.addDocumentProjectId.value).toBe("projB");
+  });
+});
+
+describe("useVaultActions - importDocuments", () => {
+  /** Raw backend shape as `list_documents_with_versions` would serialize it. */
+  function rawDoc(id: string, name: string): RawDocumentWithVersions {
+    return {
+      document: { id, name, current_version_id: `${id}-1`, created_at: 1 },
+      versions: [
+        {
+          id: `${id}-1`,
+          document_id: id,
+          number: 1,
+          original_filename: `${name}.docx`,
+          archive_reference: "",
+          backup_backend: "local-copy",
+          snapshot_id: null,
+          manifest: { entries: [] },
+          parent_version_id: null,
+          author: null,
+          note: null,
+          created_at: 1,
+          archive_status: "archived",
+        },
+      ],
+    };
+  }
+
+  function vaultMock(initial: RawDocumentWithVersions[]) {
+    let vaultList = initial;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_documents_with_versions") return vaultList;
+      if (cmd === "library_path") return "/vault/library/newB.docx";
+      if (cmd === "probe_file")
+        return { exists: true, size: 1, mtime_ms: 1, sha256: null };
+      return "job-1";
+    });
+    return {
+      set(raw: RawDocumentWithVersions[]) {
+        vaultList = raw;
+      },
+    };
+  }
+
+  it("imports a single file, assigning it to the target project and baselining it", async () => {
+    asTauri();
+    desktop.projects.value = [{ id: "projX", name: "Work", parentId: null }];
+    const vault = vaultMock([rawDoc("docA", "Alpha")]);
+    const progress: Array<[number, number]> = [];
+    vault.set([rawDoc("docA", "Alpha"), rawDoc("newB", "Beta")]);
+
+    const result = await actions.importDocuments(
+      [{ path: "C:/docs/b.docx", name: "Beta", author: "Bob" }],
+      "projX",
+      (done, total) => progress.push([done, total]),
+    );
+
+    expect(result).toEqual({ ok: 1, failed: [] });
+    expect(invoke).toHaveBeenCalledWith("commit_document", {
+      path: "C:/docs/b.docx",
+      new_name: "Beta",
+      author: "Bob",
+    });
+    expect(desktop.assignments.value["newB"]).toBe("projX");
+    const tracked = desktop.tracked.value.find((t) => t.documentId === "newB");
+    expect(tracked?.path).toBe("/vault/library/newB.docx");
+    expect(progress).toEqual([[1, 1]]);
+  });
+
+  it("collects per-file failures without aborting the batch", async () => {
+    asTauri();
+    let commitCalls = 0;
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "list_documents_with_versions")
+        return [rawDoc("docA", "Alpha")];
+      if (cmd === "library_path") return "/vault/library/x.docx";
+      if (cmd === "probe_file")
+        return { exists: true, size: 1, mtime_ms: 1, sha256: null };
+      if (cmd === "commit_document") {
+        commitCalls += 1;
+        if (commitCalls === 2) throw new Error("bad file");
+        return "job-1";
+      }
+      return undefined;
+    });
+
+    const result = await actions.importDocuments(
+      [
+        { path: "C:/docs/a.docx", name: "Alpha2" },
+        { path: "C:/docs/b.docx", name: "Beta" },
+      ],
+      null,
+    );
+
+    expect(result.ok).toBe(1);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].path).toBe("C:/docs/b.docx");
+    expect(result.failed[0].error).toContain("bad file");
+  });
+
+  it("matches created docs per-file even when names collide", async () => {
+    asTauri();
+    const vault = vaultMock([rawDoc("docA", "Alpha")]);
+    const progress: Array<[number, number]> = [];
+    vault.set([rawDoc("docA", "Alpha"), rawDoc("c1", "same")]);
+
+    const first = await actions.importDocuments(
+      [{ path: "C:/a.docx", name: "same" }],
+      null,
+      (done, total) => progress.push([done, total]),
+    );
+    expect(first).toEqual({ ok: 1, failed: [] });
+
+    // The first "same" doc is already present; the per-file snapshot still
+    // resolves to the just-created doc, not the earlier colliding one.
+    vault.set([
+      rawDoc("docA", "Alpha"),
+      rawDoc("c1", "same"),
+      rawDoc("c2", "same"),
+    ]);
+    const second = await actions.importDocuments(
+      [{ path: "C:/b.docx", name: "same" }],
+      null,
+    );
+    expect(second).toEqual({ ok: 1, failed: [] });
+  });
+});

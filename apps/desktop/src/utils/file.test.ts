@@ -4,7 +4,9 @@ import {
   DOCUMENT_EXTENSIONS,
   deriveNameFromPath,
   extOf,
+  filterDocumentPaths,
   pickDocumentFile,
+  pickDocumentFiles,
 } from "./file";
 
 describe("DOCUMENT_EXTENSIONS", () => {
@@ -95,5 +97,50 @@ describe("pickDocumentFile", () => {
       multiple: false,
       filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
     });
+  });
+});
+
+describe("pickDocumentFiles", () => {
+  it("returns an empty array when the user cancels", async () => {
+    vi.mocked(open).mockResolvedValueOnce(null);
+    expect(await pickDocumentFiles()).toEqual([]);
+  });
+
+  it("returns the selected paths and requests a multi-select dialog", async () => {
+    vi.mocked(open).mockResolvedValueOnce(["C:/docs/a.docx", "C:/docs/b.pdf"]);
+    expect(await pickDocumentFiles()).toEqual([
+      "C:/docs/a.docx",
+      "C:/docs/b.pdf",
+    ]);
+    expect(open).toHaveBeenCalledWith({
+      multiple: true,
+      filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+    });
+  });
+
+  it("normalizes a single-path result to an array", async () => {
+    vi.mocked(open).mockResolvedValueOnce("C:/docs/report.docx");
+    expect(await pickDocumentFiles()).toEqual(["C:/docs/report.docx"]);
+  });
+});
+
+describe("filterDocumentPaths", () => {
+  it("keeps managed extensions and drops others", () => {
+    expect(filterDocumentPaths(["a.docx", "b.png", "c.md", "d.txt"])).toEqual([
+      "a.docx",
+      "c.md",
+      "d.txt",
+    ]);
+  });
+
+  it("matches extensions case-insensitively", () => {
+    expect(filterDocumentPaths(["A.DOCX", "b.PDF"])).toEqual([
+      "A.DOCX",
+      "b.PDF",
+    ]);
+  });
+
+  it("returns an empty array for empty input", () => {
+    expect(filterDocumentPaths([])).toEqual([]);
   });
 });

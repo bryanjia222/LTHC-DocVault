@@ -1,10 +1,10 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 /*
  * App-wide modal open-state. Module-level singletons so any component (the
  * centralized action handler, a Settings button) can open a dialog that is
  * mounted once at the app root. Each dialog resets its own form fields when it
- * opens, so the open flags carry no payload - just "show this dialog".
+ * opens, so most open flags carry no payload - just "show this dialog".
  */
 
 const addDocumentOpen = ref(false);
@@ -20,9 +20,32 @@ const newDocumentOpen = ref(false);
 // target because the new doc's project assignment depends on where the user
 // clicked, not on the selected document.
 const newDocumentProjectId = ref<string | null>(null);
+// Files already picked by the pick-first / drag-drop flow. Empty when the
+// dialog is opened without files (the in-dialog browse fallback).
+const addDocumentFiles = ref<string[]>([]);
+// Project to assign imported documents to (null = unassigned / "全部文档").
+const addDocumentProjectId = ref<string | null>(null);
+// True while any dialog is open, so e.g. a file drop never stacks a second modal.
+const anyDialogOpen = computed(
+  () =>
+    addDocumentOpen.value ||
+    switchBackendOpen.value ||
+    commitModifiedOpen.value ||
+    documentStatusOpen.value ||
+    renameOpen.value ||
+    noteEditOpen.value ||
+    newDocumentOpen.value,
+);
 
 export function useDialogs() {
-  function openAddDocument() {
+  /**
+   * Open the add-document (import) dialog with the files already picked by the
+   * pick-first / drag-drop flow. `projectId` is the target project for the
+   * import directory selector (null / omitted = unassigned).
+   */
+  function openAddDocument(files: string[] = [], projectId?: string | null) {
+    addDocumentFiles.value = files;
+    addDocumentProjectId.value = projectId ?? null;
     addDocumentOpen.value = true;
   }
   function closeAddDocument() {
@@ -77,6 +100,9 @@ export function useDialogs() {
     noteEditOpen,
     newDocumentOpen,
     newDocumentProjectId,
+    addDocumentFiles,
+    addDocumentProjectId,
+    anyDialogOpen,
     openAddDocument,
     closeAddDocument,
     openSwitchBackend,

@@ -27,10 +27,10 @@ import type { ProjectDef } from "../data/mock";
 
 const { t } = useI18n();
 const { activeSection, setSection } = useNavigation();
-const { navigate } = useVaultActions();
+const { navigate, startImport } = useVaultActions();
 const { activeProjectId, selectAll, selectProject } = useDocuments();
 const desktop = useDesktopState();
-const { openNewDocument, openAddDocument } = useDialogs();
+const { openNewDocument } = useDialogs();
 
 const projects = computed(() => desktop.projects.value);
 
@@ -203,17 +203,23 @@ function actNewProject() {
 }
 
 function actNewFile() {
-  const id =
-    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  const id = menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
   closeMenu();
   openNewDocument(id);
 }
 
-/** Import an existing file as a new document (unassigned). Reached from the
- *  all-documents kebab, replacing the removed toolbar "添加文档" button. */
+/** Import files as new documents. Reached from the all-documents kebab; the
+ *  import directory defaults to the currently selected project. */
 function actImportDocument() {
   closeMenu();
-  openAddDocument();
+  void startImport();
+}
+
+/** Import files into a specific project from its kebab menu. */
+function actImportToProject() {
+  const id = menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  closeMenu();
+  void startImport(id);
 }
 
 /** Expand / collapse the whole project tree from the all-documents kebab. */
@@ -227,27 +233,28 @@ function actCollapseAll() {
 }
 
 function actAddSubproject() {
-  const id =
-    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  const id = menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
   closeMenu();
   if (id) startCreate(id);
 }
 
 function actRename() {
-  const id =
-    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  const id = menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
   const proj = id ? projects.value.find((p) => p.id === id) : undefined;
   closeMenu();
   if (id && proj) startRename(id, proj.name);
 }
 
 async function actDelete() {
-  const id =
-    menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
+  const id = menuTarget.value?.kind === "project" ? menuTarget.value.id : null;
   const proj = id ? projects.value.find((p) => p.id === id) : undefined;
   closeMenu();
   if (!id || !proj) return;
-  if (!(await confirmDialog(t("sidebar.confirmDeleteProject", { name: proj.name })))) {
+  if (
+    !(await confirmDialog(
+      t("sidebar.confirmDeleteProject", { name: proj.name }),
+    ))
+  ) {
     return;
   }
   desktop.deleteProject(id);
@@ -309,7 +316,9 @@ async function onProjectDrop(event: DragEvent, targetId: string) {
       // Classified doc: confirm the move before reassigning.
       const from = desktop.projectPath(current);
       const to = desktop.projectPath(targetId);
-      if (!(await confirmDialog(t("sidebar.confirmMoveProject", { from, to })))) {
+      if (
+        !(await confirmDialog(t("sidebar.confirmMoveProject", { from, to })))
+      ) {
         return;
       }
     }
@@ -476,11 +485,7 @@ function indentFor(depth: number): string {
             <button
               class="nav-main project-main"
               type="button"
-              :aria-current="
-                activeSection === 'documents' && activeProjectId === row.project?.id
-                  ? 'page'
-                  : undefined
-              "
+              :aria-current="activeSection === 'documents' && activeProjectId === row.project?.id ? 'page' : undefined"
               draggable="true"
               @click="onProjectClick(row.project!.id)"
               @contextmenu.prevent.stop="
@@ -595,6 +600,12 @@ function indentFor(depth: number): string {
               <button type="button" @click="actNewFile">
                 <FilePlus class="nav-icon" aria-hidden="true" />
                 {{ t("sidebar.newFile") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="actImportToProject">
+                <FileUp class="nav-icon" aria-hidden="true" />
+                {{ t("sidebar.importDocument") }}
               </button>
             </li>
             <li class="ctx-divider" />

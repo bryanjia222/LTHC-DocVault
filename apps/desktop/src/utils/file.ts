@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DOCUMENT_EXTENSIONS } from "./documentTypes";
+import { DOCUMENT_EXTENSIONS, isManagedExtension } from "./documentTypes";
 
 /*
  * File-picker + path helpers shared by the vault action handlers and the
@@ -8,7 +8,7 @@ import { DOCUMENT_EXTENSIONS } from "./documentTypes";
  * filter and name derivation, and never drift out of sync.
  */
 
-export { DOCUMENT_EXTENSIONS };
+export { DOCUMENT_EXTENSIONS, isManagedExtension };
 
 /**
  * Native single-select dialog for a managed document file. Returns the path or
@@ -31,6 +31,27 @@ export async function pickDocumentFile(
   });
   if (!result) return null;
   return Array.isArray(result) ? (result[0] ?? null) : result;
+}
+
+/**
+ * Native multi-select dialog for managed document files (the import flow).
+ * Returns the chosen paths, or an empty array when the user cancels.
+ */
+export async function pickDocumentFiles(): Promise<string[]> {
+  const result = await open({
+    multiple: true,
+    filters: [{ name: "Document", extensions: [...DOCUMENT_EXTENSIONS] }],
+  });
+  if (!result) return [];
+  return Array.isArray(result) ? result : [result];
+}
+
+/** Keep only paths whose extension is one DocVault manages (drag-drop filter). */
+export function filterDocumentPaths(paths: string[]): string[] {
+  return paths.filter((p) => {
+    const ext = extOf(p);
+    return ext !== null && isManagedExtension(ext);
+  });
 }
 
 /** Derive a document name from a file path by stripping the directory + extension. */
