@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
-import { ArrowRightLeft, Download, ExternalLink, Eye, Upload } from "@lucide/vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ArrowRightLeft, ChevronDown, Download, ExternalLink, Eye, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -8,6 +8,7 @@ import { useDialogs } from "../../composables/useDialogs";
 import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
+import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
 import {
   useTableColumns,
   COLUMN_MIN_FALLBACK,
@@ -196,6 +197,36 @@ function onResizeStart(id: ColumnId, event: MouseEvent) {
 const typeCategories = TYPE_CATEGORIES;
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
+
+// The whole right-side detail panel is a drawer: unpinned (default) it
+// collapses to just its header when focus leaves it; pinning keeps it open.
+const { pinned, setPinned } = useHistoryPinPref();
+const panelCollapsed = ref(false);
+const detailPanelRef = ref<HTMLElement | null>(null);
+
+// Pinning re-opens a collapsed panel.
+watch(pinned, (isPinned) => {
+  if (isPinned) panelCollapsed.value = false;
+});
+
+function togglePanelPinned() {
+  setPinned(!pinned.value);
+}
+
+/** Clicking the collapsed header re-expands the panel. */
+function onDetailHeaderClick() {
+  if (panelCollapsed.value) panelCollapsed.value = false;
+}
+
+/** Unpinned: collapse when focus leaves the panel entirely (moving between the
+ *  panel's own controls keeps it open - relatedTarget stays inside). */
+function onDetailPanelFocusOut(event: FocusEvent) {
+  if (pinned.value) return;
+  const next = event.relatedTarget as Node | null;
+  if (!next || !detailPanelRef.value?.contains(next)) {
+    panelCollapsed.value = true;
+  }
+}
 // Two right-click context menus (document table rows / version-history rows),
 // each owned by its own component's useContextMenu instance so menus near the
 // window's edge flip on-screen. The view selects the target document/version,
@@ -588,10 +619,16 @@ onBeforeUnmount(() => {
     </section>
 
     <aside
+      ref="detailPanelRef"
       class="detail-panel surface"
       :aria-label="t('details.label')"
+      @focusout="onDetailPanelFocusOut"
     >
-      <div class="panel-header compact">
+      <div
+        class="panel-header compact"
+        :class="{ collapsed: panelCollapsed }"
+        @click="onDetailHeaderClick"
+      >
         <div>
           <h2 :title="selectedDocument?.name ?? ''">
             {{ selectedDocument?.name ?? t("log.noDocument") }}
@@ -647,27 +684,49 @@ onBeforeUnmount(() => {
           >
             <ArrowRightLeft aria-hidden="true" />
           </button>
+          <button
+            class="icon-action-button panel-pin"
+            type="button"
+            :title="pinned ? t('details.unpinPanel') : t('details.pinPanel')"
+            :aria-label="pinned ? t('details.unpinPanel') : t('details.pinPanel')"
+            @click.stop="togglePanelPinned"
+          >
+            <Pin v-if="pinned" aria-hidden="true" />
+            <PinOff v-else aria-hidden="true" />
+          </button>
+          <button
+            v-if="panelCollapsed"
+            class="icon-action-button panel-pin"
+            type="button"
+            :title="t('details.expandPanel')"
+            :aria-label="t('details.expandPanel')"
+            @click.stop="panelCollapsed = false"
+          >
+            <ChevronDown aria-hidden="true" />
+          </button>
         </div>
       </div>
 
-      <DocumentMetaSection />
+      <template v-if="!panelCollapsed">
+        <DocumentMetaSection />
 
-      <VersionHistoryPanel
-        :versions="versions"
-        :view-mode="versionViewMode"
-        :has-branching="hasBranching"
-        :selected-version-id="selectedVersionId"
-        :maximized="isGraphMaximized"
-        @update:view-mode="setViewMode"
-        @select="chooseVersion"
-        @contextmenu="onGraphContextMenu"
-        @maximize="setGraphMaximized(true)"
-      />
+        <VersionHistoryPanel
+          :versions="versions"
+          :view-mode="versionViewMode"
+          :has-branching="hasBranching"
+          :selected-version-id="selectedVersionId"
+          :maximized="isGraphMaximized"
+          @update:view-mode="setViewMode"
+          @select="chooseVersion"
+          @contextmenu="onGraphContextMenu"
+          @maximize="setGraphMaximized(true)"
+        />
 
-      <VersionDetailSection
-        :version="selectedVersion"
-        @edit-note="openNoteEdit"
-      />
+        <VersionDetailSection
+          :version="selectedVersion"
+          @edit-note="openNoteEdit"
+        />
+      </template>
     </aside>
   </section>
 
@@ -728,6 +787,16 @@ onBeforeUnmount(() => {
 /* Let the flex item holding the <h2> shrink so the ellipsis can take effect. */
 .panel-header.compact > div {
   min-width: 0;
+}
+
+/* Collapsed (unpinned) drawer state: the whole panel is just the header, which
+   becomes the click-to-expand target. */
+.panel-header.compact.collapsed {
+  cursor: pointer;
+}
+
+.panel-header.compact.collapsed:hover h2 {
+  color: var(--text-primary);
 }
 
 .detail-panel {
