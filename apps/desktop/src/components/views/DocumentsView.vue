@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowRightLeft, ChevronDown, Download, ExternalLink, Eye, Pin, PinOff, Upload } from "@lucide/vue";
+import { ArrowRightLeft, ChevronDown, Download, ExternalLink, Eye, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -56,9 +56,10 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
-const { openNoteEdit } = useDialogs();
+const { openNewDocument, openNoteEdit } = useDialogs();
 const { log } = useActivityLog();
-const { runAction, openDocument, startImport } = useVaultActions();
+const { replaceCommitDocument, runAction, openDocument, startImport } =
+  useVaultActions();
 const { doubleClickAction } = useDoubleClickPref();
 
 /*
@@ -84,9 +85,9 @@ const sumVisibleWidths = computed(() =>
   visibleColumns.value.reduce((sum, id) => sum + columns[id].width, 0),
 );
 // Fixed width of the per-row quick-action column (icon + text buttons). Wide
-// enough for the longest English labels (Preview/Upload/Export); a fixed utility
-// column, not part of the resizable/hideable document columns.
-const ROW_ACTIONS_WIDTH = 300;
+// enough for the longest English labels (Preview / Replace / Export); a fixed
+// utility column, not part of the resizable/hideable document columns.
+const ROW_ACTIONS_WIDTH = 320;
 const fillerWidth = computed(() =>
   Math.max(0, wrapWidth.value - sumVisibleWidths.value - ROW_ACTIONS_WIDTH),
 );
@@ -390,8 +391,7 @@ function onVersionMenuPreview() {
 }
 
 /** Row quick-action buttons act on that row's document (selecting it first so
- *  the shared selected-document actions target it). "Upload" = import a new
- *  document (a global flow; the row selection is just affordance feedback). */
+ *  the shared selected-document actions target it). */
 function onRowOpen(document: Document) {
   selectDocument(document);
   void openDocument(document.id);
@@ -400,9 +400,9 @@ function onRowPreview(document: Document) {
   selectDocument(document);
   openPreview();
 }
-function onRowUpload(document: Document) {
+function onRowReplaceCommit(document: Document) {
   selectDocument(document);
-  void startImport();
+  void replaceCommitDocument(document.id);
 }
 function onRowExport(document: Document) {
   selectDocument(document);
@@ -417,8 +417,9 @@ function onPanelOpen() {
 function onPanelPreview() {
   openPreview();
 }
-function onPanelUpload() {
-  void startImport();
+function onPanelReplaceCommit() {
+  const doc = selectedDocument.value;
+  if (doc) void replaceCommitDocument(doc.id);
 }
 function onPanelExport() {
   runAction("actionLogs.export");
@@ -525,14 +526,22 @@ onBeforeUnmount(() => {
           {{ t("filters.clear") }}
         </button>
         <button
-          class="preview-btn"
+          class="filter-action-btn"
           type="button"
-          :disabled="!selectedDocument"
-          :title="t('actions.preview')"
-          @click="openPreview()"
+          :title="t('actions.newDocument')"
+          @click="openNewDocument()"
         >
-          <Eye aria-hidden="true" />
-          {{ t("actions.preview") }}
+          <FilePlus aria-hidden="true" />
+          {{ t("actions.newDocument") }}
+        </button>
+        <button
+          class="filter-action-btn"
+          type="button"
+          :title="t('actions.importDocument')"
+          @click="startImport()"
+        >
+          <Upload aria-hidden="true" />
+          {{ t("actions.importDocument") }}
         </button>
       </div>
 
@@ -598,7 +607,7 @@ onBeforeUnmount(() => {
               @contextmenu="openDocMenu"
               @open="onRowOpen"
               @preview="onRowPreview"
-              @upload="onRowUpload"
+              @replace-commit="onRowReplaceCommit"
               @export="onRowExport"
             />
           </tbody>
@@ -658,11 +667,12 @@ onBeforeUnmount(() => {
           <button
             class="icon-action-button panel-action"
             type="button"
-            :title="t('actions.importDocument')"
-            :aria-label="t('actions.importDocument')"
-            @click="onPanelUpload"
+            :disabled="!selectedDocument"
+            :title="t('source.replaceCommit')"
+            :aria-label="t('source.replaceCommit')"
+            @click="onPanelReplaceCommit"
           >
-            <Upload aria-hidden="true" />
+            <ArrowRightLeft aria-hidden="true" />
           </button>
           <button
             class="icon-action-button panel-action"
@@ -1027,7 +1037,7 @@ tbody tr.selected {
   pointer-events: auto;
 }
 
-.preview-btn {
+.filter-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1041,16 +1051,16 @@ tbody tr.selected {
   cursor: pointer;
 }
 
-.preview-btn:hover:not(:disabled) {
+.filter-action-btn:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
-.preview-btn:disabled {
+.filter-action-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.preview-btn svg {
+.filter-action-btn svg {
   width: 15px;
   height: 15px;
   fill: none;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { Download, ExternalLink, Eye, Upload } from "@lucide/vue";
+import { ArrowRightLeft, Download, ExternalLink, Eye } from "@lucide/vue";
 import { useTableColumns } from "../composables/useTableColumns";
 import { extOf } from "../utils/file";
 import { currentVersionLabel } from "../utils/documentLabel";
@@ -27,7 +27,7 @@ const emit = defineEmits<{
   contextmenu: [event: MouseEvent, document: Document];
   open: [document: Document];
   preview: [document: Document];
-  upload: [document: Document];
+  replaceCommit: [document: Document];
   export: [document: Document];
 }>();
 
@@ -114,11 +114,11 @@ const { visibleColumns } = useTableColumns();
       <button
         class="row-action"
         type="button"
-        :title="t('actions.importDocument')"
-        @click="emit('upload', props.document)"
+        :title="t('source.replaceCommit')"
+        @click="emit('replaceCommit', props.document)"
       >
-        <Upload aria-hidden="true" />
-        <span>{{ t("actions.upload") }}</span>
+        <ArrowRightLeft aria-hidden="true" />
+        <span>{{ t("actions.replaceCommit") }}</span>
       </button>
       <button
         class="row-action"
