@@ -2,17 +2,13 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ArrowRightLeft,
-  ChartNetwork,
   Download,
   Eye,
   ExternalLink,
   FolderMinus,
   Info,
-  List,
-  Maximize2,
   Pencil,
   RefreshCw,
-  RotateCcw,
   Trash2,
   Upload,
 } from "@lucide/vue";
@@ -29,23 +25,18 @@ import {
   COLUMN_MIN_FALLBACK,
   type ColumnId,
 } from "../../composables/useTableColumns";
-import {
-  hasBranchingHistory,
-  getParentLabel,
-  shouldShowBaseVersion,
-  descendantsOf,
-} from "../../utils/versionTree";
+import { descendantsOf, hasBranchingHistory } from "../../utils/versionTree";
 import { TYPE_CATEGORIES } from "../../utils/typeCategory";
 import { groupDocumentsByProject } from "../../utils/projectGrouping";
 import { getProjectName } from "../../utils/projectName";
 import type { SortKey } from "../../utils/sort";
 import type { SearchScope } from "../../utils/filter";
 import type { Document, ModificationStatus, Version } from "../../data/mock";
-import VersionGraph from "../VersionGraph.vue";
 import DocumentRow from "../DocumentRow.vue";
 import GraphMaximized from "./GraphMaximized.vue";
 import VersionDetailSection from "./VersionDetailSection.vue";
 import DocumentMetaSection from "./DocumentMetaSection.vue";
+import VersionHistoryPanel from "./VersionHistoryPanel.vue";
 // Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
@@ -214,7 +205,6 @@ function onResizeStart(id: ColumnId, event: MouseEvent) {
 const typeCategories = TYPE_CATEGORIES;
 const versionViewMode = ref<"list" | "tree">("list");
 const isGraphMaximized = ref(false);
-const graphRef = ref<InstanceType<typeof VersionGraph> | null>(null);
 // Two right-click context menus, both positioned via useContextMenu so a menu
 // opened near the window's right/bottom edge flips on-screen instead of being
 // clipped (the version-history rows sit at the right edge, so this matters most
@@ -245,18 +235,13 @@ function openDocMenu(event: MouseEvent, document: Document) {
   openDocMenuAt(event);
 }
 
-function openVersionMenu(event: MouseEvent, version: Version) {
-  selectVersion(version);
-  openVersionMenuAt(event);
-}
-
 /**
  * Tree-view right-click: select the node's version (so the version menu and its
  * disabled-state guards target it) then open the same menu the list rows use.
- * Reuses openVersionMenu rather than emitting a second path.
  */
 function onGraphContextMenu(payload: { version: Version; event: MouseEvent }) {
-  openVersionMenu(payload.event, payload.version);
+  selectVersion(payload.version);
+  openVersionMenuAt(payload.event);
 }
 const previewOpen = ref(false);
 /**
@@ -351,11 +336,6 @@ function setViewMode(mode: "list" | "tree") {
 
   versionViewMode.value = mode;
   log(t("log.versionViewChanged", { mode: t(`details.${mode}View`) }));
-}
-
-function resetGraph() {
-  graphRef.value?.resetView();
-  log(t("log.graphPanReset"));
 }
 
 function setGraphMaximized(maximized: boolean) {
@@ -751,112 +731,17 @@ onBeforeUnmount(() => {
 
       <DocumentMetaSection />
 
-      <section
-        class="version-list"
-        :class="versionViewMode === 'tree' ? 'tree-mode' : 'list-mode'"
-        :aria-label="t('details.versionHistoryLabel')"
-      >
-        <div class="section-heading">
-          <div class="heading-title">
-            <h3>{{ t("details.versionHistory") }}</h3>
-            <small v-if="selectedDocument" class="heading-meta">{{
-              t("details.totalVersions", { count: versions.length })
-            }}</small>
-          </div>
-          <div class="segmented-control">
-            <button
-              type="button"
-              :class="{ active: versionViewMode === 'list' }"
-              :title="t('details.listView')"
-              :aria-label="t('details.listView')"
-              @click="setViewMode('list')"
-            >
-              <List aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              :class="{ active: versionViewMode === 'tree' }"
-              :disabled="!hasBranching"
-              :title="
-                hasBranching
-                  ? t('details.treeView')
-                  : t('details.noBranchingTooltip')
-              "
-              :aria-label="t('details.treeView')"
-              @click="setViewMode('tree')"
-            >
-              <ChartNetwork aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        <div
-          class="version-history-scroll"
-          :class="{ 'tree-mode': versionViewMode === 'tree' }"
-        >
-          <template v-if="versionViewMode === 'tree'">
-            <div class="graph-toolbar">
-              <span>{{ t("details.dragHint") }}</span>
-              <div class="toolbar">
-                <button
-                  class="icon-button"
-                  type="button"
-                  :title="t('actions.resetView')"
-                  :aria-label="t('actions.resetView')"
-                  @click="resetGraph"
-                >
-                  <RotateCcw aria-hidden="true" />
-                </button>
-                <button
-                  class="icon-button"
-                  type="button"
-                  :title="t('actions.maximize')"
-                  :aria-label="t('actions.maximize')"
-                  @click="setGraphMaximized(true)"
-                >
-                  <Maximize2 aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            <VersionGraph
-              v-if="!isGraphMaximized"
-              ref="graphRef"
-              :versions="versions"
-              :selected-version-id="selectedVersionId"
-              @select="chooseVersion"
-              @contextmenu="onGraphContextMenu"
-            />
-          </template>
-
-          <template v-else>
-            <button
-              v-for="version in versions"
-              :key="version.id"
-              class="version-row"
-              :class="{
-                selected: selectedVersionId === version.id,
-                current: version.status === 'current',
-              }"
-              type="button"
-              @click="chooseVersion(version)"
-              @contextmenu.prevent.stop="openVersionMenu($event, version)"
-            >
-              <span class="version-summary">
-                <strong>{{ version.label }}</strong>
-                <small>{{ version.createdAt }}</small>
-                <small v-if="shouldShowBaseVersion(version, versions)">{{
-                  t("details.basedOnVersion", {
-                    version: getParentLabel(version, versions),
-                  })
-                }}</small>
-              </span>
-              <em class="version-status" :data-status="version.status">{{
-                t(`status.${version.status}`)
-              }}</em>
-            </button>
-          </template>
-        </div>
-      </section>
+      <VersionHistoryPanel
+        :versions="versions"
+        :view-mode="versionViewMode"
+        :has-branching="hasBranching"
+        :selected-version-id="selectedVersionId"
+        :maximized="isGraphMaximized"
+        @update:view-mode="setViewMode"
+        @select="chooseVersion"
+        @contextmenu="onGraphContextMenu"
+        @maximize="setGraphMaximized(true)"
+      />
 
       <VersionDetailSection
         :version="selectedVersion"
@@ -1310,138 +1195,6 @@ tbody tr.selected {
   height: 2px;
   background: var(--border-strong);
   border-radius: 2px;
-}
-
-.version-list {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  gap: 8px;
-}
-
-/* List mode: the version list keeps its natural height; the leftover panel
-   height becomes blank space below it (above the author/size/note block) so a
-   tall right card no longer stretches a few version rows into an empty box. */
-.version-list.list-mode {
-  flex: 0 1 auto;
-}
-
-/* Tree mode: the graph fills the available height (unchanged behaviour). */
-.version-list.tree-mode {
-  flex: 1 1 0;
-  overflow: hidden;
-}
-
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.heading-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.heading-meta {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.version-history-scroll {
-  display: grid;
-  min-height: 0;
-  gap: 8px;
-  padding-right: 4px;
-}
-
-/* List mode: content-sized but capped, so many versions scroll instead of
-   stretching the panel. */
-.version-history-scroll:not(.tree-mode) {
-  flex: 0 1 auto;
-  overflow: auto;
-  max-height: 40vh;
-}
-
-.version-history-scroll.tree-mode {
-  flex: 1 1 auto;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  padding-right: 0;
-}
-
-.graph-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.graph-toolbar .icon-button {
-  width: 28px;
-  height: 28px;
-}
-
-.version-row {
-  display: flex;
-  min-height: 58px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  text-align: left;
-  color: var(--text-primary);
-}
-
-.version-row:hover {
-  background: var(--bg-hover);
-}
-
-.version-row.selected {
-  border-color: var(--accent);
-  background: var(--bg-selected);
-}
-
-.version-row.current {
-  box-shadow: inset 4px 0 0 var(--success);
-}
-
-.version-summary {
-  display: grid;
-  gap: 2px;
-}
-
-.version-summary small {
-  color: var(--text-muted);
-}
-
-.version-status {
-  display: inline-flex;
-  height: 22px;
-  align-items: center;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 650;
-}
-
-.version-status[data-status="current"] {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-
-.version-status[data-status="archived"] {
-  background: var(--bg-inset);
-  color: var(--text-muted);
 }
 
 .action-row {
