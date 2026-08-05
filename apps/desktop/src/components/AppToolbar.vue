@@ -12,7 +12,7 @@ import { useTheme } from "../theme";
 
 /*
  * App-wide toolbar at the very top of the window. The four document actions
- * (预览 / 打开 / 版本提交 / 导出) act on the selected document and are disabled
+ * (预览 / 打开 / 提交修改 / 导出) act on the selected document and are disabled
  * without one; the command palette + theme toggle are global. Rendered above
  * the sidebar + workspace by App.vue (grid-column: 1 / -1).
  */
@@ -26,7 +26,7 @@ const { log } = useActivityLog();
 const { openPreview } = usePreview();
 const { isDark } = useTheme();
 
-/** "版本提交" commits the selected document's source changes as a new version -
+/** "提交修改" commits the selected document's source changes as a new version -
  *  only meaningful when the tracked source is modified. */
 const canCommit = computed(
   () => selectedDocument.value?.modification === "modified",
@@ -85,7 +85,7 @@ function exportDoc() {
         class="toolbar-btn"
         type="button"
         :disabled="!canCommit"
-        :title="canCommit ? t('actions.commit') : t('source.commitModifiedDisabled')"
+        :title="canCommit ? t('actions.commitVersion') : t('source.commitModifiedDisabled')"
         @click="commit"
       >
         <GitCommitVertical aria-hidden="true" />
