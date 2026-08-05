@@ -4,7 +4,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useI18n } from "vue-i18n";
 import AppSidebar from "./components/AppSidebar.vue";
-import AppTopbar from "./components/AppTopbar.vue";
+import AppToolbar from "./components/AppToolbar.vue";
 import AppContextMenu from "./components/AppContextMenu.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import AddDocumentDialog from "./components/AddDocumentDialog.vue";
@@ -218,11 +218,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
+    <AppToolbar />
     <AppSidebar />
 
     <main class="workspace">
-      <AppTopbar />
-
       <div class="view-host">
         <div v-if="booting" class="boot-state">{{ t("boot.loading") }}</div>
         <section v-else-if="!initialized" class="onboarding surface">
@@ -263,7 +262,9 @@ onBeforeUnmount(() => {
 .app-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  /* First row: the app-wide toolbar (spans both columns via grid-column
+     on its root); second row: sidebar + workspace. */
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
   min-height: 720px;
   background: var(--bg-app);

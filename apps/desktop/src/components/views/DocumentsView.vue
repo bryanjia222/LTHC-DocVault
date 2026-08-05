@@ -9,6 +9,7 @@ import { useActivityLog } from "../../composables/useActivityLog";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
+import { usePreview } from "../../composables/usePreview";
 import {
   useTableColumns,
   COLUMN_MIN_FALLBACK,
@@ -263,14 +264,10 @@ function onGraphContextMenu(payload: { version: Version; event: MouseEvent }) {
   selectVersion(payload.version);
   versionMenuRef.value?.openAt(payload.event);
 }
-const previewOpen = ref(false);
-/**
- * The version the preview overlay targets. The toolbar preview button clears it
- * (null -> the latest/current version); the version-history right-click sets it
- * to the right-clicked historical version. Decoupled from `selectedVersion` so
- * previewing an old version does not require it to also be the table selection.
- */
-const previewVersionRef = ref<Version | null>(null);
+// Preview overlay state is shared with the app-wide toolbar (module singleton);
+// the toolbar opens it without the view's logging wrapper.
+const { previewOpen, previewVersionRef, openPreview: openPreviewOverlay } =
+  usePreview();
 
 const versions = computed(() => {
   const doc = selectedDocument.value;
@@ -309,21 +306,18 @@ function chooseVersion(version: Version) {
  */
 function openPreview(version?: Version | null) {
   const doc = selectedDocument.value;
-  // null -> DocumentPreview resolves "current" (the latest version); an explicit
-  // version previews that historical version.
-  previewVersionRef.value = version === undefined ? null : version;
   log(
     t("log.actionRequested", {
       action: t("actionLogs.preview"),
       name: doc?.name ?? t("log.noDocument"),
-      version: previewVersionRef.value?.label ?? t("log.latest"),
+      version: version?.label ?? t("log.latest"),
     }),
   );
   if (!doc) {
     log(t("log.noSelection", { action: t("actionLogs.preview") }));
     return;
   }
-  previewOpen.value = true;
+  openPreviewOverlay(version);
 }
 
 function setViewMode(mode: "list" | "tree") {
