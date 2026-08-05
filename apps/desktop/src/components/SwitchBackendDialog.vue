@@ -36,6 +36,7 @@ const dir = ref("");
 // restores its real backend and the locked control shows it read-only.
 const backend = ref<"local-copy" | "restic">("restic");
 const password = ref("");
+const confirmPassword = ref("");
 const status = ref("");
 const error = ref("");
 const switching = ref(false);
@@ -53,6 +54,7 @@ watch(switchBackendOpen, (open) => {
   // vault's real backend is restored by the `dir` watcher once probed.
   backend.value = "restic";
   password.value = "";
+  confirmPassword.value = "";
   status.value = "";
   error.value = "";
   switching.value = false;
@@ -96,6 +98,15 @@ async function submit() {
     error.value = t("connect.chooseDir");
     return;
   }
+  // The password is typed twice so a typo can't silently lock a new vault.
+  if (
+    backend.value === "restic" &&
+    !backendLocked.value &&
+    password.value !== confirmPassword.value
+  ) {
+    error.value = t("connect.passwordMismatch");
+    return;
+  }
   switching.value = true;
   try {
     const outcome = await connect({
@@ -114,6 +125,7 @@ async function submit() {
         ? t("connect.initialized", { backend: t(`backend.${outcome.backend}`) })
         : t("connect.opened", { backend: t(`backend.${outcome.backend}`) });
     password.value = "";
+    confirmPassword.value = "";
     // A successful connect/initialize is the signal itself - close the dialog
     // so the user lands back in the workspace with the new vault active.
     // (Errors keep the dialog open so the message stays visible.)
@@ -180,6 +192,15 @@ function close() {
           type="password"
           class="text-input"
           :placeholder="t('connect.password')"
+        />
+      </label>
+      <label v-if="backend === 'restic' && !backendLocked" class="field">
+        <span>{{ t("connect.passwordConfirm") }}</span>
+        <input
+          v-model="confirmPassword"
+          type="password"
+          class="text-input"
+          :placeholder="t('connect.passwordConfirm')"
         />
       </label>
 

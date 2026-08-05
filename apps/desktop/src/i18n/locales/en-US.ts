@@ -436,7 +436,7 @@ export const enUS = {
     vaultTitle: "Vault status",
   },
   backend: {
-    restic: "Restic",
+    restic: "Local",
     "local-copy": "Local copy",
   },
   connect: {
@@ -444,11 +444,13 @@ export const enUS = {
     chooseDir: "Select a vault directory",
     browse: "Browse…",
     backend: "Backend",
-    password: "Restic password",
+    password: "Repository password",
+    passwordConfirm: "Confirm repository password",
+    passwordMismatch: "The two passwords do not match.",
     backendLocked:
       "This directory is already an initialized vault, so its backend is fixed. Choose an empty directory to use a different backend.",
     backendResticOnly:
-      "New vaults use the restic backend (encrypted, deduplicated backups).",
+      "New vaults use the local backend (encrypted, deduplicated backups).",
     submit: "Connect / Initialize",
     title: "Create or open vault",
     hint: "Pick an empty directory to create a new vault, or an existing vault directory to open it. A recommended location is pre-filled.",
@@ -460,7 +462,7 @@ export const enUS = {
       "Directory is non-empty and is not a recognizable 兰天嗨彩办公文档管理 vault.",
     jobs_running:
       "A job is still running. Wait for it to finish before switching.",
-    restic_password_required: "The restic backend requires a password.",
+    restic_password_required: "The local repository requires a password.",
   },
   contextMenu: {
     inspect: "Inspect",
@@ -476,9 +478,9 @@ export const enUS = {
     currentBackend: "Active backend",
     repositoryDir: "Repository directory",
     dataDir: "Staging directory",
-    resticVersion: "Restic version",
+    resticVersion: "Local version",
     bundledBinary: "Bundled binary",
-    resticPassword: "Restic password",
+    resticPassword: "Repository password",
     hidden: "•••••••• (hidden)",
     snapshotStats: "Repository stats",
     snapshots: "Snapshots",
@@ -537,7 +539,7 @@ export const enUS = {
     confirmStage: "Reset to {stage}",
     resetDone: "Reset to {stage}",
     backend: "Backend",
-    password: "Restic password",
+    password: "Repository password",
     passwordOptional: "Optional; a dev password is used if blank.",
     freshNoBackend:
       "No backend here - you'll pick repo + backend on the onboarding screen after reset.",
