@@ -74,6 +74,8 @@ export const zhCN = {
     newDocument: "新建文档",
     importDocument: "上传新文档",
     replaceCommit: "替换提交",
+    normalCommit: "普通提交",
+    commitVersion: "版本提交",
     checkout: "切换版本",
     checkoutAlreadyCurrent: "已是当前版本",
     open: "打开",
@@ -513,6 +515,9 @@ export const zhCN = {
     columnsSection: "表格列",
     columnsHint: "拖动表头右侧分隔线可调整列宽；拖到最小宽度以下松开即隐藏该列。勾选下方可显示该列。",
     columnsReset: "重置列宽与可见性",
+    resetDefaults: "恢复到默认设置",
+    resetDefaultsHint: "将主题、开发者模式、双击行为、表格列与面板固定等设置恢复为默认值。不会删除文档或常用链接。",
+    resetDefaultsConfirm: "确定恢复到默认设置吗？",
     columnsAlwaysOn: "始终显示",
   },
   commandPalette: {

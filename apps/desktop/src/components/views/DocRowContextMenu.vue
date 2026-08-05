@@ -7,11 +7,11 @@ import {
   ExternalLink,
   Eye,
   FolderMinus,
+  GitCommitVertical,
   Info,
   Pencil,
   RefreshCw,
   Trash2,
-  Upload,
 } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
@@ -187,7 +187,7 @@ onBeforeUnmount(() => {
           "
           @click="docMenuCommit"
         >
-          <Upload aria-hidden="true" />
+          <GitCommitVertical aria-hidden="true" />
           {{ t("source.commitModified") }}
         </button>
         <button

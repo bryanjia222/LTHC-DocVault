@@ -57,10 +57,9 @@ const {
   clearFilters,
 } = useDocuments();
 const desktop = useDesktopState();
-const { openNewDocument, openNoteEdit } = useDialogs();
+const { openNewDocument, openCommitModified, openNoteEdit } = useDialogs();
 const { log } = useActivityLog();
-const { replaceCommitDocument, runAction, openDocument, startImport } =
-  useVaultActions();
+const { runAction, openDocument, startImport } = useVaultActions();
 const { doubleClickAction } = useDoubleClickPref();
 
 /*
@@ -409,9 +408,9 @@ function onRowPreview(document: Document) {
   selectDocument(document);
   openPreview();
 }
-function onRowReplaceCommit(document: Document) {
+function onRowCommit(document: Document) {
   selectDocument(document);
-  void replaceCommitDocument(document.id);
+  openCommitModified();
 }
 function onRowExport(document: Document) {
   selectDocument(document);
@@ -605,7 +604,7 @@ onBeforeUnmount(() => {
               @contextmenu="openDocMenu"
               @open="onRowOpen"
               @preview="onRowPreview"
-              @replace-commit="onRowReplaceCommit"
+              @commit="onRowCommit"
               @export="onRowExport"
             />
           </tbody>

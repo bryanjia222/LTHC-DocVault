@@ -218,10 +218,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
-    <AppToolbar />
     <AppSidebar />
 
     <main class="workspace">
+      <AppToolbar />
+
       <div class="view-host">
         <div v-if="booting" class="boot-state">{{ t("boot.loading") }}</div>
         <section v-else-if="!initialized" class="onboarding surface">
@@ -262,9 +263,9 @@ onBeforeUnmount(() => {
 .app-shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  /* First row: the app-wide toolbar (spans both columns via grid-column
-     on its root); second row: sidebar + workspace. */
-  grid-template-rows: auto minmax(0, 1fr);
+  /* The sidebar spans the full column height; the toolbar sits at the top of
+     the right workspace column, above the document content. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   min-height: 720px;
   background: var(--bg-app);

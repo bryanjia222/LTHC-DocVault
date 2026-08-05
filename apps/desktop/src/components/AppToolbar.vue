@@ -89,7 +89,7 @@ function exportDoc() {
         @click="commit"
       >
         <GitCommitVertical aria-hidden="true" />
-        <span>{{ t("actions.commit") }}</span>
+        <span>{{ t("actions.commitVersion") }}</span>
       </button>
       <button
         class="toolbar-btn"
@@ -128,14 +128,12 @@ function exportDoc() {
 
 <style scoped>
 .app-toolbar {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-sidebar);
+  padding-bottom: 14px;
 }
 
 .toolbar-actions,

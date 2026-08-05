@@ -2,11 +2,12 @@
 import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
-import { useVault } from "../../composables/useVault";
+import { confirmDialog, useVault } from "../../composables/useVault";
 import { useNavigation, type SettingsTab } from "../../composables/useNavigation";
 import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
+import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
 import {
   useTableColumns,
   ALL_COLUMN_IDS,
@@ -24,9 +25,22 @@ const { isDevMode } = useDevMode();
 const { doubleClickAction, setDoubleClickAction } = useDoubleClickPref();
 const { columns, setVisible, resetColumns, isAlwaysVisible } =
   useTableColumns();
+const { setPinned } = useHistoryPinPref();
 
 function onToggleColumn(id: ColumnId, event: Event) {
   setVisible(id, (event.target as HTMLInputElement).checked);
+}
+
+/** Restore every client UI setting (theme, dev mode, double-click, table
+ *  columns, panel pinning) to its default. Documents and quick links are user
+ *  data and are left untouched. */
+async function resetSettings() {
+  if (!(await confirmDialog(t("settings.resetDefaultsConfirm")))) return;
+  setTheme("system");
+  isDevMode.value = false;
+  setDoubleClickAction("preview");
+  resetColumns();
+  setPinned(false);
 }
 
 // Dev-only reset card: vite strips this in production builds, so the
@@ -249,6 +263,14 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
         </div>
         <button type="button" class="columns-reset" @click="resetColumns">
           {{ t("settings.columnsReset") }}
+        </button>
+      </div>
+
+      <div class="surface settings-card">
+        <h3>{{ t("settings.resetDefaults") }}</h3>
+        <p class="field-hint">{{ t("settings.resetDefaultsHint") }}</p>
+        <button type="button" class="columns-reset" @click="resetSettings">
+          {{ t("settings.resetDefaults") }}
         </button>
       </div>
 

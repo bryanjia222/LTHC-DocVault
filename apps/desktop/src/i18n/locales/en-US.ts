@@ -74,6 +74,8 @@ export const enUS = {
     newDocument: "New document",
     importDocument: "Upload new document",
     replaceCommit: "Replace",
+    normalCommit: "Commit",
+    commitVersion: "Commit version",
     checkout: "Checkout",
     checkoutAlreadyCurrent: "Already the current version",
     open: "Open",
@@ -521,6 +523,9 @@ export const enUS = {
     columnsSection: "Table columns",
     columnsHint: "Drag a header's right edge to resize a column; drag below the minimum width and release to hide it. Tick below to show it.",
     columnsReset: "Reset widths & visibility",
+    resetDefaults: "Restore default settings",
+    resetDefaultsHint: "Restores theme, developer mode, double-click behavior, table columns, and panel pinning to their defaults. Documents and quick links are not touched.",
+    resetDefaultsConfirm: "Restore default settings?",
     columnsAlwaysOn: "Always shown",
   },
   commandPalette: {

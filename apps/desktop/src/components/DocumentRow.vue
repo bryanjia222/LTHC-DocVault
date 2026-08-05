@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { ArrowRightLeft, Download, ExternalLink, Eye } from "@lucide/vue";
+import { Download, ExternalLink, Eye, GitCommitVertical } from "@lucide/vue";
 import { useTableColumns } from "../composables/useTableColumns";
 import { extOf } from "../utils/file";
 import { currentVersionLabel } from "../utils/documentLabel";
@@ -27,7 +27,7 @@ const emit = defineEmits<{
   contextmenu: [event: MouseEvent, document: Document];
   open: [document: Document];
   preview: [document: Document];
-  replaceCommit: [document: Document];
+  commit: [document: Document];
   export: [document: Document];
 }>();
 
@@ -114,11 +114,16 @@ const { visibleColumns } = useTableColumns();
       <button
         class="row-action"
         type="button"
-        :title="t('source.replaceCommit')"
-        @click="emit('replaceCommit', props.document)"
+        :disabled="props.document.modification !== 'modified'"
+        :title="
+          props.document.modification === 'modified'
+            ? t('actions.normalCommit')
+            : t('source.commitModifiedDisabled')
+        "
+        @click="emit('commit', props.document)"
       >
-        <ArrowRightLeft aria-hidden="true" />
-        <span>{{ t("actions.replaceCommit") }}</span>
+        <GitCommitVertical aria-hidden="true" />
+        <span>{{ t("actions.normalCommit") }}</span>
       </button>
       <button
         class="row-action"
