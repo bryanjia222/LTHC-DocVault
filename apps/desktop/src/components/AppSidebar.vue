@@ -435,7 +435,7 @@ function indentFor(depth: number): string {
     <div class="brand">
       <div class="brand-mark">蓝</div>
       <div>
-        <strong>蓝天嗨彩文档管理</strong>
+        <strong>兰天嗨彩办公文档管理</strong>
         <span>{{ t("app.tagline") }}</span>
       </div>
     </div>
