@@ -72,6 +72,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
+            // Stamp the window title with the crate version so the title bar
+            // always matches Cargo.toml (the version the CI stamps from the
+            // release tag). tauri.conf.json carries the title without a version
+            // as the pre-load value.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&format!(
+                    "兰天嗨彩办公文档管理 v{}",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
             // Resolve the bundled restic binary once and stash it in app state;
             // every vault open/init injects it as an explicit override. `None`
             // -> the storage layer falls back to its own auto-discovery (exe dir
