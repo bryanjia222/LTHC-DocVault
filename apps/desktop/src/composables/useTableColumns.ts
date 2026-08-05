@@ -40,6 +40,11 @@ export const COLUMN_DEFAULT_WIDTHS: Record<ColumnId, number> = {
 /** Columns that can never be hidden (the primary identifier). */
 export const COLUMN_ALWAYS_VISIBLE: readonly ColumnId[] = ["name"];
 
+/** Columns hidden by default - redundant for a local vault (owner and the
+ *  health-status column are almost always the same value), so they start off
+ *  and stay discoverable under Settings > 表格列. */
+export const COLUMN_DEFAULT_HIDDEN: readonly ColumnId[] = ["owner", "status"];
+
 /** All columns in display order (mirrors the sort keys). */
 export const ALL_COLUMN_IDS: readonly ColumnId[] = SORT_KEYS;
 
@@ -54,7 +59,10 @@ function readInitial(): Record<ColumnId, ColumnState> {
   const fallback = () => {
     const out = {} as Record<ColumnId, ColumnState>;
     for (const id of ALL_COLUMN_IDS) {
-      out[id] = { width: COLUMN_DEFAULT_WIDTHS[id], visible: true };
+      out[id] = {
+        width: COLUMN_DEFAULT_WIDTHS[id],
+        visible: !COLUMN_DEFAULT_HIDDEN.includes(id),
+      };
     }
     return out;
   };
@@ -140,7 +148,7 @@ function setVisible(id: ColumnId, visible: boolean): void {
 function resetColumns(): void {
   for (const id of ALL_COLUMN_IDS) {
     columns[id].width = COLUMN_DEFAULT_WIDTHS[id];
-    columns[id].visible = true;
+    columns[id].visible = !COLUMN_DEFAULT_HIDDEN.includes(id);
   }
 }
 

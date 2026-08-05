@@ -24,14 +24,18 @@ describe("useTableColumns", () => {
     vi.resetModules();
   });
 
-  it("defaults to all columns visible at their default widths", async () => {
+  it("defaults to owner/status hidden, others visible at default widths", async () => {
     const mod = await import("./useTableColumns");
     const { columns, visibleColumns } = mod.useTableColumns();
     for (const id of mod.ALL_COLUMN_IDS) {
-      expect(columns[id].visible).toBe(true);
+      expect(columns[id].visible).toBe(!mod.COLUMN_DEFAULT_HIDDEN.includes(id));
       expect(columns[id].width).toBe(mod.COLUMN_DEFAULT_WIDTHS[id]);
     }
-    expect(visibleColumns.value).toEqual([...mod.ALL_COLUMN_IDS]);
+    expect(visibleColumns.value).toEqual(
+      [...mod.ALL_COLUMN_IDS].filter(
+        (id) => !mod.COLUMN_DEFAULT_HIDDEN.includes(id),
+      ),
+    );
   });
 
   it("reads a stored width/visibility map", async () => {
@@ -85,9 +89,9 @@ describe("useTableColumns", () => {
 
   it("commitResize with hide=false keeps the width", async () => {
     const { commitResize, columns } = await importComposable();
-    commitResize("owner", 160, false);
-    expect(columns.owner.visible).toBe(true);
-    expect(columns.owner.width).toBe(160);
+    commitResize("currentVersion", 160, false);
+    expect(columns.currentVersion.visible).toBe(true);
+    expect(columns.currentVersion.width).toBe(160);
   });
 
   it("commitResize with hide=true does NOT hide the always-visible name column", async () => {
@@ -114,23 +118,23 @@ describe("useTableColumns", () => {
     expect(columns.owner.width).toBe(COLUMN_MIN_FALLBACK);
   });
 
-  it("resetColumns restores defaults", async () => {
+  it("resetColumns restores defaults (owner/status hidden)", async () => {
     const { setWidth, setVisible, resetColumns, columns, COLUMN_DEFAULT_WIDTHS } =
       await importComposable();
     setWidth("owner", 200);
-    setVisible("status", false);
+    setVisible("currentVersion", false);
     resetColumns();
-    for (const id of ["owner", "status"] as const) {
-      expect(columns[id].width).toBe(COLUMN_DEFAULT_WIDTHS[id]);
-      expect(columns[id].visible).toBe(true);
-    }
+    expect(columns.owner.width).toBe(COLUMN_DEFAULT_WIDTHS.owner);
+    expect(columns.owner.visible).toBe(false);
+    expect(columns.status.visible).toBe(false);
+    expect(columns.currentVersion.visible).toBe(true);
   });
 
   it("persists changes to localStorage", async () => {
     const { setVisible } = await importComposable();
-    setVisible("owner", false);
+    setVisible("currentVersion", false);
     await nextTick();
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-    expect(stored.owner.visible).toBe(false);
+    expect(stored.currentVersion.visible).toBe(false);
   });
 });
