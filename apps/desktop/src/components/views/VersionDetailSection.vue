@@ -4,10 +4,10 @@ import { Pencil } from "@lucide/vue";
 import type { Version } from "../../data/mock";
 
 /*
- * Author / size / note block for the currently selected version. Shared between
- * the detail panel and the graph-maximized overlay (which used to carry a
- * verbatim copy), so the two stay in sync. `margin-top: auto` pins it to the
- * bottom of whichever flex column hosts it.
+ * Note block for the currently selected version. Shared between the detail
+ * panel and the graph-maximized overlay (which used to carry a verbatim copy),
+ * so the two stay in sync. `margin-top: auto` pins it to the bottom of
+ * whichever flex column hosts it.
  */
 
 const props = defineProps<{
@@ -22,39 +22,23 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <section
-    class="version-detail"
-    :aria-label="t('details.selectedVersionLabel')"
-  >
-    <h3>{{ t("details.selectedVersion") }}</h3>
-    <dl>
-      <div>
-        <dt>{{ t("details.author") }}</dt>
-        <dd>{{ props.version?.author ?? "-" }}</dd>
-      </div>
-      <div>
-        <dt>{{ t("details.size") }}</dt>
-        <dd>{{ props.version?.size ?? "-" }}</dd>
-      </div>
-      <div>
-        <dt>{{ t("details.note") }}</dt>
-        <dd>
-          <span class="note-text">{{
-            props.version ? props.version.note : t("details.noNote")
-          }}</span>
-          <button
-            class="note-edit-hint"
-            type="button"
-            :disabled="!props.version"
-            :title="t('details.noteEditHint')"
-            :aria-label="t('details.noteEditHint')"
-            @click="emit('edit-note')"
-          >
-            <Pencil aria-hidden="true" />
-          </button>
-        </dd>
-      </div>
-    </dl>
+  <section class="version-detail" :aria-label="t('details.note')">
+    <h3>{{ t("details.note") }}</h3>
+    <div class="note-line">
+      <span class="note-text">{{
+        props.version ? props.version.note : t("details.noNote")
+      }}</span>
+      <button
+        class="note-edit-hint"
+        type="button"
+        :disabled="!props.version"
+        :title="t('details.noteEditHint')"
+        :aria-label="t('details.noteEditHint')"
+        @click="emit('edit-note')"
+      >
+        <Pencil aria-hidden="true" />
+      </button>
+    </div>
   </section>
 </template>
 
@@ -69,20 +53,24 @@ h3 {
 .version-detail {
   margin-top: auto;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--border-soft);
 }
 
-.version-detail dl {
-  display: grid;
-  gap: 10px;
+.note-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
 }
 
-.version-detail dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+.note-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* Note pen - opens the version note editor */
@@ -93,11 +81,10 @@ h3 {
   width: 22px;
   height: 22px;
   padding: 0;
-  margin-left: 4px;
+  flex-shrink: 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  vertical-align: middle;
   cursor: pointer;
 }
 

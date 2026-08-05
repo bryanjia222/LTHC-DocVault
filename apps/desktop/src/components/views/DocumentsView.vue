@@ -668,8 +668,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <DocumentMetaSection />
-
       <VersionHistoryPanel
         :versions="versions"
         :view-mode="versionViewMode"
@@ -686,6 +684,8 @@ onBeforeUnmount(() => {
         :version="selectedVersion"
         @edit-note="openNoteEdit"
       />
+
+      <DocumentMetaSection />
     </aside>
   </section>
 

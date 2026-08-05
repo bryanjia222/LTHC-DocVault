@@ -5,12 +5,10 @@ import { useI18n } from "vue-i18n";
 import { Plus, X } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useDesktopState } from "../../composables/useDesktopState";
-import { getProjectName } from "../../utils/projectName";
 
 /*
- * Tags + project assignment for the selected document (two sibling sections,
- * so they stay separate flex items in the detail panel). State comes from the
- * shared useDocuments / useDesktopState singletons - no props needed.
+ * Tags for the selected document. State comes from the shared useDocuments /
+ * useDesktopState singletons - no props needed.
  */
 
 const { t } = useI18n();
@@ -45,13 +43,6 @@ function removeTagFromSelected(tag: string) {
   const doc = selectedDocument.value;
   if (!doc) return;
   desktop.removeTag(doc.id, tag);
-}
-
-/** Remove the selected document from its project (it becomes unassigned). */
-function removeProjectFromSelected() {
-  const doc = selectedDocument.value;
-  if (!doc) return;
-  desktop.clearDocumentProject(doc.id);
 }
 </script>
 
@@ -101,28 +92,6 @@ function removeProjectFromSelected() {
         @keydown.esc="closeTagInput"
         @blur="closeTagInput"
       />
-    </div>
-  </section>
-
-  <section class="doc-section" :aria-label="t('projects.label')">
-    <h3>{{ t("projects.title") }}</h3>
-    <div class="tag-chips">
-      <span
-        v-if="selectedDocument?.project"
-        class="tag-chip"
-      >
-        {{ getProjectName(selectedDocument.project, desktop.projects.value) }}
-        <button
-          type="button"
-          class="tag-remove"
-          :aria-label="t('actions.clear')"
-          :title="t('actions.clear')"
-          @click="removeProjectFromSelected()"
-        >
-          <X aria-hidden="true" />
-        </button>
-      </span>
-      <span v-else class="muted">{{ t("projects.empty") }}</span>
     </div>
   </section>
 </template>
