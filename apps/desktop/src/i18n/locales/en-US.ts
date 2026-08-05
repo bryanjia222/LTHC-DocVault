@@ -1,7 +1,4 @@
 export const enUS = {
-  app: {
-    tagline: "Local version archive",
-  },
   nav: {
     primary: "Primary",
     documents: "Documents",
@@ -59,8 +56,6 @@ export const enUS = {
   },
   page: {
     title: "Document Workspace",
-    subtitle:
-      "Desktop console prototype for commits, exports, checkout, and job tracking.",
   },
   boot: {
     loading: "Connecting to vault…",

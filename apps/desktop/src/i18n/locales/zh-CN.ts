@@ -1,7 +1,4 @@
 export const zhCN = {
-  app: {
-    tagline: "本地版本归档",
-  },
   nav: {
     primary: "主导航",
     documents: "文档",
@@ -59,7 +56,6 @@ export const zhCN = {
   },
   page: {
     title: "文档工作台",
-    subtitle: "版本提交、导出、切换版本与任务追踪的桌面控制台原型。",
   },
   boot: {
     loading: "正在连接仓库…",

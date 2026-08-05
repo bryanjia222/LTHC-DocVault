@@ -15,7 +15,6 @@ const { open } = useCommandPalette();
   <header class="topbar">
     <div>
       <h1>{{ t("page.title") }}</h1>
-      <p>{{ t("page.subtitle") }}</p>
     </div>
 
     <div class="toolbar">
