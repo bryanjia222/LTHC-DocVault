@@ -202,7 +202,9 @@ const isGraphMaximized = ref(false);
 // The whole right-side detail panel is a drawer: unpinned (default) it
 // collapses to just its header when focus leaves it; pinning keeps it open.
 const { pinned, setPinned } = useHistoryPinPref();
-const panelCollapsed = ref(false);
+// Unpinned: the card starts hidden and only shows as an overlay when a document
+// is selected; it never takes layout space. Pinned: always shown in-flow.
+const panelCollapsed = ref(!pinned.value);
 const detailPanelRef = ref<HTMLElement | null>(null);
 
 // Pinning re-opens a collapsed panel.
@@ -462,7 +464,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     class="content-grid"
-    :class="{ 'single-col': panelCollapsed }"
+    :class="{ 'single-col': !pinned }"
   >
     <section class="document-panel surface" :aria-label="t('documents.label')">
       <div class="panel-header">
@@ -625,9 +627,10 @@ onBeforeUnmount(() => {
     </section>
 
     <aside
-      v-if="!panelCollapsed"
+      v-if="pinned || !panelCollapsed"
       ref="detailPanelRef"
       class="detail-panel surface"
+      :class="{ 'detail-overlay': !pinned }"
       :aria-label="t('details.label')"
       @focusout="onDetailPanelFocusOut"
     >
@@ -711,6 +714,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .content-grid {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 356px;
   grid-template-rows: minmax(0, 1fr);
@@ -718,11 +722,25 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-/* Unpinned + collapsed: the card is unmounted, so a single column lets the table
-   reclaim the whole width - a fixed two-column grid would keep an empty 356px
-   track that the left panel cannot use. */
+/* Unpinned: a single column, so the table always spans the full width - the
+   card floats above its right side as an overlay instead of taking layout
+   space. Pinned re-adds the 356px column (the default two-column grid). */
 .content-grid.single-col {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Unpinned card: absolutely positioned over the table's right edge. Selecting a
+   document shows it; focus leaving hides it - never a layout change. */
+.detail-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 356px;
+  z-index: 30;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--overlay-shadow);
 }
 
 .document-panel,
