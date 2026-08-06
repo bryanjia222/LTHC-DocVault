@@ -1,0 +1,12 @@
+{
+  "name": "docvault-office-addin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DocVault Office.js add-in (Word/Excel/PPT task pane)",
+  "scripts": {
+    "validate": "office-addin-manifest validate manifest.xml"
+  },
+  "devDependencies": {
+    "office-addin-manifest": "^1.12.0"
+  }
+}

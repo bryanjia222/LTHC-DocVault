@@ -17,6 +17,7 @@
 //! API and needs no CORS handling.
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -78,7 +79,11 @@ enum Route {
         ext: Option<String>,
         note: Option<String>,
     },
+    /// GET "/" - the task-pane entry page.
     TaskPane,
+    /// GET of any other non-API path - a static asset of the task-pane build
+    /// (resolved against the build directory, never past it).
+    Asset(String),
     NotFound,
 }
 
@@ -130,6 +135,7 @@ fn parse_route(method: &str, url: &str) -> Route {
             }
             Route::NotFound
         }
+        _ if method == "GET" => Route::Asset(path.to_owned()),
         _ => Route::NotFound,
     }
 }
@@ -255,7 +261,8 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
                 "vaultOpen": state::lock_vault(&bridge.vault).is_some(),
             }),
         ),
-        Route::TaskPane => taskpane_response(&bridge.token),
+        Route::TaskPane => serve_taskpane("/", &bridge.token),
+        Route::Asset(path) => serve_taskpane(&path, &bridge.token),
         Route::Documents => {
             if !check_bearer(auth, &bridge.token) {
                 return json_response(401, &serde_json::json!({ "error": "unauthorized" }));
@@ -424,17 +431,82 @@ fn list_documents(bridge: &Bridge) -> Result<Vec<serde_json::Value>, String> {
         .collect())
 }
 
-/// The task-pane page. Until `shared/addin-web` is built, this is a minimal
-/// placeholder that also proves the served page carries the session token
-/// (`window.__DOCVAULT_TOKEN__`) that the built task pane will read.
-fn taskpane_response(token: &str) -> ResponseBox {
+/// Serve the add-in task pane: the built `shared/addin-web` page at `/` and its
+/// static assets, with the session token injected into `index.html` so the
+/// served page is same-origin with the API and needs no CORS handling. Falls
+/// back to a minimal placeholder when the build directory is missing (fresh
+/// checkout without `npm run build` in `shared/addin-web`).
+fn serve_taskpane(request_path: &str, token: &str) -> ResponseBox {
+    let Some(dist) = taskpane_dist() else {
+        return placeholder_response(token);
+    };
+    let relative = request_path.trim_start_matches('/');
+    let file_path = dist.join(relative);
+    if !file_path.starts_with(&dist) {
+        // Path-traversal guard: never serve anything outside the build dir.
+        return json_response(404, &serde_json::json!({ "error": "not found" }));
+    }
+    if relative.is_empty() || relative == "index.html" {
+        return serve_index(&dist.join("index.html"), token);
+    }
+    match std::fs::read(&file_path) {
+        Ok(bytes) => text_response(200, bytes, content_type(&file_path)),
+        Err(_) => json_response(404, &serde_json::json!({ "error": "not found" })),
+    }
+}
+
+/// The built task-pane directory, in a dev build at its repo-relative location.
+/// `None` when it hasn't been built yet.
+fn taskpane_dist() -> Option<PathBuf> {
+    let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../shared/addin-web/dist");
+    dev.join("index.html").exists().then_some(dev)
+}
+
+/// Serve `index.html` with the session token injected into `<head>` (before the
+/// app's module script runs), so `window.__DOCVAULT_TOKEN__` is set for the
+/// bridge client.
+fn serve_index(index_path: &Path, token: &str) -> ResponseBox {
+    let Ok(html) = std::fs::read_to_string(index_path) else {
+        return placeholder_response(token);
+    };
+    text_response(200, inject_token(&html, token).into_bytes(), "text/html; charset=utf-8")
+}
+
+/// Inject the session token into the task-pane `index.html` as a script inside
+/// `<head>`, so it is defined before the app's module script (which Vite emits
+/// in the head/body) runs. Falls back to prepending if there is no `<head>`.
+fn inject_token(html: &str, token: &str) -> String {
+    let script = format!(r#"<script>window.__DOCVAULT_TOKEN__ = "{token}";</script>"#);
+    match html.split_once("<head>") {
+        Some((before, after)) => format!("{before}<head>{script}{after}"),
+        None => format!("{script}{html}"),
+    }
+}
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "application/javascript",
+        Some("css") => "text/css",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("json") => "application/json",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Minimal placeholder page shown when `shared/addin-web` has not been built;
+/// it still proves the served page carries the session token.
+fn placeholder_response(token: &str) -> ResponseBox {
     let html = format!(
         r#"<!doctype html>
 <html lang="zh">
 <head><meta charset="utf-8"><title>DocVault</title></head>
 <body>
 <script>window.__DOCVAULT_TOKEN__ = "{token}";</script>
-<p>DocVault 桥接已就绪。任务窗格界面将在 addin-web 构建后提供。</p>
+<p>DocVault 桥接已就绪。请先构建任务窗格：<code>npm run build</code>（shared/addin-web）。</p>
 </body>
 </html>"#
     );
@@ -535,6 +607,25 @@ mod tests {
 
         let mut too_big = Cursor::new(vec![0u8; 10]);
         assert_eq!(read_limited_body(&mut too_big, 5), Err(ReadError::TooLarge));
+    }
+
+    #[test]
+    fn token_injected_into_head_before_scripts() {
+        let html = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script type=\"module\" src=\"/src/main.ts\"></script></body></html>";
+        let injected = inject_token(html, "abc123");
+        assert!(
+            injected.contains(
+                "<head><script>window.__DOCVAULT_TOKEN__ = \"abc123\";</script><meta"
+            ),
+            "token script must land first inside <head>, got: {injected}"
+        );
+        // Without a <head> it prepends so the token is still set.
+        let bare = "<html></html>";
+        assert!(
+            inject_token(bare, "t").starts_with("<script>window.__DOCVAULT_TOKEN__"),
+            "no <head> fallback should prepend: {}",
+            inject_token(bare, "t")
+        );
     }
 
     #[test]

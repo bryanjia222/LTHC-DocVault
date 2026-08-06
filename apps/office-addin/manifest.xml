@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:type="TaskPaneApp">
+  <Id>9f6c2e8a-3d7b-4c1e-9a2f-6b5d4e3f2a1c</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>LTHC</ProviderName>
+  <DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="保存到 DocVault"/>
+  <Description DefaultValue="将当前 Word/Excel/PPT 文档直接保存到 DocVault 文档库。"/>
+  <IconUrl DefaultValue="http://localhost:8765/icon.png"/>
+  <SupportUrl DefaultValue="https://github.com/bryanjia222/LTHC-DocVault"/>
+  <!-- 任务窗格由 DocVault 桌面端内嵌的 localhost 桥托管(Same-origin,会话 token
+       由桥在服务端注入)。注意:office-addin-manifest 校验器会报
+       "Source Location 必须 HTTPS"——这是商店标准;Office 旁加载对 http://localhost
+       有开发例外,本次先按 http 做 spike,若真实 Office 拒绝再切 https(见 README)。 -->
+  <Hosts>
+    <Host Name="Document"/>
+    <Host Name="Workbook"/>
+    <Host Name="Presentation"/>
+  </Hosts>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="http://localhost:8765/"/>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>
