@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use docvault_core::DocVault;
@@ -36,6 +37,13 @@ pub struct AppState {
     /// installed once in `run()`'s setup. `None` until then (and in unit tests,
     /// which never call `logging::init`), so [`reload_log_level`] is a no-op.
     pub logger: Mutex<Option<Logger>>,
+    /// Per-session token the add-in bridge requires on every API call; set when
+    /// the bridge starts in `run()`'s setup. `None` if the bridge never started
+    /// (port taken), in which case add-ins report the app as offline.
+    pub bridge_token: Mutex<Option<String>>,
+    /// Set when the app is exiting so the bridge accept-loop can shut down
+    /// promptly (the thread polls it on a short interval).
+    pub bridge_stop: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -46,6 +54,8 @@ impl AppState {
             last_open_error: Arc::new(Mutex::new(None)),
             restic_path: Mutex::new(None),
             logger: Mutex::new(None),
+            bridge_token: Mutex::new(None),
+            bridge_stop: Arc::new(AtomicBool::new(false)),
         }
     }
 }

@@ -14,7 +14,9 @@
 //! ever spawned.
 
 pub mod commands;
-mod executors;
+/// The executor functions are `pub(crate)` so the add-in bridge can push uploads
+/// through the same two-phase pipeline as the write commands.
+pub(crate) mod executors;
 pub use commands::*;
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+mod bridge;
 mod commands;
 mod devtools;
 mod dto;
@@ -12,6 +13,7 @@ mod state;
 mod web;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 use state::AppState;
 use tauri::Manager;
@@ -95,6 +97,13 @@ pub fn run() {
             // behavior (all tracing calls were discarded).
             *app.state::<AppState>().inner().logger.lock().unwrap() = logging::init(app.handle());
             state::open_if_initialized(app.handle(), app.state::<AppState>().inner());
+            // Start the loopback add-in bridge so Word/Excel/PPT add-ins can POST
+            // the active document straight into the vault. A bind failure (port
+            // taken) only disables the bridge for the session - the add-in then
+            // reports the app as offline instead of erroring.
+            if let Err(e) = bridge::start(app.handle().clone(), app.state::<AppState>().inner()) {
+                tracing::warn!(error = %e, "add-in bridge failed to start");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -135,8 +144,17 @@ pub fn run() {
             web::open_url,
             devtools::reset_to_stage,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running DocVault desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building DocVault desktop")
+        .run(|app_handle: &tauri::AppHandle, event: tauri::RunEvent| {
+            // Signal the add-in bridge to stop on exit so its accept-loop thread
+            // (blocked on `recv_timeout`) returns instead of lingering.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.bridge_stop.store(true, Ordering::Relaxed);
+                }
+            }
+        });
 }
 
 #[cfg(test)]
