@@ -39,9 +39,10 @@ struct Cli {
 enum Action {
     /// 安装(注册)插件。首次需管理员权限以创建共享目录。
     Install {
-        /// manifest.xml 路径(相对当前目录)
-        #[arg(long, default_value = "apps/office-addin/manifest.xml")]
-        manifest: PathBuf,
+        /// manifest.xml 路径(默认:从当前目录/可执行文件位置向上查找仓库内
+        /// apps/office-addin/manifest.xml,因此可在仓库内任意目录运行)
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         /// 同时强制关闭运行中的 Office 应用使插件立即生效(未保存文档会丢失)
         #[arg(long)]
         restart: bool,
@@ -59,10 +60,44 @@ fn main() -> Result<()> {
     let raw_args: Vec<String> = env::args().skip(1).collect();
     let cli = Cli::parse();
     match cli.action {
-        Action::Install { manifest, restart } => install(&manifest, restart, &raw_args)?,
+        Action::Install { manifest, restart } => {
+            let manifest = resolve_manifest(manifest.as_deref())?;
+            install(&manifest, restart, &raw_args)?
+        }
         Action::Uninstall { remove_share } => uninstall(remove_share, &raw_args)?,
     }
     Ok(())
+}
+
+/// 定位 manifest.xml:`--manifest` 显式指定则校验;否则从当前目录与可执行文件
+/// 所在目录逐级向上找 `apps/office-addin/manifest.xml`,使工具可在仓库内任意
+/// 位置运行(包括 target/release)。找不到给出明确指引。
+fn resolve_manifest(explicit: Option<&Path>) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        if path.exists() {
+            return Ok(path.to_path_buf());
+        }
+        bail!("--manifest 不存在: {}", path.display());
+    }
+    let cwd = env::current_dir().ok();
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
+    for start in [cwd, exe_dir].into_iter().flatten() {
+        let mut dir = start;
+        loop {
+            let candidate = dir.join("apps").join("office-addin").join("manifest.xml");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+    bail!(
+        "未找到 manifest.xml。请在仓库目录内运行本工具,或用 --manifest 指定其绝对路径。"
+    )
 }
 
 /// 是否为管理员进程:`net session` 对非管理员返回访问拒绝。
@@ -98,6 +133,7 @@ fn relaunch_elevated(args: &[String]) -> Result<()> {
 }
 
 fn install(manifest: &Path, restart: bool, raw_args: &[String]) -> Result<()> {
+    println!("manifest : {}", manifest.display());
     if !manifest.exists() {
         bail!("manifest 不存在: {}", manifest.display());
     }
@@ -189,5 +225,28 @@ fn unregister_catalog() -> Result<()> {
 fn close_office() {
     for exe in OFFICE_EXES {
         let _ = Command::new("taskkill").args(["/IM", exe, "/F"]).output();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_manifest_by_walking_up_from_crate_dir() {
+        // 测试 CWD 是 crate 根(office-addin-cli),向上找应命中仓库内的 manifest。
+        let resolved = resolve_manifest(None).expect("仓库内应能找到 manifest");
+        assert!(
+            resolved.ends_with(Path::new("apps/office-addin/manifest.xml")),
+            "unexpected path: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_missing_manifest_errors() {
+        assert!(
+            resolve_manifest(Some(Path::new("definitely-not-here.xml"))).is_err(),
+            "缺失的显式 --manifest 应报错"
+        );
     }
 }

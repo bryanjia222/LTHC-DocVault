@@ -14,10 +14,12 @@ cargo build --release   # → target/release/docvault-addin.exe
 ## 用法
 
 ```bash
-# 安装(首次弹一次 UAC,工具自动以管理员重跑;默认从仓库根读 apps/office-addin/manifest.xml)
+# 安装(首次弹一次 UAC,工具自动以管理员重跑)。
+# manifest 会自动从当前目录/可执行文件位置向上查找仓库内的
+# apps/office-addin/manifest.xml —— 在仓库内任意目录运行即可。
 docvault-addin install
 docvault-addin install --restart          # 同时强制关闭 Office 应用立即生效(未保存文档会丢失)
-docvault-addin install --manifest <path>  # 指定 manifest 位置
+docvault-addin install --manifest <path>  # 指定 manifest 绝对路径(仓库外运行时用)
 
 # 卸载(删注册表条目)
 docvault-addin uninstall
