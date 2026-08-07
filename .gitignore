@@ -1,4 +1,6 @@
-/target/
+# Rust build output at any depth (root workspace + standalone crates like
+# apps/office-addin-cli and apps/desktop/src-tauri).
+target/
 **/*.rs.bk
 node_modules/
 dist/
