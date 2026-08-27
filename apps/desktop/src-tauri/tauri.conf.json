@@ -29,6 +29,12 @@
     "resources": [
       "resources/restic*"
     ],
+    "windows": {
+      "nsis": {
+        "template": "./nsis/installer.nsi",
+        "languages": ["English", "SimpChinese"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
