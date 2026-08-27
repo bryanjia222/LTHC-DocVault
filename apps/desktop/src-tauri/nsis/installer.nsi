@@ -475,7 +475,7 @@ FunctionEnd
 Function un.ConfirmLeave
   SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
   ${If} $DeleteAppDataCheckboxState = 1
-    MessageBox MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2|MB_TOPMOST "$(deleteAppDataConfirm)" IDYES +2
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2|MB_TOPMOST "$(deleteAppDataConfirm)" IDYES +2
     Abort
   ${EndIf}
 FunctionEnd
