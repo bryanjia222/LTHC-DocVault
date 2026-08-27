@@ -1,33 +1,14 @@
-# Cross-platform packaging.
+# Cross-platform packaging (GitHub-hosted runners).
 #
-# The WebKitGTK dmabuf/EGL crash is fixed in src-tauri/src/platform/linux.rs
-# (WEBKIT_DISABLE_DMABUF_RENDERER=1 set at boot), so Linux is solid. Windows
-# x64 is built on GitHub-hosted windows-latest. Other platforms are paused;
-# their matrix cells are preserved commented below -- uncomment to restore.
+#   git tag v0.x.y && git push --tags   -> build + draft a Release
+#   Actions tab > dispatch with no tag  -> build only, artifacts in the run.
 #
-#   git tag v0.2.x && git push --tags        # build + draft a Release
-#   # or Actions tab > "Run workflow" with an empty tag -> build only, no
-#   # release; installers land in the run's artifacts.
-#
-# Matrix (linux-x64 + windows-x64 active):
-#   linux x64   -> .deb + .rpm + AppImage   on self-hosted runner cx-1
-#   windows x64 -> .exe/.msi installers     on windows-latest
-#
-# linux-x64 runs on the self-hosted runner `cx-1` (Docker container
-# `linux-runner-1`, image `self-hosted-runner-linux:local`, label
-# `docvault-linux-x64`) -- zero GHA minutes, China mirrors (rsproxy/npmmirror),
-# warm cargo/rustup/npm caches. Build deps (webkit2gtk-4.1, appindicator, rsvg,
-# patchelf, ...) are baked into the image, so "Install Linux dependencies" is
-# gated to `runner.environment != 'self-hosted'` (the runner context exposes no
-# .labels property; runner.environment is 'github-hosted' or 'self-hosted') and
-# only runs on a GitHub-hosted fallback. Rust is
-# installed at runtime via dtolnay/rust-toolchain (persisted in a volume).
+# Matrix: linux-x64 (.deb/.rpm/AppImage) + windows-x64 (.exe/.msi).
+# Other platforms are paused; uncomment to restore.
 #
 # restic is bundled per target (src-tauri/build.rs stages by Cargo TARGET).
-#
-# Code signing is opt-in: set APPLE_* / WINDOWS_CERTIFICATE_* secrets to sign;
-# otherwise builds are unsigned. Drafts are never published automatically -
-# review then publish the Release by hand.
+# Code signing is opt-in: set APPLE_* / WINDOWS_CERTIFICATE_* secrets.
+# Drafts are never published automatically - review then publish by hand.
 
 name: release
 
@@ -63,14 +44,14 @@ jobs:
       matrix:
         include:
           - label: linux-x64
-            os: docvault-linux-x64
+            os: ubuntu-latest
             rustTarget: x86_64-unknown-linux-gnu
             args: "--target x86_64-unknown-linux-gnu"
-          # --- Paused targets, preserved verbatim; uncomment to restore. ---
           - label: windows-x64
             os: windows-latest
             rustTarget: x86_64-pc-windows-msvc
             args: "--target x86_64-pc-windows-msvc"
+          # --- Paused targets; uncomment to restore ---
           # - label: windows-arm64
           #   os: windows-latest
           #   rustTarget: aarch64-pc-windows-msvc
@@ -92,6 +73,12 @@ jobs:
         with:
           targets: ${{ matrix.rustTarget }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+
       # Windows-on-ARM is cross-compiled on an x64 host: surface the aarch64
       # MSVC linker to rustc. No-op for every other cell.
       - name: Set up MSVC (arm64 cross)
@@ -101,7 +88,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux' && runner.environment != 'self-hosted'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \

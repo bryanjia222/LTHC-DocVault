@@ -1,0 +1,73 @@
+# PR / main-branch quality gate.
+#
+# Root workspace covers all non-desktop crates (core, storage, ooxml, jobs,
+# shared/types, apps/cli). The desktop Tauri app is outside the workspace and
+# compiled only during release; its TypeScript and tests run here.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Format check and clippy are fast and platform-independent;
+      # running them once on Linux avoids burning extra Windows minutes.
+      - name: Format check
+        if: runner.os == 'Linux'
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+  frontend:
+    name: frontend lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # postinstall fetches restic with --best-effort, tolerating a failed
+      # download in CI when lint/test don't need it.
+      - name: Install desktop deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Lint
+        working-directory: apps/desktop
+        run: npm run lint
+
+      - name: Test
+        working-directory: apps/desktop
+        run: npm run test
