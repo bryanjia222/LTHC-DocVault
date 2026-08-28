@@ -199,19 +199,32 @@ async function refreshQinbixinMailbox(): Promise<void> {
 async function selectConversation(
   conversation: QinbixinConversation,
 ): Promise<void> {
+  if (selectedConversationId.value === conversation.id) {
+    selectedConversation.value = conversation;
+    if (conversation.unread) {
+      await markConversationRead(conversation);
+    }
+    return;
+  }
   selectedConversationId.value = conversation.id;
   selectedConversation.value = conversation;
   await loadMessages(conversation.id);
   if (conversation.unread) {
-    try {
-      await invoke("qinbixin_mark_read", { relationshipId: conversation.id });
-      conversation.unread = false;
-      if (!conversations.value.some((item) => item.unread)) {
-        status.value = { ...status.value, has_unread: false };
-      }
-    } catch {
-      // The message list still loads; the unread flag refreshes on the next poll.
+    await markConversationRead(conversation);
+  }
+}
+
+async function markConversationRead(
+  conversation: QinbixinConversation,
+): Promise<void> {
+  try {
+    await invoke("qinbixin_mark_read", { relationshipId: conversation.id });
+    conversation.unread = false;
+    if (!conversations.value.some((item) => item.unread)) {
+      status.value = { ...status.value, has_unread: false };
     }
+  } catch {
+    // The unread flag refreshes on the next poll.
   }
 }
 

@@ -418,6 +418,7 @@ async fn request_multipart<T: serde::de::DeserializeOwned>(
         .parse::<hyper::Uri>()
         .map_err(|e| format!("invalid upload URL: {e}"))?;
     let content_type = format!("multipart/form-data; boundary={UPLOAD_BOUNDARY}");
+    let body = multipart_file_body(file_name, mime_for_file(file_name), bytes);
     let request = hyper::Request::builder()
         .method(reqwest::Method::POST)
         .uri(uri)
@@ -425,12 +426,8 @@ async fn request_multipart<T: serde::de::DeserializeOwned>(
         .header("accept", "*/*")
         .header("user-agent", "DocVault/0.2")
         .header("content-type", content_type)
-        .header("content-length", bytes.len())
-        .body(Full::new(multipart_file_body(
-            file_name,
-            mime_for_file(file_name),
-            bytes,
-        )))
+        .header("content-length", body.len())
+        .body(Full::new(body))
         .map_err(|e| format!("unable to create upload request: {e}"))?;
     let response = tokio::time::timeout(Duration::from_secs(120), HTTP_CLIENT.request(request))
         .await
