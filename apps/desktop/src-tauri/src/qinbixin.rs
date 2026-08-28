@@ -212,7 +212,6 @@ struct RawMessage {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 struct RawUploadedFile {
     location: String,
     #[serde(default)]
