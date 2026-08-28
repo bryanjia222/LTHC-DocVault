@@ -150,6 +150,7 @@ pub fn run() {
             qinbixin::qinbixin_conversations,
             qinbixin::qinbixin_messages,
             qinbixin::qinbixin_send,
+            qinbixin::qinbixin_upload,
             qinbixin::qinbixin_mark_read,
             #[cfg(debug_assertions)]
             qinbixin::qinbixin_set_environment,

@@ -89,14 +89,39 @@ pub struct QinbixinConversation {
 pub struct QinbixinMessage {
     pub id: i64,
     pub title: String,
+    pub song_title: String,
     pub content: String,
     pub sender_id: i64,
     pub sender_name: String,
     pub sender_avatar: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub sent_time: String,
+    #[serde(default)]
+    pub images: Vec<String>,
+    #[serde(default)]
+    pub videos: Vec<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub file_url: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct QinbixinUploadedFile {
+    pub url: String,
+    pub title: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QinbixinMedia {
+    #[serde(default)]
+    pub image_urls: Vec<String>,
+    #[serde(default)]
+    pub video_urls: Vec<String>,
+    #[serde(default)]
+    pub file_urls: Vec<String>,
+}
 #[derive(Debug, Serialize)]
 pub struct QinbixinResult {
     pub success: bool,
@@ -164,6 +189,8 @@ struct RawMessage {
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
+    song_title: Option<String>,
+    #[serde(default)]
     content: Option<String>,
     #[serde(default)]
     member_id: i64,
@@ -173,6 +200,22 @@ struct RawMessage {
     avatar_url: Option<String>,
     #[serde(default)]
     send_time: Option<String>,
+    #[serde(default)]
+    images: Option<Vec<String>>,
+    #[serde(default)]
+    videos: Option<Vec<String>>,
+    #[serde(default)]
+    file_url: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct RawUploadedFile {
+    location: String,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 fn environment_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -321,6 +364,153 @@ fn mapped_error<T>(envelope: RawEnvelope<T>) -> Result<T, String> {
     } else {
         Err(envelope.msg.unwrap_or_else(|| "request failed".to_owned()))
     }
+}
+
+const MAX_UPLOAD_BYTES: u64 = 100 * 1024 * 1024;
+const UPLOAD_BOUNDARY: &str = "DocVaultQinbixinMediaUpload";
+
+fn mime_for_file(file_name: &str) -> &'static str {
+    match Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "tiff" | "tif" => "image/tiff",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "ogg" => "video/ogg",
+        "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+fn multipart_file_body(file_name: &str, content_type: &str, bytes: Vec<u8>) -> Bytes {
+    let escaped_name = file_name.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut body = Vec::with_capacity(bytes.len() + 512);
+    body.extend_from_slice(
+        format!(
+            "--{UPLOAD_BOUNDARY}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"{escaped_name}\"\r\n\
+             Content-Type: {content_type}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&bytes);
+    body.extend_from_slice(format!("\r\n--{UPLOAD_BOUNDARY}--\r\n").as_bytes());
+    Bytes::from(body)
+}
+
+async fn request_multipart<T: serde::de::DeserializeOwned>(
+    base_url: &str,
+    token: &str,
+    path: &str,
+    file_name: &str,
+    bytes: Vec<u8>,
+) -> Result<(RawEnvelope<T>, Option<String>), String> {
+    let uri = format!("{base_url}{path}")
+        .parse::<hyper::Uri>()
+        .map_err(|e| format!("invalid upload URL: {e}"))?;
+    let content_type = format!("multipart/form-data; boundary={UPLOAD_BOUNDARY}");
+    let request = hyper::Request::builder()
+        .method(reqwest::Method::POST)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .header("accept", "*/*")
+        .header("user-agent", "DocVault/0.2")
+        .header("content-type", content_type)
+        .header("content-length", bytes.len())
+        .body(Full::new(multipart_file_body(
+            file_name,
+            mime_for_file(file_name),
+            bytes,
+        )))
+        .map_err(|e| format!("unable to create upload request: {e}"))?;
+    let response = tokio::time::timeout(Duration::from_secs(120), HTTP_CLIENT.request(request))
+        .await
+        .map_err(|_| "upload timed out".to_owned())?
+        .map_err(|e| format!("upload failed: {}", format_error_chain(e)))?;
+    let new_token = response
+        .headers()
+        .get("NewToken")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let status = response.status();
+    let response_bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| format!("unable to read upload response: {}", format_error_chain(e)))?;
+    let text = String::from_utf8_lossy(response_bytes.to_bytes().as_ref()).into_owned();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err("AUTH_EXPIRED".to_owned());
+    }
+    serde_json::from_str(&text)
+        .map(|envelope| (envelope, new_token))
+        .map_err(|e| format!("invalid upload response: {e}; body: {text}"))
+}
+
+#[tauri::command]
+pub async fn qinbixin_upload(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+    paths: Vec<String>,
+    upload_type: u8,
+) -> Result<Vec<QinbixinUploadedFile>, String> {
+    if !matches!(upload_type, 0..=2) {
+        return Err("invalid media type".to_owned());
+    }
+    let environment = load_environment(&app);
+    let token = state.qinbixin.lock().unwrap().token.clone();
+    if token.is_empty() {
+        return Err("AUTH_EXPIRED".to_owned());
+    }
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut uploaded = Vec::with_capacity(paths.len());
+    for path_text in paths {
+        let path = PathBuf::from(&path_text);
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "invalid media file".to_owned())?
+            .to_owned();
+        let read_path = path.clone();
+        let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(read_path))
+            .await
+            .map_err(|e| format!("unable to read media file: {e}"))?
+            .map_err(|e| format!("unable to read media file: {e}"))?;
+        if bytes.is_empty() {
+            return Err(format!("文件 {file_name} 容量为0KB"));
+        }
+        if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+            return Err(format!("文件 {file_name} 超过上传大小限制"));
+        }
+        let upload_path = format!("/API/Web/Upload?uploadType={upload_type}");
+        let (envelope, new_token) = request_multipart::<RawUploadedFile>(
+            environment.base_url(),
+            &token,
+            &upload_path,
+            &file_name,
+            bytes,
+        )
+        .await?;
+        let raw = mapped_error(envelope)?;
+        uploaded.push(QinbixinUploadedFile {
+            url: absolute_url(environment.base_url(), raw.location),
+            title: raw.title.unwrap_or_else(|| file_name.clone()),
+        });
+        store_new_token(&app, &state.qinbixin, &new_token)?;
+    }
+    Ok(uploaded)
 }
 
 fn absolute_url(base_url: &str, url: String) -> String {
@@ -585,6 +775,7 @@ pub async fn qinbixin_messages(
         .map(|item| QinbixinMessage {
             id: item.id,
             title: item.title.unwrap_or_default(),
+            song_title: item.song_title.unwrap_or_default(),
             content: item.content.unwrap_or_default(),
             sender_id: item.member_id,
             sender_name: {
@@ -600,6 +791,20 @@ pub async fn qinbixin_messages(
                 item.avatar_url.unwrap_or_default(),
             ),
             sent_time: item.send_time.unwrap_or_default(),
+            images: item
+                .images
+                .unwrap_or_default()
+                .into_iter()
+                .map(|url| absolute_url(environment.base_url(), url))
+                .collect(),
+            videos: item
+                .videos
+                .unwrap_or_default()
+                .into_iter()
+                .map(|url| absolute_url(environment.base_url(), url))
+                .collect(),
+            file_url: absolute_url(environment.base_url(), item.file_url.unwrap_or_default()),
+            tags: item.tags.unwrap_or_default(),
         })
         .collect())
 }
@@ -611,6 +816,7 @@ pub async fn qinbixin_send(
     relationship_id: i64,
     title: String,
     content: String,
+    media: Option<QinbixinMedia>,
 ) -> Result<QinbixinResult, String> {
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
@@ -623,9 +829,13 @@ pub async fn qinbixin_send(
         .filter(|line| !line.is_empty())
         .map(|line| format!("<p>{}</p>", line))
         .collect::<String>();
+    let media = media.unwrap_or_default();
     let body = json!({
         "Title": title,
         "Content": paragraphs,
+        "ImageUrl": media.image_urls.join("*"),
+        "VideoUrl": media.video_urls.join("*"),
+        "FileUrl": media.file_urls.first().cloned().unwrap_or_default(),
         "WorkType": 5,
         "PublishType": 5,
         "RelationshipIds": [relationship_id],
@@ -807,6 +1017,36 @@ mod tests {
             serde_json::from_str(r#"{"Id":1,"Content":"<p>hi</p>","NickName":"Demo"}"#).unwrap();
         assert_eq!(message.id, 1);
         assert_eq!(message.nick_name.as_deref(), Some("Demo"));
+    }
+
+    #[test]
+    fn maps_message_media_fields() {
+        let message: RawMessage = serde_json::from_str(
+            r#"{
+                "Id": 2,
+                "SongTitle": "Demo",
+                "Images": ["/images/demo.png"],
+                "Videos": ["/videos/demo.mp4"],
+                "FileUrl": "/files/demo.pdf",
+                "Tags": ["demo"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(message.song_title.as_deref(), Some("Demo"));
+        assert_eq!(message.images, Some(vec!["/images/demo.png".to_owned()]));
+        assert_eq!(message.videos, Some(vec!["/videos/demo.mp4".to_owned()]));
+        assert_eq!(message.file_url.as_deref(), Some("/files/demo.pdf"));
+        assert_eq!(message.tags, Some(vec!["demo".to_owned()]));
+    }
+
+    #[test]
+    fn builds_multipart_file_body() {
+        let body = multipart_file_body("letter image.png", "image/png", vec![1, 2, 3]);
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.starts_with(&format!("--{UPLOAD_BOUNDARY}\r\n")));
+        assert!(text.contains(r#"name="file"; filename="letter image.png""#));
+        assert!(text.contains("Content-Type: image/png"));
+        assert!(text.ends_with(&format!("--{UPLOAD_BOUNDARY}--\r\n")));
     }
 
     #[test]

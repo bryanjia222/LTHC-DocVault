@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
-import { Loader2, Send } from "@lucide/vue";
+import { Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
 
 import BaseModal from "./BaseModal.vue";
 import { openUrl } from "../composables/useVault";
-import { useQinbixin } from "../composables/useQinbixin";
+import { useQinbixin, type QinbixinMedia } from "../composables/useQinbixin";
 
 const props = defineProps<{
   open: boolean;
@@ -24,11 +24,13 @@ const {
   loadingConversations,
   loadingMessages,
   sending,
+  uploadingMedia,
   error,
   refreshQinbixinMailbox,
   selectConversation,
   login,
   sendMessage,
+  uploadMedia,
 } = useQinbixin();
 
 const userName = ref("");
@@ -37,6 +39,14 @@ const loggingIn = ref(false);
 const sendTitle = ref("");
 const sendContent = ref("");
 const sendFeedback = ref("");
+
+interface PendingMedia {
+  kind: "image" | "video" | "file";
+  url: string;
+  title: string;
+}
+
+const pendingMedia = ref<PendingMedia[]>([]);
 
 const dialogTitle = computed(() => {
   if (!status.value.logged_in) {
@@ -49,12 +59,69 @@ const sanitizedMessages = computed(() =>
   messages.value.map((message) => ({
     ...message,
     safeContent: DOMPurify.sanitize(message.content, {
-      ALLOWED_TAGS: ["p", "br", "strong", "em", "b", "i", "a", "span"],
-      ALLOWED_ATTR: ["href", "target", "rel"],
+      ALLOWED_TAGS: [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "b",
+        "i",
+        "u",
+        "s",
+        "strike",
+        "span",
+        "a",
+        "img",
+        "video",
+        "audio",
+        "source",
+        "ol",
+        "ul",
+        "li",
+        "blockquote",
+        "pre",
+        "code",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "td",
+        "th",
+      ],
+      ALLOWED_ATTR: [
+        "href",
+        "target",
+        "rel",
+        "src",
+        "alt",
+        "type",
+        "controls",
+        "preload",
+        "width",
+        "height",
+        "style",
+        "class",
+        "colspan",
+        "rowspan",
+      ],
+      ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|data:image\/|\/|#)/i,
     }),
     incoming: message.sender_id !== status.value.profile?.id,
   })),
 );
+
+function mediaUrls(kind: PendingMedia["kind"]): string[] {
+  return pendingMedia.value
+    .filter((item) => item.kind === kind)
+    .map((item) => item.url);
+}
 
 let mailboxTimer: number | null = null;
 
@@ -100,13 +167,27 @@ async function submitLogin() {
 
 async function submitMessage() {
   const conversation = selectedConversation.value;
-  if (!conversation || !sendTitle.value.trim() || !sendContent.value.trim()) {
+  const media: QinbixinMedia = {
+    imageUrls: mediaUrls("image"),
+    videoUrls: mediaUrls("video"),
+    fileUrls: mediaUrls("file"),
+  };
+  const hasMedia =
+    media.imageUrls.length > 0 ||
+    media.videoUrls.length > 0 ||
+    media.fileUrls.length > 0;
+  if (
+    !conversation ||
+    !sendTitle.value.trim() ||
+    (!sendContent.value.trim() && !hasMedia)
+  ) {
     return;
   }
   const result = await sendMessage(
     conversation.id,
     sendTitle.value.trim(),
     sendContent.value,
+    media,
   );
   sendFeedback.value = result.success
     ? t("qinbixin.sendSucceeded")
@@ -114,7 +195,24 @@ async function submitMessage() {
   if (result.success) {
     sendTitle.value = "";
     sendContent.value = "";
+    pendingMedia.value = [];
   }
+}
+
+async function pickMedia(kind: PendingMedia["kind"]): Promise<void> {
+  const files = await uploadMedia(kind);
+  if (kind === "file") {
+    pendingMedia.value = pendingMedia.value.filter(
+      (item) => item.kind !== "file",
+    );
+  }
+  pendingMedia.value.push(
+    ...files.map((file) => ({ kind, url: file.url, title: file.title })),
+  );
+}
+
+function removeMedia(url: string): void {
+  pendingMedia.value = pendingMedia.value.filter((item) => item.url !== url);
 }
 
 async function openMessageLink(event: MouseEvent) {
@@ -127,6 +225,14 @@ async function openMessageLink(event: MouseEvent) {
   event.stopPropagation();
   try {
     await openUrl(new URL(href, window.location.href).toString());
+  } catch {
+    // Browser launch is best-effort; the webview must not navigate instead.
+  }
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    await openUrl(new URL(url, window.location.href).toString());
   } catch {
     // Browser launch is best-effort; the webview must not navigate instead.
   }
@@ -227,14 +333,50 @@ async function openMessageLink(event: MouseEvent) {
             >
               <header class="message-header">
                 <strong>{{ message.title }}</strong>
-                <span>{{ message.sender_name }} · {{ message.sent_time }}</span>
+                <span class="message-time">{{ message.sent_time }}</span>
               </header>
+              <p v-if="message.song_title" class="message-song">
+                <span>{{ t("qinbixin.songTitle") }}:</span>
+                {{ message.song_title }}
+              </p>
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div
                 class="message-content"
                 @click.capture="openMessageLink"
                 v-html="message.safeContent"
               />
+              <div v-if="message.tags.length" class="message-tags">
+                <span v-for="tag in message.tags" :key="tag"># {{ tag }}</span>
+              </div>
+              <div v-if="message.images.length" class="media-grid">
+                <button
+                  v-for="image in message.images"
+                  :key="image"
+                  class="media-thumb"
+                  type="button"
+                  :title="t('qinbixin.openExternally')"
+                  @click="openExternalUrl(image)"
+                >
+                  <img :src="image" :alt="message.title" />
+                </button>
+              </div>
+              <div v-if="message.videos.length" class="media-grid">
+                <video
+                  v-for="video in message.videos"
+                  :key="video"
+                  controls
+                  preload="metadata"
+                  :src="video"
+                />
+              </div>
+              <a
+                v-if="message.file_url"
+                class="attachment-link"
+                :href="message.file_url"
+                @click.prevent="openExternalUrl(message.file_url)"
+              >
+                {{ t("qinbixin.attachmentDownload") }}
+              </a>
             </article>
             <p v-else class="list-state">{{ t("qinbixin.noMessages") }}</p>
           </div>
@@ -251,7 +393,48 @@ async function openMessageLink(event: MouseEvent) {
               class="text-input content-input"
               :placeholder="t('qinbixin.contentPlaceholder')"
             />
+            <div v-if="pendingMedia.length" class="pending-media">
+              <span v-for="item in pendingMedia" :key="item.url" class="chip">
+                {{ item.title }}
+                <button
+                  type="button"
+                  :title="t('qinbixin.removeAttachment')"
+                  @click="removeMedia(item.url)"
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </span>
+            </div>
             <div class="compose-actions">
+              <div class="media-actions">
+                <button
+                  class="icon-button media-button"
+                  type="button"
+                  :title="t('qinbixin.addImage')"
+                  :disabled="uploadingMedia"
+                  @click="pickMedia('image')"
+                >
+                  <Image aria-hidden="true" />
+                </button>
+                <button
+                  class="icon-button media-button"
+                  type="button"
+                  :title="t('qinbixin.addVideo')"
+                  :disabled="uploadingMedia"
+                  @click="pickMedia('video')"
+                >
+                  <Video aria-hidden="true" />
+                </button>
+                <button
+                  class="icon-button media-button"
+                  type="button"
+                  :title="t('qinbixin.addAttachment')"
+                  :disabled="uploadingMedia"
+                  @click="pickMedia('file')"
+                >
+                  <Paperclip aria-hidden="true" />
+                </button>
+              </div>
               <span v-if="sendFeedback" class="feedback">{{
                 sendFeedback
               }}</span>
@@ -285,6 +468,8 @@ async function openMessageLink(event: MouseEvent) {
 .message-layout {
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 420px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .field {
@@ -430,14 +615,90 @@ async function openMessageLink(event: MouseEvent) {
 }
 
 .message-header {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 6px;
 }
 
-.message-header span {
+.message-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-time {
+  flex-shrink: 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.message-song {
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.message-song span {
+  color: var(--text-muted);
+}
+
+.message-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-tags span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.media-thumb {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.media-thumb img {
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+
+.media-grid video {
+  display: block;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.attachment-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.attachment-link:hover {
+  text-decoration: underline;
 }
 
 .message-content {
@@ -470,6 +731,60 @@ async function openMessageLink(event: MouseEvent) {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.media-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+}
+
+.media-button {
+  width: 30px;
+  height: 30px;
+}
+
+.pending-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  max-width: 220px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.chip span,
+.chip {
+  min-width: 0;
+}
+
+.chip button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chip button svg {
+  width: 12px;
+  height: 12px;
 }
 
 .feedback {

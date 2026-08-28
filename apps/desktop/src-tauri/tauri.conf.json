@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost https://qinbixin.com.cn http://admin.ymcs.top:928; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://localhost:1420 ipc: http://ipc.localhost"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost https://qinbixin.com.cn http://admin.ymcs.top:928; media-src 'self' data: asset: http://asset.localhost https://qinbixin.com.cn http://admin.ymcs.top:928; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://localhost:1420 ipc: http://ipc.localhost"
     }
   },
   "bundle": {

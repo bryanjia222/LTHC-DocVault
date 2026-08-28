@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { ref } from "vue";
 
 import { isTauri } from "./useVault";
@@ -36,11 +37,27 @@ export interface QinbixinConversation {
 export interface QinbixinMessage {
   id: number;
   title: string;
+  song_title: string;
   content: string;
   sender_id: number;
   sender_name: string;
   sender_avatar: string;
   sent_time: string;
+  images: string[];
+  videos: string[];
+  file_url: string;
+  tags: string[];
+}
+
+export interface QinbixinMedia {
+  imageUrls: string[];
+  videoUrls: string[];
+  fileUrls: string[];
+}
+
+export interface QinbixinUploadedFile {
+  url: string;
+  title: string;
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -57,6 +74,7 @@ const messages = ref<QinbixinMessage[]>([]);
 const loadingConversations = ref(false);
 const loadingMessages = ref(false);
 const sending = ref(false);
+const uploadingMedia = ref(false);
 const switchingEnvironment = ref(false);
 const switchingAccount = ref(false);
 const error = ref("");
@@ -297,13 +315,19 @@ async function sendMessage(
   relationshipId: number,
   title: string,
   content: string,
+  media: QinbixinMedia = { imageUrls: [], videoUrls: [], fileUrls: [] },
 ): Promise<{ success: boolean; message: string }> {
   if (!isTauri()) return { success: true, message: "" };
   sending.value = true;
   try {
     const result = await invoke<{ success: boolean; message: string }>(
       "qinbixin_send",
-      { relationshipId, title, content },
+      {
+        relationshipId,
+        title,
+        content,
+        media,
+      },
     );
     if (result.success) {
       await loadMessages(relationshipId);
@@ -317,6 +341,57 @@ async function sendMessage(
   }
 }
 
+async function uploadMedia(
+  kind: "image" | "video" | "file",
+): Promise<QinbixinUploadedFile[]> {
+  if (!isTauri() || uploadingMedia.value) return [];
+  const filters =
+    kind === "image"
+      ? [
+          {
+            name: "图片",
+            extensions: ["jpg", "jpeg", "png", "gif", "webp", "tiff", "tif"],
+          },
+        ]
+      : kind === "video"
+        ? [{ name: "视频", extensions: ["mp4", "webm", "ogg", "mov"] }]
+        : [
+            {
+              name: "文件",
+              extensions: [
+                "pdf",
+                "txt",
+                "zip",
+                "rar",
+                "7z",
+                "doc",
+                "docx",
+                "xls",
+                "xlsx",
+                "ppt",
+                "pptx",
+                "mp3",
+                "mp4",
+              ],
+            },
+          ];
+  const selected = await open({ multiple: kind !== "file", filters });
+  const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+  if (paths.length === 0) return [];
+  uploadingMedia.value = true;
+  try {
+    return await invoke<QinbixinUploadedFile[]>("qinbixin_upload", {
+      paths,
+      uploadType: kind === "image" ? 0 : kind === "file" ? 1 : 2,
+    });
+  } catch (e) {
+    error.value = String(e);
+    return [];
+  } finally {
+    uploadingMedia.value = false;
+  }
+}
+
 export function useQinbixin() {
   return {
     status,
@@ -327,6 +402,7 @@ export function useQinbixin() {
     loadingConversations,
     loadingMessages,
     sending,
+    uploadingMedia,
     switchingEnvironment,
     switchingAccount,
     error,
@@ -338,6 +414,7 @@ export function useQinbixin() {
     login,
     logout,
     sendMessage,
+    uploadMedia,
     setEnvironment,
     loadDevAccounts,
     loginDevAccount,
