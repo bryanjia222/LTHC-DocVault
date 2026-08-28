@@ -171,7 +171,10 @@ async function refreshQinbixinMailbox(): Promise<void> {
   if (selectedId !== null) {
     await loadMessages(selectedId, true);
   } else if (conversations.value.length) {
-    await selectConversation(conversations.value[0]);
+    const conversation = conversations.value[0];
+    selectedConversationId.value = conversation.id;
+    selectedConversation.value = conversation;
+    await loadMessages(conversation.id, true);
   }
 }
 
