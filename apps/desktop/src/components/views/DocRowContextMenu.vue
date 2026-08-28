@@ -216,7 +216,11 @@ onBeforeUnmount(() => {
           @click="docMenuRemoveFromProject"
         >
           <FolderMinus aria-hidden="true" />
-          {{ t("source.removeFromProject", { project: getProjectName(activeProjectId, desktop.projects.value) }) }}
+          {{
+            t("source.removeFromProject", {
+              project: getProjectName(activeProjectId, desktop.projects.value),
+            })
+          }}
         </button>
         <button
           type="button"

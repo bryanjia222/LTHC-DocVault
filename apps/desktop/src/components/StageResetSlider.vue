@@ -26,7 +26,9 @@ const trackEl = ref<HTMLElement | null>(null);
 
 const stage = computed(() => STAGES[selectedIndex.value]);
 const stageNumber = computed(() => selectedIndex.value + 1);
-const stageLabel = computed(() => t("dev.stageLabel", { n: stageNumber.value }));
+const stageLabel = computed(() =>
+  t("dev.stageLabel", { n: stageNumber.value }),
+);
 const stageHint = computed(() => t(`dev.stages.${stage.value}.hint`));
 const thumbPos = computed(
   () => (selectedIndex.value / (STAGES.length - 1)) * 100,
@@ -153,11 +155,7 @@ function onConfirm() {
     <p v-else class="fresh-note">{{ t("dev.freshNoBackend") }}</p>
 
     <div class="confirm-row">
-      <button
-        class="primary"
-        type="button"
-        @click="onConfirm"
-      >
+      <button class="primary" type="button" @click="onConfirm">
         {{ t("dev.confirmStage", { stage: stageLabel }) }}
       </button>
     </div>

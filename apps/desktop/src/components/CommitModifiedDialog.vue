@@ -56,7 +56,11 @@ function close() {
     :subtitle="t('commitModified.subtitle')"
     @close="close"
   >
-    <form id="commit-modified-form" class="dialog-form" @submit.prevent="submit">
+    <form
+      id="commit-modified-form"
+      class="dialog-form"
+      @submit.prevent="submit"
+    >
       <label class="field">
         <span>{{ t("commitModified.docLabel") }}</span>
         <input

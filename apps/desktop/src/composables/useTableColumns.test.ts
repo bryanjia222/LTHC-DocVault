@@ -119,8 +119,13 @@ describe("useTableColumns", () => {
   });
 
   it("resetColumns restores defaults (owner/status hidden)", async () => {
-    const { setWidth, setVisible, resetColumns, columns, COLUMN_DEFAULT_WIDTHS } =
-      await importComposable();
+    const {
+      setWidth,
+      setVisible,
+      resetColumns,
+      columns,
+      COLUMN_DEFAULT_WIDTHS,
+    } = await importComposable();
     setWidth("owner", 200);
     setVisible("currentVersion", false);
     resetColumns();

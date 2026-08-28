@@ -21,7 +21,13 @@ const baseline: TrackedFile = {
 };
 
 function probe(overrides: Partial<FileProbe> = {}): FileProbe {
-  return { exists: true, size: 1000, mtimeMs: 100, sha256: "aaa", ...overrides };
+  return {
+    exists: true,
+    size: 1000,
+    mtimeMs: 100,
+    sha256: "aaa",
+    ...overrides,
+  };
 }
 
 describe("deriveModificationStatus - no tracking", () => {

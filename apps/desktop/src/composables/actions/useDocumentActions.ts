@@ -22,12 +22,8 @@ import {
 export function useDocumentActions() {
   const { t } = useI18n();
   const { log } = useActivityLog();
-  const {
-    selectedDocument,
-    selectedVersion,
-    documents,
-    activeProjectId,
-  } = useDocuments();
+  const { selectedDocument, selectedVersion, documents, activeProjectId } =
+    useDocuments();
   const {
     commit,
     exportVersion,

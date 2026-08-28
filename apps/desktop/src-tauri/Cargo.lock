@@ -979,6 +979,10 @@ dependencies = [
  "docvault-storage",
  "docvault-types",
  "encoding_rs",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
  "open",
  "percent-encoding",
  "reqwest 0.12.28",
@@ -991,6 +995,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "tiny_http",
+ "tokio",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-appender",
@@ -1839,6 +1844,7 @@ dependencies = [
  "http",
  "hyper",
  "hyper-util",
+ "log",
  "rustls",
  "tokio",
  "tokio-rustls",
@@ -3350,6 +3356,7 @@ version = "0.23.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",

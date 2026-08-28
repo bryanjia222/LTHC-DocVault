@@ -9,7 +9,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "prebuild": "node scripts/fetch-restic.mjs --host --best-effort",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri.cjs",
     "restic:fetch": "node scripts/fetch-restic.mjs",
     "format": "prettier --write .",
     "lint": "eslint . --ext .ts,.vue",

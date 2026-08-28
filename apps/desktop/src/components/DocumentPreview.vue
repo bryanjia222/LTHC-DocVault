@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import { RefreshCw, X } from "@lucide/vue";
 import { useVault } from "../composables/useVault";
@@ -99,15 +106,15 @@ watch(menuOpen, (isOpen) => {
   else window.removeEventListener("keydown", onMenuKeydown);
 });
 
-const versionLabel = computed(
-  () => props.version?.label ?? t("log.latest"),
-);
+const versionLabel = computed(() => props.version?.label ?? t("log.latest"));
 
 // Live handles to whatever renderer we started, so onBeforeUnmount can tear it
 // down. Each `load()` mints a `RenderGuard`; superseding it (a version switch,
 // re-open, or unmount) flips `.cancelled` so the prior load's pending awaits
 // bail at their next checkpoint instead of racing the new render onto the host.
-interface RenderGuard { cancelled: boolean; }
+interface RenderGuard {
+  cancelled: boolean;
+}
 let activeGuard: RenderGuard | null = null;
 let pdfLoadingTask: { destroy: () => Promise<void> } | null = null;
 // pptx-renderer's viewer is typed loosely to avoid pulling its types into the
@@ -228,7 +235,11 @@ async function load() {
  * off-screen, restoring the user's scroll position. Failures keep the cached
  * copy visible and just drop the badge.
  */
-async function refreshMutable(wantsWorkingCopy: boolean, key: string, guard: RenderGuard) {
+async function refreshMutable(
+  wantsWorkingCopy: boolean,
+  key: string,
+  guard: RenderGuard,
+) {
   refreshing.value = true;
   try {
     const bytes = await fetchBytes(wantsWorkingCopy);
@@ -240,7 +251,9 @@ async function refreshMutable(wantsWorkingCopy: boolean, key: string, guard: Ren
   }
 }
 
-async function fetchBytes(wantsWorkingCopy: boolean): Promise<ArrayBuffer | null> {
+async function fetchBytes(
+  wantsWorkingCopy: boolean,
+): Promise<ArrayBuffer | null> {
   return wantsWorkingCopy
     ? await previewWorkingCopy({ document_id: props.document.id })
     : await previewVersion({
@@ -270,7 +283,11 @@ async function renderAndShow(
 }
 
 /** Render a container and write its snapshot to the memory LRU + disk cache. */
-async function captureAndCache(el: HTMLElement, key: string, guard: RenderGuard) {
+async function captureAndCache(
+  el: HTMLElement,
+  key: string,
+  guard: RenderGuard,
+) {
   try {
     const html = await captureHtml(el);
     if (guard.cancelled) return;
@@ -289,7 +306,11 @@ async function captureAndCache(el: HTMLElement, key: string, guard: RenderGuard)
  * swaps the host to the fresh output and restores the user's scroll position so
  * they land back on the page they were reading.
  */
-async function refreshAndSwap(bytes: ArrayBuffer, key: string, guard: RenderGuard) {
+async function refreshAndSwap(
+  bytes: ArrayBuffer,
+  key: string,
+  guard: RenderGuard,
+) {
   const kind = detectPreviewKind(props.document.type, bytes);
   if (guard.cancelled || kind === "unsupported") return;
   // Match the on-screen host's width (the container, not the wider scroll
@@ -382,7 +403,11 @@ function makeOffscreenSurface(width?: number): HTMLDivElement {
   return el;
 }
 
-async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
+async function renderPdf(
+  bytes: ArrayBuffer,
+  el: HTMLDivElement,
+  guard: RenderGuard,
+) {
   const pdfjs = await import("pdfjs-dist");
   if (guard.cancelled) return;
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -408,7 +433,11 @@ async function renderPdf(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGu
   }
 }
 
-async function renderMd(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
+async function renderMd(
+  bytes: ArrayBuffer,
+  el: HTMLDivElement,
+  guard: RenderGuard,
+) {
   const { marked } = await import("marked");
   const DOMPurify = (await import("dompurify")).default;
   if (guard.cancelled) return;
@@ -428,7 +457,11 @@ function renderTxt(bytes: ArrayBuffer, el: HTMLDivElement) {
   el.appendChild(pre);
 }
 
-async function renderDocx(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
+async function renderDocx(
+  bytes: ArrayBuffer,
+  el: HTMLDivElement,
+  guard: RenderGuard,
+) {
   const { renderAsync } = await import("docx-preview");
   if (guard.cancelled) return;
   await renderAsync(bytes, el, undefined, {
@@ -437,7 +470,11 @@ async function renderDocx(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderG
   });
 }
 
-async function renderXlsx(bytes: ArrayBuffer, el: HTMLDivElement, guard: RenderGuard) {
+async function renderXlsx(
+  bytes: ArrayBuffer,
+  el: HTMLDivElement,
+  guard: RenderGuard,
+) {
   const XLSX = await import("xlsx");
   if (guard.cancelled) return;
   const wb = XLSX.read(bytes, { type: "array" });
@@ -571,7 +608,12 @@ onBeforeUnmount(() => {
           <div class="preview-heading">
             <h2>{{ t("preview.title") }}</h2>
             <p>
-              {{ t("preview.subtitle", { name: document.name, version: versionLabel }) }}
+              {{
+                t("preview.subtitle", {
+                  name: document.name,
+                  version: versionLabel,
+                })
+              }}
             </p>
           </div>
           <button
@@ -586,7 +628,9 @@ onBeforeUnmount(() => {
         </header>
 
         <div ref="bodyRef" class="preview-body">
-          <div v-if="loading" class="preview-status">{{ t("preview.loading") }}</div>
+          <div v-if="loading" class="preview-status">
+            {{ t("preview.loading") }}
+          </div>
           <div v-else-if="error" class="preview-status preview-error">
             {{ t("preview.error", { error }) }}
           </div>

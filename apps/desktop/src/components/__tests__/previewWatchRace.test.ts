@@ -21,7 +21,10 @@ describe("DocumentPreview watch source shape (poll-loop root-cause)", () => {
     const poll = ref(0); // simulates refreshModifications rewriting probes
     const docId = ref("doc1");
     // selectedDocument: a NEW object each poll (reference changes), same id.
-    const selectedDocument = computed(() => ({ id: docId.value, n: poll.value }));
+    const selectedDocument = computed(() => ({
+      id: docId.value,
+      n: poll.value,
+    }));
     const propsDoc = computed(() => selectedDocument.value);
 
     let fires = 0;
@@ -43,7 +46,10 @@ describe("DocumentPreview watch source shape (poll-loop root-cause)", () => {
     const version = ref<{ label: string } | null>(null);
     const poll = ref(0);
     const docId = ref("doc1");
-    const selectedDocument = computed(() => ({ id: docId.value, n: poll.value }));
+    const selectedDocument = computed(() => ({
+      id: docId.value,
+      n: poll.value,
+    }));
     const propsDoc = computed(() => selectedDocument.value);
 
     let fires = 0;
@@ -66,7 +72,10 @@ describe("DocumentPreview watch source shape (poll-loop root-cause)", () => {
     const version = ref<{ label: string } | null>(null);
     const poll = ref(0);
     const docId = ref("doc1");
-    const selectedDocument = computed(() => ({ id: docId.value, n: poll.value }));
+    const selectedDocument = computed(() => ({
+      id: docId.value,
+      n: poll.value,
+    }));
     const propsDoc = computed(() => selectedDocument.value);
 
     let fires = 0;

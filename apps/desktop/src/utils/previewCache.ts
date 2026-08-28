@@ -21,7 +21,9 @@ export function previewCacheKey(
   currentLabel = "",
 ): string {
   if (version) return `${docId}|v:${version.label}`;
-  return modified ? `${docId}|working:${currentLabel}` : `${docId}|current:${currentLabel}`;
+  return modified
+    ? `${docId}|working:${currentLabel}`
+    : `${docId}|current:${currentLabel}`;
 }
 
 export function isMutablePreview(version: Version | null): boolean {
@@ -52,7 +54,9 @@ export function setPreviewCache(key: string, html: string): void {
  *  and evicts the head past the limit, so inserting oldest-first leaves the
  *  newest entries at the tail (most-recently-used) and drops the stalest when
  *  the LRU fills - i.e. the prefetch warms the caches most likely to be reopened. */
-export function bulkSetPreviewCache(entries: { key: string; html: string }[]): void {
+export function bulkSetPreviewCache(
+  entries: { key: string; html: string }[],
+): void {
   for (const { key, html } of entries) {
     setPreviewCache(key, html);
   }
@@ -70,7 +74,8 @@ async function blobToDataUrl(url: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("FileReader failed"));
     reader.readAsDataURL(blob);
   });
 }
@@ -87,8 +92,12 @@ export async function captureHtml(container: HTMLElement): Promise<string> {
   const clone = container.cloneNode(true) as HTMLElement;
   // canvas -> img. Read pixels off the ORIGINAL canvases (the clone's canvases
   // have empty bitmaps), replacing each matching canvas in the clone.
-  const srcCanvases = Array.from(container.querySelectorAll<HTMLCanvasElement>("canvas"));
-  const cloneCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
+  const srcCanvases = Array.from(
+    container.querySelectorAll<HTMLCanvasElement>("canvas"),
+  );
+  const cloneCanvases = Array.from(
+    clone.querySelectorAll<HTMLCanvasElement>("canvas"),
+  );
   for (let i = 0; i < srcCanvases.length; i++) {
     const src = srcCanvases[i];
     const img = document.createElement("img");

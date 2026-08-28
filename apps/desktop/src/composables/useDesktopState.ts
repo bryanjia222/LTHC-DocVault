@@ -95,7 +95,9 @@ async function loadDesktopState(): Promise<void> {
     assignments.value = { ...mockDesktopState.assignments };
     sortPrefs.value = { ...mockDesktopState.sortPrefs };
     trashed.value = [...mockDesktopState.trashed];
-    trashedVersions.value = mockDesktopState.trashedVersions.map((v) => ({ ...v }));
+    trashedVersions.value = mockDesktopState.trashedVersions.map((v) => ({
+      ...v,
+    }));
     loaded.value = true;
     return;
   }
@@ -212,7 +214,9 @@ function createProject(parentId: string | null, name: string): string | null {
   const parent = parentId ?? null;
   const lower = clean.toLowerCase();
   const isSibling = (p: ProjectDef) => (p.parentId ?? null) === parent;
-  if (projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)) {
+  if (
+    projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)
+  ) {
     return null;
   }
   const id = makeProjectId();
@@ -232,10 +236,14 @@ function renameProject(id: string, name: string): boolean {
   const lower = clean.toLowerCase();
   const isSibling = (p: ProjectDef) =>
     p.id !== id && (p.parentId ?? null) === parent;
-  if (projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)) {
+  if (
+    projects.value.some((p) => isSibling(p) && p.name.toLowerCase() === lower)
+  ) {
     return false;
   }
-  projects.value = projects.value.map((p) => (p.id === id ? { ...p, name: clean } : p));
+  projects.value = projects.value.map((p) =>
+    p.id === id ? { ...p, name: clean } : p,
+  );
   void saveDesktopState();
   return true;
 }
@@ -461,7 +469,10 @@ function trackedPathFor(docId: string): string | null {
 }
 
 function modificationFor(docId: string): ModificationStatus {
-  return deriveModificationStatus(trackedFor(docId), probes.value[docId] ?? null);
+  return deriveModificationStatus(
+    trackedFor(docId),
+    probes.value[docId] ?? null,
+  );
 }
 
 /**
@@ -589,8 +600,7 @@ async function refreshModifications(): Promise<void> {
         };
         continue;
       }
-      const statMatches =
-        stat.size === t.size && stat.mtimeMs === t.mtimeMs;
+      const statMatches = stat.size === t.size && stat.mtimeMs === t.mtimeMs;
       if (statMatches) {
         // Fast path: unchanged; no hash needed.
         nextProbes[t.documentId] = {

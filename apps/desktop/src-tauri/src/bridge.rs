@@ -250,7 +250,12 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
     let auth = request
         .headers()
         .iter()
-        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("authorization"))
+        .find(|h| {
+            h.field
+                .as_str()
+                .as_str()
+                .eq_ignore_ascii_case("authorization")
+        })
         .map(|h| h.value.as_str());
     match route {
         Route::Health => json_response(
@@ -268,12 +273,8 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
                 return json_response(401, &serde_json::json!({ "error": "unauthorized" }));
             }
             match list_documents(bridge) {
-                Ok(documents) => {
-                    json_response(200, &serde_json::json!({ "documents": documents }))
-                }
-                Err(message) => {
-                    json_response(503, &serde_json::json!({ "error": message }))
-                }
+                Ok(documents) => json_response(200, &serde_json::json!({ "documents": documents })),
+                Err(message) => json_response(503, &serde_json::json!({ "error": message })),
             }
         }
         Route::Import {
@@ -286,7 +287,9 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
             }
             let ext = match normalize_ext(ext.as_deref()) {
                 Ok(ext) => ext,
-                Err(message) => return json_response(400, &serde_json::json!({ "error": message })),
+                Err(message) => {
+                    return json_response(400, &serde_json::json!({ "error": message }))
+                }
             };
             let bytes = match read_body(request) {
                 Ok(bytes) => bytes,
@@ -303,7 +306,9 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
             }
             let ext = match normalize_ext(ext.as_deref()) {
                 Ok(ext) => ext,
-                Err(message) => return json_response(400, &serde_json::json!({ "error": message })),
+                Err(message) => {
+                    return json_response(400, &serde_json::json!({ "error": message }))
+                }
             };
             let bytes = match read_body(request) {
                 Ok(bytes) => bytes,
@@ -323,9 +328,10 @@ fn body_error_response(error: ReadError) -> ResponseBox {
         ReadError::TooLarge => {
             json_response(413, &serde_json::json!({ "error": "document too large" }))
         }
-        ReadError::Io => {
-            json_response(400, &serde_json::json!({ "error": "failed to read request body" }))
-        }
+        ReadError::Io => json_response(
+            400,
+            &serde_json::json!({ "error": "failed to read request body" }),
+        ),
     }
 }
 
@@ -392,7 +398,10 @@ fn commit_version(
     Ok(serde_json::json!({ "jobId": job_id }))
 }
 
-fn write_upload(bytes: &[u8], ext: &str) -> Result<(std::path::PathBuf, tempfile::TempDir), String> {
+fn write_upload(
+    bytes: &[u8],
+    ext: &str,
+) -> Result<(std::path::PathBuf, tempfile::TempDir), String> {
     let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let source_path = temp_dir.path().join(format!("upload.{ext}"));
     std::fs::write(&source_path, bytes).map_err(|e| e.to_string())?;
@@ -469,7 +478,11 @@ fn serve_index(index_path: &Path, token: &str) -> ResponseBox {
     let Ok(html) = std::fs::read_to_string(index_path) else {
         return placeholder_response(token);
     };
-    text_response(200, inject_token(&html, token).into_bytes(), "text/html; charset=utf-8")
+    text_response(
+        200,
+        inject_token(&html, token).into_bytes(),
+        "text/html; charset=utf-8",
+    )
 }
 
 /// Inject the session token into the task-pane `index.html` as a script inside
@@ -564,7 +577,10 @@ mod tests {
     #[test]
     fn route_import_parses_query() {
         assert_eq!(
-            parse_route("POST", "/api/documents/import?fileName=a.docx&ext=docx&author=Li"),
+            parse_route(
+                "POST",
+                "/api/documents/import?fileName=a.docx&ext=docx&author=Li"
+            ),
             Route::Import {
                 file_name: "a.docx".to_owned(),
                 ext: Some("docx".to_owned()),
@@ -588,7 +604,10 @@ mod tests {
                 note: Some("fix".to_owned()),
             }
         );
-        assert_eq!(parse_route("POST", "/api/documents//versions"), Route::NotFound);
+        assert_eq!(
+            parse_route("POST", "/api/documents//versions"),
+            Route::NotFound
+        );
     }
 
     #[test]
@@ -614,9 +633,8 @@ mod tests {
         let html = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script type=\"module\" src=\"/src/main.ts\"></script></body></html>";
         let injected = inject_token(html, "abc123");
         assert!(
-            injected.contains(
-                "<head><script>window.__DOCVAULT_TOKEN__ = \"abc123\";</script><meta"
-            ),
+            injected
+                .contains("<head><script>window.__DOCVAULT_TOKEN__ = \"abc123\";</script><meta"),
             "token script must land first inside <head>, got: {injected}"
         );
         // Without a <head> it prepends so the token is still set.
@@ -675,7 +693,9 @@ mod tests {
         // Without the session token the upload is rejected.
         let denied = tauri::async_runtime::block_on(
             client
-                .post(format!("http://{addr}/api/documents/import?fileName=a.txt&ext=txt"))
+                .post(format!(
+                    "http://{addr}/api/documents/import?fileName=a.txt&ext=txt"
+                ))
                 .body(b"x".to_vec())
                 .send(),
         )
@@ -685,7 +705,9 @@ mod tests {
         // An authorized upload commits synchronously (Phase A) and returns the id.
         let imported = tauri::async_runtime::block_on(
             client
-                .post(format!("http://{addr}/api/documents/import?fileName=note.txt&ext=txt"))
+                .post(format!(
+                    "http://{addr}/api/documents/import?fileName=note.txt&ext=txt"
+                ))
                 .header("Authorization", "Bearer test-token")
                 .body(b"hello world".to_vec())
                 .send(),
@@ -694,7 +716,9 @@ mod tests {
         assert_eq!(imported.status().as_u16(), 200);
         let imported_text = tauri::async_runtime::block_on(imported.text()).unwrap();
         let payload: serde_json::Value = serde_json::from_str(&imported_text).unwrap();
-        let doc_id = payload["documentId"].as_str().expect("documentId in payload");
+        let doc_id = payload["documentId"]
+            .as_str()
+            .expect("documentId in payload");
 
         // The bridge's document list and the vault agree on the new doc.
         let listed = tauri::async_runtime::block_on(

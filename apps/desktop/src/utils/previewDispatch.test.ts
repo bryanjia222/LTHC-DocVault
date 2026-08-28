@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { detectPreviewKind, isZipBytes, type PreviewKind } from "./previewDispatch";
+import {
+  detectPreviewKind,
+  isZipBytes,
+  type PreviewKind,
+} from "./previewDispatch";
 
 /*
  * Guards the pure preview-dispatch decision. The Kingsoft branch is the
@@ -28,7 +32,9 @@ describe("isZipBytes", () => {
   });
 
   it("recognizes an empty-archive signature (PK\\x05\\x06)", () => {
-    expect(isZipBytes(buf(new Uint8Array([0x50, 0x4b, 0x05, 0x06])))).toBe(true);
+    expect(isZipBytes(buf(new Uint8Array([0x50, 0x4b, 0x05, 0x06])))).toBe(
+      true,
+    );
   });
 
   it("rejects non-ZIP content", () => {
@@ -48,14 +54,15 @@ describe("isZipBytes", () => {
 
 describe("detectPreviewKind", () => {
   describe("direct types", () => {
-    const cases: Array<[Parameters<typeof detectPreviewKind>[0], PreviewKind]> = [
-      ["pdf", "pdf"],
-      ["md", "md"],
-      ["txt", "txt"],
-      ["docx", "docx"],
-      ["xlsx", "xlsx"],
-      ["pptx", "pptx"],
-    ];
+    const cases: Array<[Parameters<typeof detectPreviewKind>[0], PreviewKind]> =
+      [
+        ["pdf", "pdf"],
+        ["md", "md"],
+        ["txt", "txt"],
+        ["docx", "docx"],
+        ["xlsx", "xlsx"],
+        ["pptx", "pptx"],
+      ];
     for (const [type, expected] of cases) {
       it(`routes ${type} -> ${expected} regardless of bytes`, () => {
         expect(detectPreviewKind(type, buf(TEXT_BYTES))).toBe(expected);

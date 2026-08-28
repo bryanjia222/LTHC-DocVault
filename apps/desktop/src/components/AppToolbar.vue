@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { Download, ExternalLink, Eye, GitCommitVertical, Moon, Sun } from "@lucide/vue";
+import {
+  Download,
+  ExternalLink,
+  Eye,
+  GitCommitVertical,
+  Moon,
+  Sun,
+} from "@lucide/vue";
 import { useDocuments } from "../composables/useDocuments";
 import { useVaultActions } from "../composables/useVaultActions";
 import { useDialogs } from "../composables/useDialogs";
@@ -85,7 +92,11 @@ function exportDoc() {
         class="toolbar-btn"
         type="button"
         :disabled="!canCommit"
-        :title="canCommit ? t('actions.commitVersion') : t('source.commitModifiedDisabled')"
+        :title="
+          canCommit
+            ? t('actions.commitVersion')
+            : t('source.commitModifiedDisabled')
+        "
         @click="commit"
       >
         <GitCommitVertical aria-hidden="true" />

@@ -333,9 +333,7 @@ async function setLogLevel(level: string): Promise<void> {
  * point add/checkout/commit-modified flows at the tool-owned working copy
  * instead of an arbitrary user-chosen source path.
  */
-async function libraryPath(params: {
-  document_id: string;
-}): Promise<string> {
+async function libraryPath(params: { document_id: string }): Promise<string> {
   return invoke<string>("library_path", params);
 }
 
@@ -448,7 +446,7 @@ async function fetchUrlMeta(
  * Open a web link in the system default browser (http/https only). No-op
  * outside Tauri.
  */
-async function openUrl(url: string): Promise<void> {
+export async function openUrl(url: string): Promise<void> {
   if (!isTauri()) return;
   await invoke<void>("open_url", { url });
 }
@@ -607,7 +605,11 @@ async function subscribeJobs(
     ];
     if (refreshKinds.includes(raw.kind) && raw.status === "succeeded") {
       void loadDocuments();
-      if (raw.kind === "archive" || raw.kind === "create_blank" || raw.kind === "delete") {
+      if (
+        raw.kind === "archive" ||
+        raw.kind === "create_blank" ||
+        raw.kind === "delete"
+      ) {
         void loadRepoSize(true);
       }
     }

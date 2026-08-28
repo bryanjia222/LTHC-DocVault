@@ -27,6 +27,31 @@ export const zhCN = {
     fetching: "正在获取标题与图标…",
     fetchHint: "在网址输入框按回车，或点击右侧按钮获取标题与图标。",
   },
+  qinbixin: {
+    title: "亲笔信",
+    openMail: "打开亲笔信收发信",
+    mail: "收发信",
+    login: "登录",
+    logout: "退出登录",
+    loggedIn: "已登录",
+    loggedOut: "未登录",
+    confirmLogout: "确认退出亲笔信登录？",
+    loginTitle: "登录亲笔信",
+    loginSubtitle: "使用亲笔信账号查看和发送信件",
+    userName: "账号",
+    userNamePlaceholder: "手机号 / 邮箱 / 登录名",
+    password: "密码",
+    mailTitle: "收发信",
+    noConversations: "暂无会话",
+    selectConversation: "请选择一个会话",
+    noPreview: "暂无内容",
+    noMessages: "暂无信件",
+    titlePlaceholder: "信件标题",
+    contentPlaceholder: "写信内容…",
+    send: "发送",
+    sendSucceeded: "信件已发送",
+    sendFailed: "发送失败",
+  },
   sidebar: {
     vault: "仓库",
     documents: "文档",
@@ -44,8 +69,7 @@ export const zhCN = {
     deleteProject: "删除",
     confirmDeleteProject:
       "确认删除项目「{name}」？文档仍保留在仓库与其他所属项目中。",
-    confirmMoveProject:
-      "确认将文档从「{from}」移动到「{to}」？",
+    confirmMoveProject: "确认将文档从「{from}」移动到「{to}」？",
     projectDropHint:
       "拖入文档以加入该项目；将项目拖到另一项目上可设为子项目（拖到「全部文档」上则移至顶层）",
     projectNameTaken: "该项目名称已存在",
@@ -154,8 +178,7 @@ export const zhCN = {
     },
   },
   confirm: {
-    moveToTrash:
-      "将文档「{name}」移入回收站？",
+    moveToTrash: "将文档「{name}」移入回收站？",
     permanentDelete:
       "永久删除文档「{name}」？其所有版本与备份快照都将被移除，且无法恢复。",
     permanentDeleteAgain:
@@ -164,8 +187,7 @@ export const zhCN = {
       "清空回收站？将永久删除回收站中的 {count} 项（文档与版本）及其备份快照，且无法恢复。",
     emptyTrashAgain:
       "再次确认：永久删除回收站中全部 {count} 项的历史记录？此操作不可撤销。",
-    deleteVersion:
-      "将文档「{name}」的版本 {version} 移入回收站？",
+    deleteVersion: "将文档「{name}」的版本 {version} 移入回收站？",
     deleteVersionDescendants:
       "将文档「{name}」的版本 {version} 移入回收站？这将同时移入其衍生版本：{descendants}",
     permanentDeleteVersion:
@@ -293,8 +315,7 @@ export const zhCN = {
     deleteBlockedTitle: "无法删除版本",
     deleteBlockedCurrent:
       "当前版本位于该版本的历史之中。请先切换到其历史之外的版本，再进行删除。",
-    deleteBlockedLast:
-      "这是该文档唯一的版本——如需移除，请直接删除整个文档。",
+    deleteBlockedLast: "这是该文档唯一的版本——如需移除，请直接删除整个文档。",
   },
   trash: {
     title: "回收站",
@@ -304,7 +325,8 @@ export const zhCN = {
     restore: "恢复",
     permanentDelete: "永久删除",
     emptyTrash: "清空回收站",
-    permanentDeleteHint: "永久删除将移除该文档的所有版本与备份快照，且无法恢复。",
+    permanentDeleteHint:
+      "永久删除将移除该文档的所有版本与备份快照，且无法恢复。",
     versionsTitle: "已删除的版本",
     versionsCount: "{count} 个版本",
   },
@@ -397,7 +419,8 @@ export const zhCN = {
     opened: "已打开文档：{name}",
     openFailed: "打开文档失败：{name}（{error}）",
     openFailedTitle: "无法打开文档",
-    openNoDefaultApp: "兰天嗨彩办公文档管理 无法用系统默认程序打开「{name}」。通常是因为系统未为该文件类型（.docx/.xlsx/.pptx）关联默认程序，或关联的程序启动失败。请在系统设置中为该扩展名关联一个 Office 程序（如 Word/WPS/LibreOffice）后重试。详细错误：{error}",
+    openNoDefaultApp:
+      "兰天嗨彩办公文档管理 无法用系统默认程序打开「{name}」。通常是因为系统未为该文件类型（.docx/.xlsx/.pptx）关联默认程序，或关联的程序启动失败。请在系统设置中为该扩展名关联一个 Office 程序（如 Word/WPS/LibreOffice）后重试。详细错误：{error}",
     renamed: "已重命名文档：{name} → {newName}",
     noteUpdated: "已更新备注：{name} {version}",
     latest: "latest",
@@ -437,7 +460,8 @@ export const zhCN = {
     password: "仓库密码",
     passwordConfirm: "确认仓库密码",
     passwordMismatch: "两次输入的密码不一致。",
-    backendLocked: "该目录已是已初始化的仓库，后端不可更改。如需使用其他后端，请选择一个空目录。",
+    backendLocked:
+      "该目录已是已初始化的仓库，后端不可更改。如需使用其他后端，请选择一个空目录。",
     backendResticOnly: "新建仓库使用本地后端（加密、去重备份）。",
     submit: "连接 / 初始化",
     title: "创建或打开仓库",
@@ -504,10 +528,12 @@ export const zhCN = {
     doubleClickOpen: "打开",
     doubleClickHint: "双击文档行时执行的操作。",
     columnsSection: "表格列",
-    columnsHint: "拖动表头右侧分隔线可调整列宽；拖到最小宽度以下松开即隐藏该列。勾选下方可显示该列。",
+    columnsHint:
+      "拖动表头右侧分隔线可调整列宽；拖到最小宽度以下松开即隐藏该列。勾选下方可显示该列。",
     columnsReset: "重置列宽与可见性",
     resetDefaults: "恢复到默认设置",
-    resetDefaultsHint: "将主题、开发者模式、双击行为、表格列与面板固定等设置恢复为默认值。不会删除文档或常用链接。",
+    resetDefaultsHint:
+      "将主题、开发者模式、双击行为、表格列与面板固定等设置恢复为默认值。不会删除文档或常用链接。",
     resetDefaultsConfirm: "确定恢复到默认设置吗？",
     columnsAlwaysOn: "始终显示",
   },
@@ -522,6 +548,17 @@ export const zhCN = {
   dev: {
     title: "测试与重置",
     hint: "仅开发构建可见。重置到隔离的测试仓库，不影响你手动连接的真实仓库。",
+    qinbixin: {
+      environment: "亲笔信站点",
+      production: "正式站",
+      test: "测试站",
+      environmentHint:
+        "测试站地址：http://admin.ymcs.top:928/。正式站与测试站的登录状态分别保存。",
+      quickUsers: "快速切换测试站账号",
+      account: "账号 {name}",
+      switching: "切换中…",
+      noAccounts: "未在 .env 中找到可用的开发账号。",
+    },
     sliderHint: "拖动选择一个阶段，点击确认以重置到该状态。",
     stageLabel: "阶段 {n}",
     confirmStage: "重置到 {stage}",

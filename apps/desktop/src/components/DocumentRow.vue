@@ -53,8 +53,12 @@ const { visibleColumns } = useTableColumns();
     <td v-for="id in visibleColumns" :key="id" :data-col="id">
       <template v-if="id === 'name'">
         <div class="name-cell">
-          <span class="file-type">{{ extOf(props.document.originalFilename) ?? "" }}</span>
-          <strong :title="props.document.name">{{ props.document.name }}</strong>
+          <span class="file-type">{{
+            extOf(props.document.originalFilename) ?? ""
+          }}</span>
+          <strong :title="props.document.name">{{
+            props.document.name
+          }}</strong>
         </div>
         <div
           v-if="props.isSelected && props.document.tags?.length"
@@ -80,7 +84,10 @@ const { visibleColumns } = useTableColumns();
         <span
           class="mod-pill"
           :data-mod="props.document.modification ?? 'none'"
-        >{{ t(`modification.${props.document.modification ?? "none"}`) }}</span>
+          >{{
+            t(`modification.${props.document.modification ?? "none"}`)
+          }}</span
+        >
       </template>
       <template v-else-if="id === 'updated'">
         <span class="cell-text">{{ props.document.updatedAt }}</span>

@@ -1,7 +1,11 @@
 import { computed, ref } from "vue";
 import { useVault } from "./useVault";
 import { useDesktopState } from "./useDesktopState";
-import { countActiveFilters, filterDocuments, type SearchScope } from "../utils/filter";
+import {
+  countActiveFilters,
+  filterDocuments,
+  type SearchScope,
+} from "../utils/filter";
 import {
   DEFAULT_SORT,
   isSortDirection,
@@ -57,13 +61,15 @@ const sortScope = computed(() => activeProjectId.value ?? "__all__");
  * desktop state) when present and valid, else DEFAULT_SORT. `setSort` writes the
  * pref straight back to desktop state, so this is the single source of truth.
  */
-const effectiveSort = computed<{ key: SortKey; direction: SortDirection }>(() => {
-  const pref = desktop.getSortPref(sortScope.value);
-  if (pref && isSortKey(pref.key) && isSortDirection(pref.direction)) {
-    return { key: pref.key, direction: pref.direction };
-  }
-  return DEFAULT_SORT;
-});
+const effectiveSort = computed<{ key: SortKey; direction: SortDirection }>(
+  () => {
+    const pref = desktop.getSortPref(sortScope.value);
+    if (pref && isSortKey(pref.key) && isSortDirection(pref.direction)) {
+      return { key: pref.key, direction: pref.direction };
+    }
+    return DEFAULT_SORT;
+  },
+);
 const sortKey = computed(() => effectiveSort.value.key);
 const sortDirection = computed(() => effectiveSort.value.direction);
 

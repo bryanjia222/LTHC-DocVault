@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { onBeforeUnmount, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 
 /*
  * Reusable modal shell. Provides the overlay + panel, a header with title and a
@@ -19,6 +19,18 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
+const pressedOnOverlay = ref(false);
+
+function onOverlayPointerdown(event: PointerEvent) {
+  pressedOnOverlay.value = event.target === event.currentTarget;
+}
+
+function onOverlayPointerup(event: PointerEvent) {
+  if (pressedOnOverlay.value && event.target === event.currentTarget) {
+    emit("close");
+  }
+  pressedOnOverlay.value = false;
+}
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape" && props.open) {
@@ -45,7 +57,12 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-overlay" @click="emit('close')">
+    <div
+      v-if="open"
+      class="modal-overlay"
+      @pointerdown="onOverlayPointerdown"
+      @pointerup="onOverlayPointerup"
+    >
       <div
         class="modal-panel"
         :class="{ 'modal-wide': props.wide }"

@@ -148,7 +148,11 @@ function close() {
 </script>
 
 <template>
-  <BaseModal :open="switchBackendOpen" :title="t('connect.title')" @close="close">
+  <BaseModal
+    :open="switchBackendOpen"
+    :title="t('connect.title')"
+    @close="close"
+  >
     <form id="switch-backend-form" class="dialog-form" @submit.prevent="submit">
       <p class="dialog-hint">{{ t("connect.hint") }}</p>
 
@@ -182,7 +186,9 @@ function close() {
         </select>
       </label>
 
-      <p v-if="backendLocked" class="dialog-hint">{{ t("connect.backendLocked") }}</p>
+      <p v-if="backendLocked" class="dialog-hint">
+        {{ t("connect.backendLocked") }}
+      </p>
       <p v-else class="dialog-hint">{{ t("connect.backendResticOnly") }}</p>
 
       <label v-if="backend === 'restic' && !backendLocked" class="field">

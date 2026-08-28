@@ -4,10 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ChartNetwork, List, Maximize2, RotateCcw } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useActivityLog } from "../../composables/useActivityLog";
-import {
-  getParentLabel,
-  shouldShowBaseVersion,
-} from "../../utils/versionTree";
+import { getParentLabel, shouldShowBaseVersion } from "../../utils/versionTree";
 import type { Version } from "../../data/mock";
 import VersionGraph from "../VersionGraph.vue";
 

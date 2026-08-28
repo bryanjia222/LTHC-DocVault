@@ -90,14 +90,22 @@ function resetGraph() {
       <aside class="graph-context surface">
         <div class="panel-header compact">
           <div>
-            <h2 :title="selectedDocument?.name">{{ selectedDocument?.name ?? t("log.noDocument") }}</h2>
+            <h2 :title="selectedDocument?.name">
+              {{ selectedDocument?.name ?? t("log.noDocument") }}
+            </h2>
           </div>
           <div class="action-row">
             <button
               class="icon-action-button"
               type="button"
-              :disabled="!selectedVersion || selectedVersion.status === 'current'"
-              :title="selectedVersion?.status === 'current' ? t('actions.checkoutAlreadyCurrent') : t('actions.checkout')"
+              :disabled="
+                !selectedVersion || selectedVersion.status === 'current'
+              "
+              :title="
+                selectedVersion?.status === 'current'
+                  ? t('actions.checkoutAlreadyCurrent')
+                  : t('actions.checkout')
+              "
               :aria-label="t('actions.checkout')"
               @click="runAction('actionLogs.checkout')"
             >

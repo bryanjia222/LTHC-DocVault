@@ -7,12 +7,30 @@ use docvault_core::DocVault;
 use docvault_jobs::{JobRegistry, JobStatus};
 use docvault_storage::{StorageError, StorageOverrides, VaultPaths, VaultStorage};
 use docvault_types::VaultConfig;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tracing::warn;
 
 use crate::dto::{ConnectError, ConnectOutcome, VaultProbe};
 use crate::logging::Logger;
 use crate::prefs;
+use crate::qinbixin::QinbixinSession;
+
+/// The dev-only identifier in `tauri.conf.dev.json`. It gives `tauri dev` a
+/// separate app config dir, so debug runs never load the installed app's
+/// desktop preferences or logs.
+pub(crate) const DEV_IDENTIFIER: &str = "com.lthc.docvault.dev";
+
+/// The only vault root a dev app may connect to. The dev reset tool also
+/// targets this directory, so destructive testing has one isolated home.
+pub(crate) fn dev_vault_root(app: &AppHandle) -> Option<PathBuf> {
+    if app.config().identifier != DEV_IDENTIFIER {
+        return None;
+    }
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("docvault-test-vault"))
+}
 
 /// Shared application state. The vault is `None` until the user initializes it
 /// (first run); once initialized it is opened on startup. `rusqlite::Connection`
@@ -33,6 +51,9 @@ pub struct AppState {
     /// [`restic_override`] so the bundled binary is used regardless of where the
     /// vault lives - replacing the former `DOCVAULT_RESTIC_PATH` env var.
     pub restic_path: Mutex<Option<PathBuf>>,
+    /// The Qinbixin login session. Shared by the sidebar and message dialog; the
+    /// session owns its own persistence in the app config directory.
+    pub qinbixin: std::sync::Mutex<QinbixinSession>,
     /// The initialized tracing subscriber (file-rolling + reloadable level),
     /// installed once in `run()`'s setup. `None` until then (and in unit tests,
     /// which never call `logging::init`), so [`reload_log_level`] is a no-op.
@@ -52,6 +73,7 @@ impl AppState {
             vault: Arc::new(Mutex::new(None)),
             jobs: JobRegistry::new(),
             last_open_error: Arc::new(Mutex::new(None)),
+            qinbixin: std::sync::Mutex::new(QinbixinSession::default()),
             restic_path: Mutex::new(None),
             logger: Mutex::new(None),
             bridge_token: Mutex::new(None),
@@ -69,7 +91,9 @@ impl Default for AppState {
 /// The vault root the desktop should use: the last user-chosen root from prefs,
 /// falling back to the platform default when the user has not yet connected.
 pub fn current_root(app: &AppHandle) -> PathBuf {
-    prefs::load_root(app).unwrap_or_else(VaultPaths::default_root)
+    dev_vault_root(app)
+        .or_else(|| prefs::load_root(app))
+        .unwrap_or_else(VaultPaths::default_root)
 }
 
 /// Lock the shared vault, recovering from a poisoned mutex instead of panicking.
@@ -149,6 +173,7 @@ pub fn open_if_initialized(app: &AppHandle, state: &AppState) {
     let Some(root) = prefs::load_root(app) else {
         return;
     };
+    let root = dev_vault_root(app).unwrap_or(root);
     let paths = VaultPaths::from_root(&root);
     if !paths.config_path.exists() {
         return;
@@ -308,6 +333,17 @@ mod tests {
     use std::path::Path;
     use std::thread;
     use std::time::Duration;
+
+    /// The Rust-side dev guard and the Tauri config override must name the
+    /// same app; otherwise a dev run could fall back to installed-app state.
+    #[test]
+    fn dev_config_uses_dev_identifier() {
+        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.dev.json");
+        let text = std::fs::read_to_string(config_path).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(config["identifier"], DEV_IDENTIFIER);
+    }
 
     /// An empty directory is initialized as a new local-copy vault.
     #[test]

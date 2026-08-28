@@ -1,8 +1,4 @@
-import type {
-  FileProbe,
-  ModificationStatus,
-  TrackedFile,
-} from "../data/mock";
+import type { FileProbe, ModificationStatus, TrackedFile } from "../data/mock";
 
 /*
  * Pure modification-tracking logic, extracted from the reactive/Tauri layer so

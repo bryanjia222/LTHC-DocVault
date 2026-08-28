@@ -24,7 +24,10 @@ pub fn vault_status(app: AppHandle, state: State<AppState>) -> Result<VaultStatu
     Ok(VaultStatusDto {
         initialized,
         root_dir,
-        recommended_root: VaultPaths::default_root().display().to_string(),
+        recommended_root: state::dev_vault_root(&app)
+            .unwrap_or_else(VaultPaths::default_root)
+            .display()
+            .to_string(),
         open_error: state::open_error(state.inner()),
     })
 }
@@ -119,6 +122,14 @@ pub fn connect_vault(
     backend: String,
     restic_password: Option<String>,
 ) -> Result<ConnectOutcome, ConnectError> {
+    if let Some(expected_root) = state::dev_vault_root(&app) {
+        if std::path::Path::new(&root_dir) != expected_root.as_path() {
+            return Err(ConnectError::Other(format!(
+                "development builds may only connect to the isolated vault at {}",
+                expected_root.display()
+            )));
+        }
+    }
     let outcome = state::connect_vault_core(state.inner(), &root_dir, &backend, restic_password)?;
     prefs::save_root(&app, std::path::Path::new(&outcome.root_dir))
         .map_err(|e| ConnectError::Other(e.to_string()))?;

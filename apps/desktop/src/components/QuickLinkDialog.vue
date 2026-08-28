@@ -85,8 +85,16 @@ function onSave() {
 <template>
   <BaseModal
     :open="props.open"
-    :title="props.mode === 'edit' ? t('quickLinks.dialogEditTitle') : t('quickLinks.dialogAddTitle')"
-    :subtitle="props.mode === 'edit' ? t('quickLinks.dialogEditSubtitle') : t('quickLinks.dialogAddSubtitle')"
+    :title="
+      props.mode === 'edit'
+        ? t('quickLinks.dialogEditTitle')
+        : t('quickLinks.dialogAddTitle')
+    "
+    :subtitle="
+      props.mode === 'edit'
+        ? t('quickLinks.dialogEditSubtitle')
+        : t('quickLinks.dialogAddSubtitle')
+    "
     @close="emit('close')"
   >
     <div class="quick-link-form">

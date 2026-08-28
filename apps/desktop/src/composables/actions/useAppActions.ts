@@ -3,7 +3,12 @@ import { useActivityLog } from "../useActivityLog";
 import { useNavigation, type NavigationId } from "../useNavigation";
 import { useDocuments } from "../useDocuments";
 import { useDesktopState } from "../useDesktopState";
-import { confirmDialog, useVault, type ResetStage, type ResetBackend } from "../useVault";
+import {
+  confirmDialog,
+  useVault,
+  type ResetStage,
+  type ResetBackend,
+} from "../useVault";
 import { useTheme } from "../../theme";
 import { useFlash } from "../useFlash";
 

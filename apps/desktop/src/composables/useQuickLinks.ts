@@ -20,7 +20,11 @@ const STORAGE_KEY = "docvault.quickLinks";
 function isQuickLink(value: unknown): value is QuickLink {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.id === "string" && typeof v.title === "string" && typeof v.url === "string";
+  return (
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    typeof v.url === "string"
+  );
 }
 
 function readInitial(): QuickLink[] {
@@ -63,7 +67,11 @@ function makeLinkId(): string {
 }
 
 export function useQuickLinks() {
-  function addQuickLink(input: { title: string; url: string; favicon?: string }) {
+  function addQuickLink(input: {
+    title: string;
+    url: string;
+    favicon?: string;
+  }) {
     const id = makeLinkId();
     quickLinks.value = [
       ...quickLinks.value,
@@ -72,7 +80,10 @@ export function useQuickLinks() {
     return id;
   }
 
-  function updateQuickLink(id: string, patch: Partial<Pick<QuickLink, "title" | "url" | "favicon">>) {
+  function updateQuickLink(
+    id: string,
+    patch: Partial<Pick<QuickLink, "title" | "url" | "favicon">>,
+  ) {
     quickLinks.value = quickLinks.value.map((link) =>
       link.id === id ? { ...link, ...patch } : link,
     );

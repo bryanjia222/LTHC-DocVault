@@ -16,7 +16,8 @@ export const enUS = {
     delete: "Delete",
     empty: "No quick links yet",
     dialogAddTitle: "Add link",
-    dialogAddSubtitle: "Enter a URL; the title and icon are fetched automatically",
+    dialogAddSubtitle:
+      "Enter a URL; the title and icon are fetched automatically",
     dialogEditTitle: "Edit link",
     dialogEditSubtitle: "Change the URL or name; re-fetch the icon if needed",
     dialogUrlLabel: "URL",
@@ -25,7 +26,33 @@ export const enUS = {
     dialogCancel: "Cancel",
     fetch: "Fetch title & icon",
     fetching: "Fetching title & icon…",
-    fetchHint: "Press Enter in the URL field, or click the button, to fetch the title and icon.",
+    fetchHint:
+      "Press Enter in the URL field, or click the button, to fetch the title and icon.",
+  },
+  qinbixin: {
+    title: "亲笔信",
+    openMail: "Open Qinbixin mail",
+    mail: "Mail",
+    login: "Log in",
+    logout: "Log out",
+    loggedIn: "Signed in",
+    loggedOut: "Signed out",
+    confirmLogout: "Log out from Qinbixin?",
+    loginTitle: "Log in to Qinbixin",
+    loginSubtitle: "Read and send letters with your Qinbixin account",
+    userName: "Account",
+    userNamePlaceholder: "Phone / email / login name",
+    password: "Password",
+    mailTitle: "Mail",
+    noConversations: "No conversations",
+    selectConversation: "Select a conversation",
+    noPreview: "No preview",
+    noMessages: "No letters",
+    titlePlaceholder: "Letter title",
+    contentPlaceholder: "Write your letter…",
+    send: "Send",
+    sendSucceeded: "Letter sent",
+    sendFailed: "Failed to send",
   },
   sidebar: {
     vault: "Vault",
@@ -43,9 +70,8 @@ export const enUS = {
     renameProject: "Rename",
     deleteProject: "Delete",
     confirmDeleteProject:
-      "Delete project \"{name}\"? Its documents stay in the vault and any other projects they belong to.",
-    confirmMoveProject:
-      "Move document from \"{from}\" to \"{to}\"?",
+      'Delete project "{name}"? Its documents stay in the vault and any other projects they belong to.',
+    confirmMoveProject: 'Move document from "{from}" to "{to}"?',
     projectDropHint:
       "Drop a document here to add it; drag a project onto another to nest it (or onto All documents to move it to the root)",
     projectNameTaken: "A project with this name already exists",
@@ -58,7 +84,8 @@ export const enUS = {
   boot: {
     loading: "Connecting to vault…",
     welcome: "Welcome to 兰天嗨彩办公文档管理",
-    notInitialized: "Create a new vault or open an existing one. Default location: {root}",
+    notInitialized:
+      "Create a new vault or open an existing one. Default location: {root}",
     connect: "Create or select vault",
     initFailed: "Initialization failed: {error}",
     openFailed: "Could not open the existing vault: {error}",
@@ -105,7 +132,7 @@ export const enUS = {
     importAll: "Import all {count}",
     bulkTitle: "Import {count} documents",
     bulkHint:
-      "All {count} files will be imported into \"{project}\" with their existing names. No per-file adjustments are shown for large batches.",
+      'All {count} files will be imported into "{project}" with their existing names. No per-file adjustments are shown for large batches.',
     progress: "Importing {done}/{total}…",
     removeFile: "Remove",
     dropHint:
@@ -124,7 +151,8 @@ export const enUS = {
   },
   renameDialog: {
     title: "Rename document",
-    subtitle: "Set a new name for the document (versions and backups are unaffected).",
+    subtitle:
+      "Set a new name for the document (versions and backups are unaffected).",
     nameLabel: "New name",
     namePlaceholder: "Document name",
     hint: "Only the document name changes; version history and snapshots are kept.",
@@ -155,28 +183,26 @@ export const enUS = {
     },
   },
   confirm: {
-    moveToTrash:
-      "Move document \"{name}\" to the recycle bin?",
+    moveToTrash: 'Move document "{name}" to the recycle bin?',
     permanentDelete:
-      "Permanently delete document \"{name}\"? All its versions and backup snapshots will be removed and cannot be recovered.",
+      'Permanently delete document "{name}"? All its versions and backup snapshots will be removed and cannot be recovered.',
     permanentDeleteAgain:
-      "Are you sure? Permanently deleting \"{name}\" removes all of its history. This cannot be undone.",
+      'Are you sure? Permanently deleting "{name}" removes all of its history. This cannot be undone.',
     emptyTrash:
       "Empty the recycle bin? This permanently deletes {count} item(s) (documents and versions) and their backup snapshots, and cannot be undone.",
     emptyTrashAgain:
       "Are you sure? Permanently deleting all {count} item(s) in the bin removes their history. This cannot be undone.",
-    deleteVersion:
-      "Move version {version} of \"{name}\" to the recycle bin?",
+    deleteVersion: 'Move version {version} of "{name}" to the recycle bin?',
     deleteVersionDescendants:
-      "Move version {version} of \"{name}\" to the recycle bin? This will also move its derived versions: {descendants}",
+      'Move version {version} of "{name}" to the recycle bin? This will also move its derived versions: {descendants}',
     permanentDeleteVersion:
-      "Permanently delete version {version} of \"{name}\"? Its archive and backup snapshot will be removed and cannot be recovered.",
+      'Permanently delete version {version} of "{name}"? Its archive and backup snapshot will be removed and cannot be recovered.',
     permanentDeleteVersionDescendants:
-      "Permanently delete version {version} of \"{name}\"? This will also permanently delete its derived versions: {descendants}",
+      'Permanently delete version {version} of "{name}"? This will also permanently delete its derived versions: {descendants}',
     permanentDeleteVersionAgain:
       "Are you sure? Permanently deleting version {version} cannot be undone.",
     restoreVersionAncestors:
-      "Restore version {version} of \"{name}\"? It is based on version(s) still in the recycle bin: {ancestors}. They must be restored together so the history is not orphaned. (No cancels the restore.)",
+      'Restore version {version} of "{name}"? It is based on version(s) still in the recycle bin: {ancestors}. They must be restored together so the history is not orphaned. (No cancels the restore.)',
   },
   actionLogs: {
     refresh: "Refresh",
@@ -272,10 +298,10 @@ export const enUS = {
     commitModified: "Commit modified",
     replaceCommit: "Replace commit",
     replaceCommitConfirm:
-      "\"{name}\" has uncommitted changes. Commit them first (as a new version), then replace with the new file?",
+      '"{name}" has uncommitted changes. Commit them first (as a new version), then replace with the new file?',
     replaceCommitTypeMismatchTitle: "Wrong file type",
     replaceCommitTypeMismatch:
-      "The replacement for \"{name}\" must be the same type (same extension). Expected \"{expected}\", got \"{picked}\".",
+      'The replacement for "{name}" must be the same type (same extension). Expected "{expected}", got "{picked}".',
     commitModifiedDisabled: "Document is not modified - nothing to commit",
     open: "Open",
     preview: "Preview",
@@ -299,7 +325,8 @@ export const enUS = {
   },
   trash: {
     title: "Recycle bin",
-    subtitle: "Deleted documents are held here until restored or permanently deleted.",
+    subtitle:
+      "Deleted documents are held here until restored or permanently deleted.",
     empty: "Recycle bin is empty.",
     count: "{count} document(s)",
     restore: "Restore",
@@ -392,7 +419,8 @@ export const enUS = {
     jobCancelled: "{action} cancelled: {target}",
     commitSucceeded: "Committed {target} (compressing in background)",
     documentCreated: "Created document: {name}",
-    alreadyCurrent: "{name} is already the current version ({version}) - nothing to switch",
+    alreadyCurrent:
+      "{name} is already the current version ({version}) - nothing to switch",
     actionFailed: "{action} failed: {error}",
     noSelection: "{action} requires a document and version selected first",
     noDocument: "No document",
@@ -400,19 +428,21 @@ export const enUS = {
     opened: "Opened document: {name}",
     openFailed: "Failed to open document: {name} ({error})",
     openFailedTitle: "Could not open document",
-    openNoDefaultApp: "兰天嗨彩办公文档管理 could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
+    openNoDefaultApp:
+      "兰天嗨彩办公文档管理 could not open '{name}' with the system default application. This usually means no program is associated with this file type (.docx/.xlsx/.pptx), or the associated program failed to start. Associate an Office app (e.g. Word/WPS/LibreOffice) with this extension in your OS settings, then try again. Details: {error}",
     renamed: "Renamed document: {name} -> {newName}",
     noteUpdated: "Updated note: {name} {version}",
     latest: "latest",
     exported: "Exported {target}",
     cleared: "Activity log cleared",
-    movedToTrash: "Moved \"{target}\" to the recycle bin",
-    restored: "Restored \"{target}\" from the recycle bin",
+    movedToTrash: 'Moved "{target}" to the recycle bin',
+    restored: 'Restored "{target}" from the recycle bin',
     versionMovedToTrash:
-      "Moved version {version} of \"{name}\" to the recycle bin ({count} version(s))",
-    versionRestored: "Restored version {version} of \"{name}\" from the recycle bin",
+      'Moved version {version} of "{name}" to the recycle bin ({count} version(s))',
+    versionRestored:
+      'Restored version {version} of "{name}" from the recycle bin',
     versionRestoredWithAncestors:
-      "Restored version {version} of \"{name}\" (and its ancestor(s): {ancestors}) from the recycle bin",
+      'Restored version {version} of "{name}" (and its ancestor(s): {ancestors}) from the recycle bin',
     trashEmpty: "Recycle bin is empty",
     trashEmptied: "Emptied the recycle bin ({count} document(s))",
     commandRun: "Run command: {command}",
@@ -497,7 +527,8 @@ export const enUS = {
     logLevel: "Log level",
     logFile: "Log file",
     reloadApp: "Reload app",
-    reloadAppHint: "A reload resets the UI and caches and takes a while; use only when needed.",
+    reloadAppHint:
+      "A reload resets the UI and caches and takes a while; use only when needed.",
     theme: "Theme",
     themeLight: "Light",
     themeSystem: "System",
@@ -512,10 +543,12 @@ export const enUS = {
     doubleClickOpen: "Open",
     doubleClickHint: "What double-clicking a document row does.",
     columnsSection: "Table columns",
-    columnsHint: "Drag a header's right edge to resize a column; drag below the minimum width and release to hide it. Tick below to show it.",
+    columnsHint:
+      "Drag a header's right edge to resize a column; drag below the minimum width and release to hide it. Tick below to show it.",
     columnsReset: "Reset widths & visibility",
     resetDefaults: "Restore default settings",
-    resetDefaultsHint: "Restores theme, developer mode, double-click behavior, table columns, and panel pinning to their defaults. Documents and quick links are not touched.",
+    resetDefaultsHint:
+      "Restores theme, developer mode, double-click behavior, table columns, and panel pinning to their defaults. Documents and quick links are not touched.",
     resetDefaultsConfirm: "Restore default settings?",
     columnsAlwaysOn: "Always shown",
   },
@@ -530,7 +563,19 @@ export const enUS = {
   dev: {
     title: "Test & reset",
     hint: "Dev-only. Resets an isolated test vault; never touches your manually-connected real vault.",
-    sliderHint: "Drag to a stage, then confirm to reset the test vault to that state.",
+    qinbixin: {
+      environment: "Qinbixin site",
+      production: "Production",
+      test: "Test",
+      environmentHint:
+        "Test URL: http://admin.ymcs.top:928/. Production and test sessions are stored separately.",
+      quickUsers: "Quick test-account switch",
+      account: "Account {name}",
+      switching: "Switching...",
+      noAccounts: "No usable development accounts found in .env.",
+    },
+    sliderHint:
+      "Drag to a stage, then confirm to reset the test vault to that state.",
     stageLabel: "Stage {n}",
     confirmStage: "Reset to {stage}",
     resetDone: "Reset to {stage}",

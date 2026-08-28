@@ -8,13 +8,7 @@ import type { DocumentType } from "../data/mock";
  * renderer to hand the buffer to without touching the DOM or any library.
  */
 export type PreviewKind =
-  | "pdf"
-  | "md"
-  | "txt"
-  | "docx"
-  | "xlsx"
-  | "pptx"
-  | "unsupported";
+  "pdf" | "md" | "txt" | "docx" | "xlsx" | "pptx" | "unsupported";
 
 /** "PK" - the two-byte signature shared by every ZIP variant. */
 const ZIP_PK = 0x50;

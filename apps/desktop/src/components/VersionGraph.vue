@@ -38,7 +38,10 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (event: "select", version: Version): void;
-  (event: "contextmenu", payload: { version: Version; event: MouseEvent }): void;
+  (
+    event: "contextmenu",
+    payload: { version: Version; event: MouseEvent },
+  ): void;
 }>();
 
 const { t } = useI18n();

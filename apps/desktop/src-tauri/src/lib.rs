@@ -9,6 +9,7 @@ mod logging;
 mod platform;
 mod prefs;
 mod preview_cache;
+mod qinbixin;
 mod state;
 mod web;
 
@@ -96,6 +97,7 @@ pub fn run() {
             // config dir is unavailable - logging then stays off, matching prior
             // behavior (all tracing calls were discarded).
             *app.state::<AppState>().inner().logger.lock().unwrap() = logging::init(app.handle());
+            qinbixin::load_session(app.handle(), &app.state::<AppState>().inner().qinbixin);
             state::open_if_initialized(app.handle(), app.state::<AppState>().inner());
             // Start the loopback add-in bridge so Word/Excel/PPT add-ins can POST
             // the active document straight into the vault. A bind failure (port
@@ -142,6 +144,19 @@ pub fn run() {
             preview_cache::list_preview_cache,
             web::fetch_url_meta,
             web::open_url,
+            qinbixin::qinbixin_status,
+            qinbixin::qinbixin_login,
+            qinbixin::qinbixin_logout,
+            qinbixin::qinbixin_conversations,
+            qinbixin::qinbixin_messages,
+            qinbixin::qinbixin_send,
+            qinbixin::qinbixin_mark_read,
+            #[cfg(debug_assertions)]
+            qinbixin::qinbixin_set_environment,
+            #[cfg(debug_assertions)]
+            qinbixin::qinbixin_dev_accounts,
+            #[cfg(debug_assertions)]
+            qinbixin::qinbixin_login_dev_account,
             devtools::reset_to_stage,
         ])
         .build(tauri::generate_context!())

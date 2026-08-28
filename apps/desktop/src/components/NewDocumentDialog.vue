@@ -19,7 +19,8 @@ import { useActivityLog } from "../composables/useActivityLog";
 
 const { t } = useI18n();
 const { log } = useActivityLog();
-const { newDocumentOpen, newDocumentProjectId, closeNewDocument } = useDialogs();
+const { newDocumentOpen, newDocumentProjectId, closeNewDocument } =
+  useDialogs();
 const { createBlankDocument, documents, loadDocuments, libraryPath } =
   useVault();
 const desktop = useDesktopState();

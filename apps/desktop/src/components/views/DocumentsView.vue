@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { ArrowUpDown, FilePlus, Pin, PinOff, Upload } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useDocuments } from "../../composables/useDocuments";
@@ -163,8 +170,7 @@ function onResizeMove(event: MouseEvent) {
   // Arm hide once the mouse reaches the previous column's right edge (this
   // column's left edge): raw width <= 0 means the handle crossed the left edge.
   // Always-visible columns can't hide, so don't arm/dim them (no false cue).
-  armedColId.value =
-    raw <= 0 && !isAlwaysVisible(dragId) ? dragId : null;
+  armedColId.value = raw <= 0 && !isAlwaysVisible(dragId) ? dragId : null;
 }
 
 function onResizeEnd() {
@@ -248,7 +254,9 @@ watch(selectedDocumentId, () => {
 // window's edge flip on-screen. The view selects the target document/version,
 // then opens the menu through the component ref.
 const docMenuRef = ref<InstanceType<typeof DocRowContextMenu> | null>(null);
-const versionMenuRef = ref<InstanceType<typeof VersionContextMenu> | null>(null);
+const versionMenuRef = ref<InstanceType<typeof VersionContextMenu> | null>(
+  null,
+);
 
 function openDocMenu(event: MouseEvent, document: Document) {
   selectDocument(document);
@@ -267,8 +275,11 @@ function onGraphContextMenu(payload: { version: Version; event: MouseEvent }) {
 }
 // Preview overlay state is shared with the app-wide toolbar (module singleton);
 // the toolbar opens it without the view's logging wrapper.
-const { previewOpen, previewVersionRef, openPreview: openPreviewOverlay } =
-  usePreview();
+const {
+  previewOpen,
+  previewVersionRef,
+  openPreview: openPreviewOverlay,
+} = usePreview();
 
 const versions = computed(() => {
   const doc = selectedDocument.value;
@@ -462,10 +473,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section
-    class="content-grid"
-    :class="{ 'single-col': !pinned }"
-  >
+  <section class="content-grid" :class="{ 'single-col': !pinned }">
     <section class="document-panel surface" :aria-label="t('documents.label')">
       <div class="panel-header">
         <div>
@@ -614,9 +622,7 @@ onBeforeUnmount(() => {
             <tr>
               <td :colspan="fullColspan" class="empty-state">
                 <template v-if="documents.length === 0">
-                  {{
-                    t("documents.emptyNoDocs")
-                  }}
+                  {{ t("documents.emptyNoDocs") }}
                 </template>
                 <template v-else>{{ t("documents.empty") }}</template>
               </td>
@@ -645,7 +651,11 @@ onBeforeUnmount(() => {
             class="icon-action-button"
             type="button"
             :disabled="!selectedVersion || selectedVersion.status === 'current'"
-            :title="selectedVersion?.status === 'current' ? t('actions.checkoutAlreadyCurrent') : t('actions.checkout')"
+            :title="
+              selectedVersion?.status === 'current'
+                ? t('actions.checkoutAlreadyCurrent')
+                : t('actions.checkout')
+            "
             :aria-label="t('actions.checkout')"
             @click="runAction('actionLogs.checkout')"
           >
@@ -655,7 +665,9 @@ onBeforeUnmount(() => {
             class="icon-action-button panel-pin"
             type="button"
             :title="pinned ? t('details.unpinPanel') : t('details.pinPanel')"
-            :aria-label="pinned ? t('details.unpinPanel') : t('details.pinPanel')"
+            :aria-label="
+              pinned ? t('details.unpinPanel') : t('details.pinPanel')
+            "
             @click.stop="togglePanelPinned"
           >
             <Pin v-if="pinned" aria-hidden="true" />
@@ -694,15 +706,9 @@ onBeforeUnmount(() => {
     @contextmenu="onGraphContextMenu"
   />
 
-  <DocRowContextMenu
-    ref="docMenuRef"
-    @preview="onDocMenuPreview"
-  />
+  <DocRowContextMenu ref="docMenuRef" @preview="onDocMenuPreview" />
 
-  <VersionContextMenu
-    ref="versionMenuRef"
-    @preview="onVersionMenuPreview"
-  />
+  <VersionContextMenu ref="versionMenuRef" @preview="onVersionMenuPreview" />
 
   <DocumentPreview
     v-if="previewOpen && selectedDocument"

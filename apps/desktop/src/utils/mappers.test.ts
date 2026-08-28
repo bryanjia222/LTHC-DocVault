@@ -238,7 +238,12 @@ describe("mapDocument", () => {
   it("marks the version matching current_version_id as current", () => {
     const doc = mapDocument(
       mkDoc({
-        document: { id: "d", name: "D", current_version_id: "v2", created_at: 0 },
+        document: {
+          id: "d",
+          name: "D",
+          current_version_id: "v2",
+          created_at: 0,
+        },
         versions: [
           mkVersion({ id: "v1", created_at: 1000 }),
           mkVersion({ id: "v2", created_at: 2000 }),
@@ -267,8 +272,16 @@ describe("mapDocument", () => {
     const doc = mapDocument(
       mkDoc({
         versions: [
-          mkVersion({ id: "v1", created_at: 1000, original_filename: "old.docx" }),
-          mkVersion({ id: "v2", created_at: 2000, original_filename: "new.xlsx" }),
+          mkVersion({
+            id: "v1",
+            created_at: 1000,
+            original_filename: "old.docx",
+          }),
+          mkVersion({
+            id: "v2",
+            created_at: 2000,
+            original_filename: "new.xlsx",
+          }),
         ],
       }),
     );
@@ -392,9 +405,9 @@ describe("mapJob", () => {
   });
 
   it("shows 0% for an indeterminate running job", () => {
-    expect(
-      mapJob(mkJob({ status: "running", progress: null })).progress,
-    ).toBe(0);
+    expect(mapJob(mkJob({ status: "running", progress: null })).progress).toBe(
+      0,
+    );
   });
 
   it("fills 100% for a succeeded job with null progress", () => {

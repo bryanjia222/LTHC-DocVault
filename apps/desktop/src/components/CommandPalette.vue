@@ -20,7 +20,8 @@ import type { NavigationId } from "../composables/useNavigation";
 
 const { t } = useI18n();
 const { isOpen, close } = useCommandPalette();
-const { navigate, runAction, toggleCurrentTheme, openStatus } = useVaultActions();
+const { navigate, runAction, toggleCurrentTheme, openStatus } =
+  useVaultActions();
 
 interface Command {
   id: string;

@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  ArrowRightLeft,
-  Download,
-  Eye,
-  RefreshCw,
-  Trash2,
-} from "@lucide/vue";
+import { ArrowRightLeft, Download, Eye, RefreshCw, Trash2 } from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { useContextMenu } from "../../composables/useContextMenu";
@@ -123,7 +117,9 @@ onBeforeUnmount(() => {
           @click="versionMenuPreview"
         >
           <Eye aria-hidden="true" />
-          {{ t("versionMenu.preview", { label: selectedVersion?.label ?? "" }) }}
+          {{
+            t("versionMenu.preview", { label: selectedVersion?.label ?? "" })
+          }}
         </button>
         <button
           type="button"
@@ -143,7 +139,9 @@ onBeforeUnmount(() => {
           @click="versionMenuCheckout"
         >
           <ArrowRightLeft aria-hidden="true" />
-          {{ t("versionMenu.checkout", { label: selectedVersion?.label ?? "" }) }}
+          {{
+            t("versionMenu.checkout", { label: selectedVersion?.label ?? "" })
+          }}
         </button>
         <div class="ctx-divider"></div>
         <button
@@ -151,7 +149,9 @@ onBeforeUnmount(() => {
           class="ctx-item danger"
           role="menuitem"
           :disabled="versionDeleteDisabled"
-          :title="versionDeleteDisabled ? t('versionMenu.deleteBlockedCurrent') : ''"
+          :title="
+            versionDeleteDisabled ? t('versionMenu.deleteBlockedCurrent') : ''
+          "
           @click="versionMenuDelete"
         >
           <Trash2 aria-hidden="true" />

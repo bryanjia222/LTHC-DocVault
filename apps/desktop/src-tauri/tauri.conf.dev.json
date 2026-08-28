@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.lthc.docvault.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "DocVault (Dev)"
+      }
+    ]
+  }
+}

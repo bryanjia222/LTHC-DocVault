@@ -6,25 +6,28 @@
 //   node scripts/set-version.mjs <version> [path/to/Cargo.toml]
 //
 // Only the [package] version is touched; dependency versions are left alone.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
 const cargoPath =
-  process.argv[3] || new URL('../src-tauri/Cargo.toml', import.meta.url).pathname;
+  process.argv[3] ||
+  new URL("../src-tauri/Cargo.toml", import.meta.url).pathname;
 
 if (!version) {
-  console.error('set-version: missing <version> argument');
+  console.error("set-version: missing <version> argument");
   process.exit(1);
 }
 
-const src = readFileSync(cargoPath, 'utf8');
+const src = readFileSync(cargoPath, "utf8");
 // Match the first `version = "..."` that follows [package] (always the package
 // version, since [package] is the first table). Non-greedy so it won't reach into
 // [dependencies]. Everything else is preserved byte-for-byte.
 const pattern = /(\[package\][\s\S]*?\nversion\s*=\s*)"[^"]*"/;
 
 if (!pattern.test(src)) {
-  console.error(`set-version: no [package] version field found in ${cargoPath}`);
+  console.error(
+    `set-version: no [package] version field found in ${cargoPath}`,
+  );
   process.exit(1);
 }
 

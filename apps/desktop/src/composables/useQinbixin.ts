@@ -1,0 +1,301 @@
+import { invoke } from "@tauri-apps/api/core";
+import { ref } from "vue";
+
+import { isTauri } from "./useVault";
+
+export interface QinbixinProfile {
+  id: number;
+  login_name: string;
+  nickname: string;
+  image_url: string;
+}
+
+export interface QinbixinStatus {
+  logged_in: boolean;
+  profile?: QinbixinProfile;
+  has_unread: boolean;
+  environment: QinbixinEnvironment;
+}
+
+export type QinbixinEnvironment = "production" | "test";
+
+export interface QinbixinDevAccount {
+  id: string;
+  user_name: string;
+}
+
+export interface QinbixinConversation {
+  id: number;
+  title: string;
+  avatar: string;
+  is_group: boolean;
+  unread: boolean;
+  preview: string;
+}
+
+export interface QinbixinMessage {
+  id: number;
+  title: string;
+  content: string;
+  sender_id: number;
+  sender_name: string;
+  sender_avatar: string;
+  sent_time: string;
+}
+
+const POLL_INTERVAL_MS = 5_000;
+
+const status = ref<QinbixinStatus>({
+  logged_in: false,
+  has_unread: false,
+  environment: "production",
+});
+const conversations = ref<QinbixinConversation[]>([]);
+const selectedConversationId = ref<number | null>(null);
+const selectedConversation = ref<QinbixinConversation | null>(null);
+const messages = ref<QinbixinMessage[]>([]);
+const loadingConversations = ref(false);
+const loadingMessages = ref(false);
+const sending = ref(false);
+const switchingEnvironment = ref(false);
+const switchingAccount = ref(false);
+const error = ref("");
+const devAccounts = ref<QinbixinDevAccount[]>([]);
+
+let pollTimer: number | null = null;
+
+export async function refreshQinbixinStatus(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    status.value = await invoke<QinbixinStatus>("qinbixin_status");
+    error.value = "";
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+function startPolling(): void {
+  if (pollTimer !== null || !isTauri()) return;
+  void refreshQinbixinStatus();
+  pollTimer = window.setInterval(() => {
+    void refreshQinbixinStatus();
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling(): void {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function loadConversations(): Promise<void> {
+  if (!isTauri()) return;
+  loadingConversations.value = true;
+  try {
+    conversations.value = await invoke<QinbixinConversation[]>(
+      "qinbixin_conversations",
+    );
+    error.value = "";
+  } catch (e) {
+    if (String(e).includes("AUTH_EXPIRED")) {
+      status.value = {
+        ...status.value,
+        logged_in: false,
+        has_unread: false,
+      };
+    }
+    error.value = String(e);
+  } finally {
+    loadingConversations.value = false;
+  }
+}
+
+async function loadMessages(relationshipId: number): Promise<void> {
+  if (!isTauri()) return;
+  loadingMessages.value = true;
+  try {
+    messages.value = await invoke<QinbixinMessage[]>("qinbixin_messages", {
+      relationshipId,
+    });
+    error.value = "";
+  } catch (e) {
+    if (String(e).includes("AUTH_EXPIRED")) {
+      status.value = {
+        ...status.value,
+        logged_in: false,
+        has_unread: false,
+      };
+    }
+    error.value = String(e);
+  } finally {
+    loadingMessages.value = false;
+  }
+}
+
+async function selectConversation(
+  conversation: QinbixinConversation,
+): Promise<void> {
+  selectedConversationId.value = conversation.id;
+  selectedConversation.value = conversation;
+  await loadMessages(conversation.id);
+  if (conversation.unread) {
+    try {
+      await invoke("qinbixin_mark_read", { relationshipId: conversation.id });
+      conversation.unread = false;
+      if (!conversations.value.some((item) => item.unread)) {
+        status.value = { ...status.value, has_unread: false };
+      }
+    } catch {
+      // The message list still loads; the unread flag refreshes on the next poll.
+    }
+  }
+}
+
+async function login(userName: string, password: string): Promise<boolean> {
+  try {
+    status.value = await invoke<QinbixinStatus>("qinbixin_login", {
+      userName,
+      password,
+    });
+    error.value = "";
+    await loadConversations();
+    return true;
+  } catch (e) {
+    error.value = String(e);
+    return false;
+  }
+}
+
+async function logout(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("qinbixin_logout");
+  status.value = {
+    ...status.value,
+    logged_in: false,
+    has_unread: false,
+  };
+  conversations.value = [];
+  selectedConversationId.value = null;
+  selectedConversation.value = null;
+  messages.value = [];
+  error.value = "";
+}
+
+function clearConversationState(): void {
+  conversations.value = [];
+  selectedConversationId.value = null;
+  selectedConversation.value = null;
+  messages.value = [];
+}
+
+async function setEnvironment(environment: QinbixinEnvironment): Promise<void> {
+  if (!isTauri() || !import.meta.env.DEV || switchingEnvironment.value) return;
+  switchingEnvironment.value = true;
+  try {
+    status.value = await invoke<QinbixinStatus>("qinbixin_set_environment", {
+      environment,
+    });
+    error.value = "";
+    clearConversationState();
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    switchingEnvironment.value = false;
+  }
+}
+
+async function loadDevAccounts(): Promise<void> {
+  if (!isTauri() || !import.meta.env.DEV) return;
+  try {
+    devAccounts.value = await invoke<QinbixinDevAccount[]>(
+      "qinbixin_dev_accounts",
+    );
+  } catch (e) {
+    devAccounts.value = [];
+    error.value = String(e);
+  }
+}
+
+async function loginDevAccount(accountId: string): Promise<boolean> {
+  if (
+    !isTauri() ||
+    !import.meta.env.DEV ||
+    !accountId ||
+    switchingAccount.value
+  ) {
+    return false;
+  }
+  const currentEnvironment = status.value.environment;
+  if (currentEnvironment !== "test") {
+    await setEnvironment("test");
+    if (status.value.environment !== "test") return false;
+  }
+  switchingAccount.value = true;
+  try {
+    status.value = await invoke<QinbixinStatus>("qinbixin_login_dev_account", {
+      accountId,
+    });
+    error.value = "";
+    clearConversationState();
+    await loadConversations();
+    return true;
+  } catch (e) {
+    error.value = String(e);
+    return false;
+  } finally {
+    switchingAccount.value = false;
+  }
+}
+
+async function sendMessage(
+  relationshipId: number,
+  title: string,
+  content: string,
+): Promise<{ success: boolean; message: string }> {
+  if (!isTauri()) return { success: true, message: "" };
+  sending.value = true;
+  try {
+    const result = await invoke<{ success: boolean; message: string }>(
+      "qinbixin_send",
+      { relationshipId, title, content },
+    );
+    if (result.success) {
+      await loadMessages(relationshipId);
+      await refreshQinbixinStatus();
+    }
+    return result;
+  } catch (e) {
+    return { success: false, message: String(e) };
+  } finally {
+    sending.value = false;
+  }
+}
+
+export function useQinbixin() {
+  return {
+    status,
+    conversations,
+    selectedConversationId,
+    selectedConversation,
+    messages,
+    loadingConversations,
+    loadingMessages,
+    sending,
+    switchingEnvironment,
+    switchingAccount,
+    error,
+    devAccounts,
+    refreshQinbixinStatus,
+    loadConversations,
+    selectConversation,
+    login,
+    logout,
+    sendMessage,
+    setEnvironment,
+    loadDevAccounts,
+    loginDevAccount,
+    startPolling,
+    stopPolling,
+  };
+}

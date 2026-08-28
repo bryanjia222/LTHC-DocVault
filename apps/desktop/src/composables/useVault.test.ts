@@ -44,7 +44,12 @@ beforeEach(() => {
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
     switch (cmd) {
       case "vault_status":
-        return { initialized: true, root_dir: "/r", recommended_root: "/rec", open_error: "" };
+        return {
+          initialized: true,
+          root_dir: "/r",
+          recommended_root: "/rec",
+          open_error: "",
+        };
       case "list_documents_with_versions":
         return [];
       case "list_jobs":

@@ -34,7 +34,15 @@ open = "5"
 # system-proxy so HTTP(S)_PROXY env vars are honored (like the restic fetch);
 # gzip/deflate/brotli so compressed bodies (the default for most sites over
 # https) are decompressed - otherwise the <title> scan sees raw gzip bytes.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "system-proxy", "gzip", "deflate", "brotli"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "system-proxy", "gzip", "deflate", "brotli", "json"] }
+# Qinbixin's test host emits a very large Set-Cookie header block. reqwest does
+# not expose Hyper's HTTP/1 buffer limit, so this API uses a tuned legacy
+# Hyper client directly.
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "logging", "ring", "tls12", "webpki-roots"] }
+http-body-util = "0.1"
+tokio = { version = "1", default-features = false, features = ["time"] }
 base64 = "0.22"
 encoding_rs = "0.8"
 # In-process loopback HTTP server for the Office/WPS add-in bridge. Plain HTTP

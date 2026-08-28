@@ -3,8 +3,5 @@
   "identifier": "default",
   "description": "Default desktop capability set: core IPC + event listen, and the file dialog plugin for commit/export/checkout.",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "dialog:default"
-  ]
+  "permissions": ["core:default", "dialog:default"]
 }

@@ -69,7 +69,8 @@ function removeTagFromSelected(tag: string) {
       <span
         v-if="!selectedDocument?.tags?.length && !tagInputOpen"
         class="muted"
-      >{{ t("tags.empty") }}</span>
+        >{{ t("tags.empty") }}</span
+      >
       <button
         v-if="!tagInputOpen"
         type="button"

@@ -139,12 +139,7 @@ export interface Document {
 }
 
 export type JobKind =
-  | "commit"
-  | "export"
-  | "checkout"
-  | "delete"
-  | "archive"
-  | "create_blank";
+  "commit" | "export" | "checkout" | "delete" | "archive" | "create_blank";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Job {

@@ -1,13 +1,21 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
 import { confirmDialog, useVault } from "../../composables/useVault";
-import { useNavigation, type SettingsTab } from "../../composables/useNavigation";
+import {
+  useNavigation,
+  type SettingsTab,
+} from "../../composables/useNavigation";
 import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
+import {
+  useQinbixin,
+  type QinbixinEnvironment,
+} from "../../composables/useQinbixin";
 import {
   useTableColumns,
   ALL_COLUMN_IDS,
@@ -26,6 +34,15 @@ const { doubleClickAction, setDoubleClickAction } = useDoubleClickPref();
 const { columns, setVisible, resetColumns, isAlwaysVisible } =
   useTableColumns();
 const { setPinned } = useHistoryPinPref();
+const {
+  status: qinbixinStatus,
+  switchingEnvironment,
+  switchingAccount,
+  devAccounts,
+  setEnvironment: setQinbixinEnvironment,
+  loadDevAccounts,
+  loginDevAccount,
+} = useQinbixin();
 
 function onToggleColumn(id: ColumnId, event: Event) {
   setVisible(id, (event.target as HTMLInputElement).checked);
@@ -47,6 +64,14 @@ async function resetSettings() {
 // destructive test actions never ship to end users.
 const isDev = import.meta.env.DEV;
 
+const qinbixinEnvironments: {
+  id: QinbixinEnvironment;
+  labelKey: string;
+}[] = [
+  { id: "production", labelKey: "dev.qinbixin.production" },
+  { id: "test", labelKey: "dev.qinbixin.test" },
+];
+
 const logLevels = ["error", "warn", "info", "debug", "trace"] as const;
 
 async function onLogLevelChange(event: Event) {
@@ -57,6 +82,12 @@ async function onLogLevelChange(event: Event) {
     console.error("set_log_level failed", e);
   }
 }
+
+onMounted(() => {
+  if (isDev) {
+    void loadDevAccounts();
+  }
+});
 
 /** Full app reload - deliberately not a right-click item (it is expensive); it
  *  lives here under Settings so a stale UI / config can be reset deliberately. */
@@ -278,6 +309,55 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
         <h3>{{ t("dev.title") }}</h3>
         <p class="field-hint">{{ t("dev.hint") }}</p>
         <StageResetSlider />
+
+        <div class="qinbixin-dev-tools">
+          <div class="dev-tool-section">
+            <h4>{{ t("dev.qinbixin.environment") }}</h4>
+            <div class="segmented-control qinbixin-environment-control">
+              <button
+                v-for="environment in qinbixinEnvironments"
+                :key="environment.id"
+                type="button"
+                :class="{
+                  active: qinbixinStatus.environment === environment.id,
+                }"
+                :disabled="switchingEnvironment"
+                @click="setQinbixinEnvironment(environment.id)"
+              >
+                {{ t(environment.labelKey) }}
+              </button>
+            </div>
+            <p class="field-hint">{{ t("dev.qinbixin.environmentHint") }}</p>
+          </div>
+
+          <div class="dev-tool-section">
+            <h4>{{ t("dev.qinbixin.quickUsers") }}</h4>
+            <div class="dev-account-list">
+              <button
+                v-for="account in devAccounts"
+                :key="account.id"
+                type="button"
+                class="dev-account"
+                :class="{
+                  active:
+                    qinbixinStatus.profile?.login_name === account.user_name,
+                }"
+                :disabled="switchingAccount"
+                @click="loginDevAccount(account.id)"
+              >
+                <span>{{
+                  t("dev.qinbixin.account", { name: account.user_name })
+                }}</span>
+                <span v-if="switchingAccount" class="dev-account-state">
+                  {{ t("dev.qinbixin.switching") }}
+                </span>
+              </button>
+            </div>
+            <p v-if="devAccounts.length === 0" class="field-hint">
+              {{ t("dev.qinbixin.noAccounts") }}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -433,6 +513,54 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
 
 .dev-card {
   padding: 18px;
+}
+
+.qinbixin-dev-tools {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.dev-tool-section h4 {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.qinbixin-environment-control {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.dev-account-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dev-account {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dev-account:hover,
+.dev-account.active {
+  background: var(--bg-hover);
+}
+
+.dev-account-state {
+  color: var(--text-muted);
 }
 
 .column-toggles {

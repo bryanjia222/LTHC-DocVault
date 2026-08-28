@@ -95,18 +95,18 @@ describe("useDocuments - enrichment", () => {
   });
 
   it("reports modification status from the desktop tracker", () => {
-    expect(docs.documents.value.find((d) => d.id === "docA")?.modification).toBe(
-      "none",
-    );
+    expect(
+      docs.documents.value.find((d) => d.id === "docA")?.modification,
+    ).toBe("none");
     desktop.tracked.value = [
       { documentId: "docA", path: "/a.docx", size: 1, mtimeMs: 1, sha256: "a" },
     ];
     desktop.probes.value = {
       docA: { exists: true, size: 2, mtimeMs: 2, sha256: "b" },
     };
-    expect(docs.documents.value.find((d) => d.id === "docA")?.modification).toBe(
-      "modified",
-    );
+    expect(
+      docs.documents.value.find((d) => d.id === "docA")?.modification,
+    ).toBe("modified");
   });
 
   it("exposes the tracked source path (null when not tracked)", () => {
@@ -116,13 +116,19 @@ describe("useDocuments - enrichment", () => {
     expect(docs.documents.value.find((d) => d.id === "docA")?.trackedPath).toBe(
       "/a.docx",
     );
-    expect(docs.documents.value.find((d) => d.id === "docB")?.trackedPath).toBeNull();
+    expect(
+      docs.documents.value.find((d) => d.id === "docB")?.trackedPath,
+    ).toBeNull();
   });
 
   it("exposes the project assignment (null when unassigned)", () => {
     desktop.assignments.value = { docA: "p1" };
-    expect(docs.documents.value.find((d) => d.id === "docA")?.project).toBe("p1");
-    expect(docs.documents.value.find((d) => d.id === "docB")?.project).toBeNull();
+    expect(docs.documents.value.find((d) => d.id === "docA")?.project).toBe(
+      "p1",
+    );
+    expect(
+      docs.documents.value.find((d) => d.id === "docB")?.project,
+    ).toBeNull();
   });
 });
 

@@ -1,0 +1,495 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import DOMPurify from "dompurify";
+import { Loader2, Send } from "@lucide/vue";
+
+import BaseModal from "./BaseModal.vue";
+import { openUrl } from "../composables/useVault";
+import { useQinbixin } from "../composables/useQinbixin";
+
+const props = defineProps<{
+  open: boolean;
+}>();
+
+const emit = defineEmits<{ close: [] }>();
+const { t } = useI18n();
+
+const {
+  status,
+  conversations,
+  selectedConversationId,
+  selectedConversation,
+  messages,
+  loadingConversations,
+  loadingMessages,
+  sending,
+  error,
+  loadConversations,
+  selectConversation,
+  login,
+  sendMessage,
+} = useQinbixin();
+
+const userName = ref("");
+const password = ref("");
+const loggingIn = ref(false);
+const sendTitle = ref("");
+const sendContent = ref("");
+const sendFeedback = ref("");
+
+const dialogTitle = computed(() => {
+  if (!status.value.logged_in) {
+    return t("qinbixin.loginTitle");
+  }
+  return t("qinbixin.mailTitle");
+});
+
+const sanitizedMessages = computed(() =>
+  messages.value.map((message) => ({
+    ...message,
+    safeContent: DOMPurify.sanitize(message.content, {
+      ALLOWED_TAGS: ["p", "br", "strong", "em", "b", "i", "a", "span"],
+      ALLOWED_ATTR: ["href", "target", "rel"],
+    }),
+    incoming: message.sender_id !== status.value.profile?.id,
+  })),
+);
+
+watch(
+  () => [props.open, status.value.logged_in] as const,
+  async ([open, loggedIn]) => {
+    if (!open) return;
+    sendFeedback.value = "";
+    if (!loggedIn) return;
+    await loadConversations();
+    if (!selectedConversationId.value && conversations.value.length) {
+      await selectConversation(conversations.value[0]);
+    }
+  },
+);
+
+async function submitLogin() {
+  if (!userName.value.trim() || !password.value || loggingIn.value) return;
+  loggingIn.value = true;
+  const ok = await login(userName.value.trim(), password.value);
+  loggingIn.value = false;
+  if (ok) {
+    password.value = "";
+  }
+}
+
+async function submitMessage() {
+  const conversation = selectedConversation.value;
+  if (!conversation || !sendTitle.value.trim() || !sendContent.value.trim()) {
+    return;
+  }
+  const result = await sendMessage(
+    conversation.id,
+    sendTitle.value.trim(),
+    sendContent.value,
+  );
+  sendFeedback.value = result.success
+    ? t("qinbixin.sendSucceeded")
+    : result.message || t("qinbixin.sendFailed");
+  if (result.success) {
+    sendTitle.value = "";
+    sendContent.value = "";
+  }
+}
+
+async function openMessageLink(event: MouseEvent) {
+  if (!(event.target instanceof Element)) return;
+  const link = event.target.closest("a");
+  if (!link) return;
+  const href = link.getAttribute("href");
+  if (!href) return;
+  event.preventDefault();
+  event.stopPropagation();
+  try {
+    await openUrl(new URL(href, window.location.href).toString());
+  } catch {
+    // Browser launch is best-effort; the webview must not navigate instead.
+  }
+}
+</script>
+
+<template>
+  <BaseModal
+    :open="props.open"
+    :title="dialogTitle"
+    :subtitle="
+      status.logged_in ? status.profile?.nickname : t('qinbixin.loginSubtitle')
+    "
+    wide
+    @close="emit('close')"
+  >
+    <form
+      v-if="!status.logged_in"
+      class="login-form"
+      @submit.prevent="submitLogin"
+    >
+      <label class="field">
+        <span>{{ t("qinbixin.userName") }}</span>
+        <input
+          v-model="userName"
+          class="text-input"
+          type="text"
+          autocomplete="username"
+          :placeholder="t('qinbixin.userNamePlaceholder')"
+        />
+      </label>
+      <label class="field">
+        <span>{{ t("qinbixin.password") }}</span>
+        <input
+          v-model="password"
+          class="text-input"
+          type="password"
+          autocomplete="current-password"
+        />
+      </label>
+      <button class="primary login-button" type="submit" :disabled="loggingIn">
+        <Loader2 v-if="loggingIn" class="spin" aria-hidden="true" />
+        {{ t("qinbixin.login") }}
+      </button>
+    </form>
+
+    <div v-else class="message-layout">
+      <aside class="conversation-list">
+        <div v-if="loadingConversations" class="list-state">
+          <Loader2 class="spin" aria-hidden="true" />
+        </div>
+        <p v-else-if="conversations.length === 0" class="list-state">
+          {{ t("qinbixin.noConversations") }}
+        </p>
+        <button
+          v-for="conversation in conversations"
+          v-else
+          :key="conversation.id"
+          class="conversation"
+          :class="{ selected: selectedConversationId === conversation.id }"
+          type="button"
+          @click="selectConversation(conversation)"
+        >
+          <img
+            v-if="conversation.avatar"
+            class="avatar"
+            :src="conversation.avatar"
+            alt=""
+          />
+          <span v-else class="avatar fallback">{{
+            conversation.title.slice(0, 1)
+          }}</span>
+          <span class="conversation-text">
+            <span class="conversation-title">{{ conversation.title }}</span>
+            <span class="conversation-preview">{{
+              conversation.preview || t("qinbixin.noPreview")
+            }}</span>
+          </span>
+          <span v-if="conversation.unread" class="unread-dot" />
+        </button>
+      </aside>
+
+      <section class="message-panel">
+        <div v-if="!selectedConversation" class="list-state">
+          {{ t("qinbixin.selectConversation") }}
+        </div>
+        <template v-else>
+          <div class="message-scroll">
+            <div v-if="loadingMessages" class="list-state">
+              <Loader2 class="spin" aria-hidden="true" />
+            </div>
+            <article
+              v-for="message in sanitizedMessages"
+              v-else-if="sanitizedMessages.length > 0"
+              :key="message.id"
+              class="message"
+              :class="{ incoming: message.incoming }"
+            >
+              <header class="message-header">
+                <strong>{{ message.title }}</strong>
+                <span>{{ message.sender_name }} · {{ message.sent_time }}</span>
+              </header>
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div
+                class="message-content"
+                @click.capture="openMessageLink"
+                v-html="message.safeContent"
+              />
+            </article>
+            <p v-else class="list-state">{{ t("qinbixin.noMessages") }}</p>
+          </div>
+
+          <div class="compose-form">
+            <input
+              v-model="sendTitle"
+              class="text-input"
+              type="text"
+              :placeholder="t('qinbixin.titlePlaceholder')"
+            />
+            <textarea
+              v-model="sendContent"
+              class="text-input content-input"
+              :placeholder="t('qinbixin.contentPlaceholder')"
+            />
+            <div class="compose-actions">
+              <span v-if="sendFeedback" class="feedback">{{
+                sendFeedback
+              }}</span>
+              <button
+                class="primary send-button"
+                type="button"
+                :disabled="sending"
+                @click="submitMessage"
+              >
+                <Loader2 v-if="sending" class="spin" aria-hidden="true" />
+                <Send v-else class="small-icon" aria-hidden="true" />
+                {{ t("qinbixin.send") }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </section>
+    </div>
+
+    <p v-if="error" class="backend-error">{{ error }}</p>
+  </BaseModal>
+</template>
+
+<style scoped>
+.login-form,
+.message-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.message-layout {
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 420px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.text-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.login-button,
+.send-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+}
+
+.login-button {
+  justify-self: start;
+}
+
+.conversation-list {
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border-soft);
+  padding-right: 10px;
+}
+
+.conversation {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.conversation:hover,
+.conversation.selected {
+  background: var(--bg-hover);
+}
+
+.avatar,
+.avatar.fallback {
+  display: grid;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.conversation-text {
+  display: grid;
+  min-width: 0;
+}
+
+.conversation-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-preview {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.message-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-scroll {
+  min-height: 0;
+  max-height: 300px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.message {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--bg-surface);
+}
+
+.message.incoming {
+  background: var(--bg-subtle);
+}
+
+.message-header {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.message-header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.message-content {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.message-content :deep(p) {
+  margin: 0 0 6px;
+}
+
+.message-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.compose-form {
+  display: grid;
+  gap: 8px;
+}
+
+.content-input {
+  height: 110px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.feedback {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.small-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.spin {
+  width: 16px;
+  height: 16px;
+  animation: qinbixin-spin 0.8s linear infinite;
+}
+
+.list-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.backend-error {
+  margin-top: 10px;
+  color: var(--danger-text);
+  font-size: 12px;
+}
+
+@keyframes qinbixin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

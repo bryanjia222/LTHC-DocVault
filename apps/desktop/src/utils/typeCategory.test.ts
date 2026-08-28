@@ -11,9 +11,11 @@ import type { DocumentType } from "../data/mock";
 
 describe("typeCategory", () => {
   it("groups word / pdf / md / txt / wps as 文档 (document)", () => {
-    (["docx", "doc", "pdf", "md", "txt", "wps"] as DocumentType[]).forEach((t) => {
-      expect(typeCategory(t)).toBe("document");
-    });
+    (["docx", "doc", "pdf", "md", "txt", "wps"] as DocumentType[]).forEach(
+      (t) => {
+        expect(typeCategory(t)).toBe("document");
+      },
+    );
   });
 
   it("groups ppt / pptx / dps as PPT (presentation)", () => {
@@ -33,6 +35,10 @@ describe("typeCategory", () => {
   });
 
   it("exposes exactly the 3 user-facing categories (no other chip)", () => {
-    expect(TYPE_CATEGORIES).toEqual(["document", "presentation", "spreadsheet"]);
+    expect(TYPE_CATEGORIES).toEqual([
+      "document",
+      "presentation",
+      "spreadsheet",
+    ]);
   });
 });

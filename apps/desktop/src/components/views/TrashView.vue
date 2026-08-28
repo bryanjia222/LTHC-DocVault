@@ -160,7 +160,9 @@ function hasTrashItems(): boolean {
                       class="chip"
                       type="button"
                       :title="t('trash.restore')"
-                      @click="onRestoreVersion(item.document.id, item.version.id)"
+                      @click="
+                        onRestoreVersion(item.document.id, item.version.id)
+                      "
                     >
                       <RotateCcw aria-hidden="true" />
                       {{ t("trash.restore") }}
@@ -170,7 +172,10 @@ function hasTrashItems(): boolean {
                       type="button"
                       :title="t('trash.permanentDeleteHint')"
                       @click="
-                        onPermanentlyDeleteVersion(item.document.id, item.version.id)
+                        onPermanentlyDeleteVersion(
+                          item.document.id,
+                          item.version.id,
+                        )
                       "
                     >
                       <Trash2 aria-hidden="true" />
@@ -183,7 +188,9 @@ function hasTrashItems(): boolean {
           </table>
         </div>
 
-        <p v-if="!hasTrashItems()" class="empty-state">{{ t("trash.empty") }}</p>
+        <p v-if="!hasTrashItems()" class="empty-state">
+          {{ t("trash.empty") }}
+        </p>
       </div>
     </section>
   </section>

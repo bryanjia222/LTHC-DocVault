@@ -153,6 +153,17 @@ cargo llvm-cov --workspace --summary-only
 cargo install cargo-llvm-cov --locked
 ```
 
+### 桌面开发数据隔离
+
+```bash
+cd apps/desktop
+npm run tauri dev
+```
+
+桌面开发运行会合并 `tauri.conf.dev.json`，使用独立 identifier `com.lthc.docvault.dev`。因此调试运行的桌面偏好、日志和单实例标识不会复用已安装版本的数据。
+
+开发构建只允许连接 `<app_config_dir>/com.lthc.docvault.dev/docvault-test-vault`。设置页的“测试与重置”工具也操作这个目录，用于初始化或灌入示例文档；已安装版本和 `~/.DocVault` 中的真实仓库不会被启动流程自动打开。
+
 ------
 
 ## 快速开始
@@ -400,4 +411,3 @@ level = "info"
 - 协作与权限系统
 - 存储层扩展能力
 - 企业级部署模式
-

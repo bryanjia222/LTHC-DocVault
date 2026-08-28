@@ -40,27 +40,35 @@ const docs: Document[] = [
 
 describe("sortDocuments", () => {
   it("sorts by name ascending, case-insensitively", () => {
-    expect(
-      sortDocuments(docs, "name", "asc").map((d) => d.id),
-    ).toEqual(["a", "b", "c"]);
+    expect(sortDocuments(docs, "name", "asc").map((d) => d.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
   });
 
   it("sorts by name descending", () => {
-    expect(
-      sortDocuments(docs, "name", "desc").map((d) => d.id),
-    ).toEqual(["c", "b", "a"]);
+    expect(sortDocuments(docs, "name", "desc").map((d) => d.id)).toEqual([
+      "c",
+      "b",
+      "a",
+    ]);
   });
 
   it("sorts by owner ascending, case-insensitively", () => {
-    expect(
-      sortDocuments(docs, "owner", "asc").map((d) => d.id),
-    ).toEqual(["c", "a", "b"]); // amy, mike, zed
+    expect(sortDocuments(docs, "owner", "asc").map((d) => d.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]); // amy, mike, zed
   });
 
   it("sorts by updated descending (newest first)", () => {
-    expect(
-      sortDocuments(docs, "updated", "desc").map((d) => d.id),
-    ).toEqual(["a", "c", "b"]);
+    expect(sortDocuments(docs, "updated", "desc").map((d) => d.id)).toEqual([
+      "a",
+      "c",
+      "b",
+    ]);
   });
 
   it("does not mutate the input array", () => {
@@ -72,16 +80,25 @@ describe("sortDocuments", () => {
   it("defaults to newest-first (updated desc)", () => {
     expect(DEFAULT_SORT).toEqual({ key: "updated", direction: "desc" });
     expect(
-      sortDocuments(docs, DEFAULT_SORT.key, DEFAULT_SORT.direction).map((d) => d.id),
+      sortDocuments(docs, DEFAULT_SORT.key, DEFAULT_SORT.direction).map(
+        (d) => d.id,
+      ),
     ).toEqual(["a", "c", "b"]);
   });
 });
 
 describe("sort pref guards", () => {
   it("recognizes valid sort keys", () => {
-    (["name", "owner", "currentVersion", "status", "modification", "updated"] as SortKey[]).forEach(
-      (k) => expect(isSortKey(k)).toBe(true),
-    );
+    (
+      [
+        "name",
+        "owner",
+        "currentVersion",
+        "status",
+        "modification",
+        "updated",
+      ] as SortKey[]
+    ).forEach((k) => expect(isSortKey(k)).toBe(true));
   });
 
   it("rejects unknown keys", () => {

@@ -4,6 +4,7 @@ target/
 **/*.rs.bk
 node_modules/
 dist/
+.env
 .DS_Store
 example_docs/
 .docvault/
@@ -16,3 +17,7 @@ example_docs/
 # Vendored restic binaries (fetched automatically by the build, never committed).
 /third_party/restic/**/restic
 /third_party/restic/**/restic.exe
+
+# Local agent tool state
+.claude/
+.codex/

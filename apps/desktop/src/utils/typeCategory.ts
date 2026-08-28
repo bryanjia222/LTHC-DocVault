@@ -10,7 +10,8 @@ import type { DocumentType } from "../data/mock";
  *   表格 (spreadsheet)  -> excel (xls/xlsx)/et
  */
 
-export type TypeCategory = "document" | "presentation" | "spreadsheet" | "other";
+export type TypeCategory =
+  "document" | "presentation" | "spreadsheet" | "other";
 
 /** The user-facing categories, in display order (excludes "other" - no chip). */
 export const TYPE_CATEGORIES: TypeCategory[] = [

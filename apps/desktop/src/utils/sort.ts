@@ -11,12 +11,7 @@ import type { Document } from "../data/mock";
  */
 
 export type SortKey =
-  | "name"
-  | "owner"
-  | "currentVersion"
-  | "status"
-  | "modification"
-  | "updated";
+  "name" | "owner" | "currentVersion" | "status" | "modification" | "updated";
 
 export type SortDirection = "asc" | "desc";
 

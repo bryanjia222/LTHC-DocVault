@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,6 +11,9 @@ import {
   FileUp,
   Folder,
   FolderPlus,
+  LogIn,
+  LogOut,
+  Mail,
   Link,
   MoreVertical,
   Pencil,
@@ -28,6 +31,8 @@ import { confirmDialog, useVault } from "../composables/useVault";
 import { useQuickLinks, type QuickLink } from "../composables/useQuickLinks";
 import { useContextMenu } from "../composables/useContextMenu";
 import QuickLinkDialog from "./QuickLinkDialog.vue";
+import QinbixinDialog from "./QinbixinDialog.vue";
+import { useQinbixin } from "../composables/useQinbixin";
 import type { ProjectDef } from "../data/mock";
 
 const { t } = useI18n();
@@ -36,6 +41,11 @@ const { navigate, startImport } = useVaultActions();
 const { activeProjectId, selectAll, selectProject } = useDocuments();
 const desktop = useDesktopState();
 const { openNewDocument } = useDialogs();
+const {
+  status: qinbixinStatus,
+  startPolling: startQinbixinPolling,
+  stopPolling: stopQinbixinPolling,
+} = useQinbixin();
 
 // --- quick links (sidebar web bookmarks) ---
 const { quickLinks, addQuickLink, updateQuickLink, removeQuickLink } =
@@ -74,8 +84,30 @@ function onLinkDialogSave(payload: {
   linkDialogOpen.value = false;
 }
 
+onMounted(() => {
+  startQinbixinPolling();
+});
+
+onBeforeUnmount(() => {
+  stopQinbixinPolling();
+});
+
 function openQuickLink(link: QuickLink) {
   void openUrl(link.url);
+}
+
+const qinbixinDialogOpen = ref(false);
+
+function openQinbixin() {
+  closeMenu();
+  qinbixinDialogOpen.value = true;
+}
+
+async function logoutQinbixin() {
+  closeMenu();
+  if (!(await confirmDialog(t("qinbixin.confirmLogout")))) return;
+  const { logout } = useQinbixin();
+  await logout();
 }
 
 const projects = computed(() => desktop.projects.value);
@@ -226,7 +258,8 @@ function cancelRename() {
 type MenuTarget =
   | { kind: "all" }
   | { kind: "project"; id: string }
-  | { kind: "link"; id: string };
+  | { kind: "link"; id: string }
+  | { kind: "qinbixin" };
 const {
   open: menuOpen,
   pos: menuPos,
@@ -440,6 +473,44 @@ function indentFor(depth: number): string {
     </div>
 
     <div class="nav-section" :aria-label="t('nav.primary')">
+      <!-- Qinbixin: login state and unread notice, with a single mail view. -->
+      <div class="nav-row qinbixin-row">
+        <button
+          class="nav-main"
+          type="button"
+          :title="t('qinbixin.openMail')"
+          @click="openQinbixin"
+        >
+          <Mail class="nav-icon" aria-hidden="true" />
+          <span class="qinbixin-name">{{ t("qinbixin.title") }}</span>
+          <span class="qinbixin-state">
+            {{
+              qinbixinStatus.logged_in
+                ? qinbixinStatus.profile?.nickname || t("qinbixin.loggedIn")
+                : t("qinbixin.loggedOut")
+            }}
+          </span>
+          <span
+            v-if="qinbixinStatus.logged_in && qinbixinStatus.has_unread"
+            class="qinbixin-dot"
+          />
+        </button>
+        <button
+          class="icon-btn kebab-btn"
+          type="button"
+          :title="t('sidebar.moreActions')"
+          :aria-label="t('sidebar.moreActions')"
+          @click.stop.prevent="openKebab($event, { kind: 'qinbixin' })"
+        >
+          <MoreVertical class="nav-icon" aria-hidden="true" />
+        </button>
+      </div>
+
+      <QinbixinDialog
+        :open="qinbixinDialogOpen"
+        @close="qinbixinDialogOpen = false"
+      />
+
       <!-- 常用链接: pinned web links with auto-fetched title + favicon -->
       <div class="quick-links" :aria-label="t('quickLinks.title')">
         <div class="quick-links-heading">
@@ -461,11 +532,7 @@ function indentFor(depth: number): string {
           class="quick-link-row"
           :title="link.url"
         >
-          <button
-            class="nav-main"
-            type="button"
-            @click="openQuickLink(link)"
-          >
+          <button class="nav-main" type="button" @click="openQuickLink(link)">
             <img
               v-if="link.favicon"
               class="quick-link-favicon"
@@ -480,7 +547,9 @@ function indentFor(depth: number): string {
             type="button"
             :title="t('sidebar.moreActions')"
             :aria-label="t('sidebar.moreActions')"
-            @click.stop.prevent="openKebab($event, { kind: 'link', id: link.id })"
+            @click.stop.prevent="
+              openKebab($event, { kind: 'link', id: link.id })
+            "
           >
             <MoreVertical class="nav-icon" aria-hidden="true" />
           </button>
@@ -613,7 +682,12 @@ function indentFor(depth: number): string {
             <button
               class="nav-main project-main"
               type="button"
-              :aria-current="activeSection === 'documents' && activeProjectId === row.project?.id ? 'page' : undefined"
+              :aria-current="
+                activeSection === 'documents' &&
+                activeProjectId === row.project?.id
+                  ? 'page'
+                  : undefined
+              "
               draggable="true"
               @click="onProjectClick(row.project!.id)"
               @contextmenu.prevent.stop="
@@ -747,6 +821,34 @@ function indentFor(depth: number): string {
               <button type="button" class="danger" @click="actDelete">
                 <Trash2 class="nav-icon" aria-hidden="true" />
                 {{ t("sidebar.deleteProject") }}
+              </button>
+            </li>
+          </template>
+          <template v-else-if="menuTarget?.kind === 'qinbixin'">
+            <li>
+              <button type="button" @click="openQinbixin">
+                <Mail class="nav-icon" aria-hidden="true" />
+                {{ t("qinbixin.mail") }}
+              </button>
+            </li>
+            <li class="ctx-divider" />
+            <li>
+              <button
+                v-if="!qinbixinStatus.logged_in"
+                type="button"
+                @click="openQinbixin"
+              >
+                <LogIn class="nav-icon" aria-hidden="true" />
+                {{ t("qinbixin.login") }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="danger"
+                @click="logoutQinbixin"
+              >
+                <LogOut class="nav-icon" aria-hidden="true" />
+                {{ t("qinbixin.logout") }}
               </button>
             </li>
           </template>
@@ -988,6 +1090,35 @@ function indentFor(depth: number): string {
 .nav-row.active .nav-badge {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+.qinbixin-row {
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 6px;
+  padding-bottom: 8px;
+}
+
+.qinbixin-name {
+  flex-shrink: 0;
+}
+
+.qinbixin-state {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qinbixin-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 .nav-icon {

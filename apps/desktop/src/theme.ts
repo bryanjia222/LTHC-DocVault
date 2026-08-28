@@ -43,7 +43,8 @@ systemDark.value = readSystemDark();
 
 /** Effective dark: explicit modes win; "system" follows the OS preference. */
 const isDark = computed(
-  () => theme.value === "dark" || (theme.value === "system" && systemDark.value),
+  () =>
+    theme.value === "dark" || (theme.value === "system" && systemDark.value),
 );
 
 function applyTheme() {

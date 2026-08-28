@@ -28,7 +28,11 @@ function doc(overrides: Partial<Document> & { id: string }): Document {
   };
 }
 
-function project(id: string, name: string, parentId: string | null): ProjectDef {
+function project(
+  id: string,
+  name: string,
+  parentId: string | null,
+): ProjectDef {
   return { id, name, parentId };
 }
 

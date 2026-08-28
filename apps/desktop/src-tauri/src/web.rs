@@ -93,7 +93,10 @@ async fn fetch_meta(url: &str) -> UrlMeta {
             current = next;
             continue;
         }
-        return UrlMeta { title: None, favicon: None };
+        return UrlMeta {
+            title: None,
+            favicon: None,
+        };
     }
     UrlMeta::default()
 }
@@ -148,7 +151,13 @@ async fn fetch_favicon(client: &reqwest::Client, href: &str) -> Option<String> {
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .map(|s| {
+            s.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        })
         .unwrap_or_default();
     let Ok(bytes) = resp.bytes().await else {
         return None;
@@ -345,7 +354,8 @@ mod tests {
 
     #[test]
     fn gbk_title_decodes() {
-        let html = "<html><head><meta charset=\"gbk\"><title>中文标题</title></head><body></body></html>";
+        let html =
+            "<html><head><meta charset=\"gbk\"><title>中文标题</title></head><body></body></html>";
         let bytes = encoding_rs::GBK.encode(html).0;
         let text = decode_html(&bytes);
         assert_eq!(extract_title(&text).as_deref(), Some("中文标题"));
@@ -354,7 +364,10 @@ mod tests {
     #[test]
     fn sniff_recognizes_png_ico_and_rejects_text() {
         assert_eq!(sniff_mime(b"\x89PNG\r\n\x1a\n\x00"), Some("image/png"));
-        assert_eq!(sniff_mime(b"\x00\x00\x01\x00\x00\x00\x00\x00"), Some("image/x-icon"));
+        assert_eq!(
+            sniff_mime(b"\x00\x00\x01\x00\x00\x00\x00\x00"),
+            Some("image/x-icon")
+        );
         assert_eq!(sniff_mime(b"<html>not an image"), None);
     }
 
@@ -387,7 +400,10 @@ mod tests {
     #[test]
     fn no_meta_refresh_returns_none() {
         assert_eq!(
-            extract_refresh_url("<html><head><title>x</title></head></html>", "https://e.com"),
+            extract_refresh_url(
+                "<html><head><title>x</title></head></html>",
+                "https://e.com"
+            ),
             None
         );
     }

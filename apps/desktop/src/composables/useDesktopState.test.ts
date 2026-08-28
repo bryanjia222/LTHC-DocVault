@@ -42,7 +42,13 @@ beforeEach(() => {
   vi.mocked(invoke).mockImplementation(async (cmd: string) => {
     switch (cmd) {
       case "get_desktop_state":
-        return { tags: {}, tracked: [], projects: [], assignments: {}, sort_prefs: {} };
+        return {
+          tags: {},
+          tracked: [],
+          projects: [],
+          assignments: {},
+          sort_prefs: {},
+        };
       case "set_desktop_state":
         return undefined;
       case "stat_files":
@@ -69,7 +75,13 @@ describe("useDesktopState - get_desktop_state contract", () => {
     vi.mocked(invoke).mockResolvedValueOnce({
       tags: { docA: ["legal"] },
       tracked: [
-        { document_id: "docA", path: "/p.docx", size: 9, mtime_ms: 7, sha256: "abc" },
+        {
+          document_id: "docA",
+          path: "/p.docx",
+          size: 9,
+          mtime_ms: 7,
+          sha256: "abc",
+        },
       ],
       projects: [{ id: "p1", name: "Legal" }],
       assignments: { docA: "p1" },
@@ -80,9 +92,17 @@ describe("useDesktopState - get_desktop_state contract", () => {
     await ds.loadDesktopState();
     expect(ds.tags.value).toEqual({ docA: ["legal"] });
     expect(ds.tracked.value).toEqual([
-      { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
+      {
+        documentId: "docA",
+        path: "/p.docx",
+        size: 9,
+        mtimeMs: 7,
+        sha256: "abc",
+      },
     ]);
-    expect(ds.projects.value).toEqual([{ id: "p1", name: "Legal", parentId: null }]);
+    expect(ds.projects.value).toEqual([
+      { id: "p1", name: "Legal", parentId: null },
+    ]);
     expect(ds.assignments.value).toEqual({ docA: "p1" });
     expect(ds.sortPrefs.value).toEqual({
       __all__: { key: "updated", direction: "desc" },
@@ -188,7 +208,13 @@ describe("useDesktopState - set_desktop_state contract", () => {
 describe("useDesktopState - stat_files contract", () => {
   it("is invoked with { paths } for the batch fast probe", async () => {
     ds.tracked.value = [
-      { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
+      {
+        documentId: "docA",
+        path: "/p.docx",
+        size: 9,
+        mtimeMs: 7,
+        sha256: "abc",
+      },
     ];
     vi.mocked(invoke).mockResolvedValueOnce([
       { path: "/p.docx", exists: true, size: 9, mtime_ms: 7 },
@@ -234,7 +260,13 @@ describe("useDesktopState - probe_file contract", () => {
 describe("useDesktopState - two-tier refresh", () => {
   it("reports unchanged when the fast stat matches the baseline (no probe_file)", async () => {
     ds.tracked.value = [
-      { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
+      {
+        documentId: "docA",
+        path: "/p.docx",
+        size: 9,
+        mtimeMs: 7,
+        sha256: "abc",
+      },
     ];
     vi.mocked(invoke).mockResolvedValueOnce([
       { path: "/p.docx", exists: true, size: 9, mtime_ms: 7 },
@@ -242,15 +274,18 @@ describe("useDesktopState - two-tier refresh", () => {
     await ds.refreshModifications();
     expect(ds.modificationFor("docA")).toBe("unchanged");
     // Fast path must NOT trigger a full hash probe.
-    expect(invoke).not.toHaveBeenCalledWith(
-      "probe_file",
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith("probe_file", expect.anything());
   });
 
   it("reports missing when the file no longer exists", async () => {
     ds.tracked.value = [
-      { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
+      {
+        documentId: "docA",
+        path: "/p.docx",
+        size: 9,
+        mtimeMs: 7,
+        sha256: "abc",
+      },
     ];
     vi.mocked(invoke).mockResolvedValueOnce([
       { path: "/p.docx", exists: false, size: 0, mtime_ms: 0 },
@@ -261,7 +296,13 @@ describe("useDesktopState - two-tier refresh", () => {
 
   it("escalates to probe_file when stat changed, and reports modified on sha mismatch", async () => {
     ds.tracked.value = [
-      { documentId: "docA", path: "/p.docx", size: 9, mtimeMs: 7, sha256: "abc" },
+      {
+        documentId: "docA",
+        path: "/p.docx",
+        size: 9,
+        mtimeMs: 7,
+        sha256: "abc",
+      },
     ];
     vi.mocked(invoke)
       // stat_files: size + mtime changed.
@@ -348,7 +389,9 @@ describe("useDesktopState - projects", () => {
     const child = ds.createProject(parent, "Legal");
     expect(child).toBeTruthy();
     expect(ds.projects.value).toHaveLength(2);
-    expect(ds.projects.value.find((p) => p.id === child)?.parentId).toBe(parent);
+    expect(ds.projects.value.find((p) => p.id === child)?.parentId).toBe(
+      parent,
+    );
     // Persisted with parent_id present.
     await vi.waitFor(() => {
       expect(invokeArgs("set_desktop_state").projects).toContainEqual({
@@ -449,7 +492,10 @@ describe("useDesktopState - projects", () => {
   it("setSortPref / getSortPref persist and read back, scoped by view", () => {
     ds.setSortPref("__all__", "name", "asc");
     ds.setSortPref("p1", "updated", "desc");
-    expect(ds.getSortPref("__all__")).toEqual({ key: "name", direction: "asc" });
+    expect(ds.getSortPref("__all__")).toEqual({
+      key: "name",
+      direction: "asc",
+    });
     expect(ds.getSortPref("p1")).toEqual({ key: "updated", direction: "desc" });
     expect(ds.getSortPref("unset")).toBeNull();
   });

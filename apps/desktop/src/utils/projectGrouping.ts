@@ -45,7 +45,8 @@ function preorderProjectIds(
   const out: string[] = [];
   const visit = (id: string): void => {
     out.push(id);
-    for (const child of projects.filter((p) => p.parentId === id)) visit(child.id);
+    for (const child of projects.filter((p) => p.parentId === id))
+      visit(child.id);
   };
   const roots =
     rootId === null
@@ -116,7 +117,11 @@ export function groupDocumentsByProject(
     }
   }
   if (unassigned.length > 0) {
-    groups.push({ key: UNASSIGNED_KEY, label: unassignedLabel, docs: unassigned });
+    groups.push({
+      key: UNASSIGNED_KEY,
+      label: unassignedLabel,
+      docs: unassigned,
+    });
   }
   return groups;
 }

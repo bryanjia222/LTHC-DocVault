@@ -50,8 +50,10 @@ import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 // undici's EnvHttpProxyAgent, which honors NO_PROXY too. No-op without a proxy,
 // so direct-connected dev machines are unaffected.
 if (
-  process.env.HTTPS_PROXY || process.env.https_proxy ||
-  process.env.HTTP_PROXY || process.env.http_proxy
+  process.env.HTTPS_PROXY ||
+  process.env.https_proxy ||
+  process.env.HTTP_PROXY ||
+  process.env.http_proxy
 ) {
   setGlobalDispatcher(new EnvHttpProxyAgent());
 }
@@ -62,11 +64,36 @@ const RELEASE_BASE = `https://github.com/restic/restic/releases/download/v${VERS
 // Desktop targets we ship. `asset` is the upstream GitHub release filename;
 // `binary` is the extracted executable name (Windows keeps the .exe suffix).
 const TARGETS = [
-  { triple: "x86_64-pc-windows-msvc", asset: `restic_${VERSION}_windows_amd64.zip`, binary: "restic.exe", type: "zip" },
-  { triple: "x86_64-apple-darwin", asset: `restic_${VERSION}_darwin_amd64.bz2`, binary: "restic", type: "bz2" },
-  { triple: "aarch64-apple-darwin", asset: `restic_${VERSION}_darwin_arm64.bz2`, binary: "restic", type: "bz2" },
-  { triple: "x86_64-unknown-linux-gnu", asset: `restic_${VERSION}_linux_amd64.bz2`, binary: "restic", type: "bz2" },
-  { triple: "aarch64-unknown-linux-gnu", asset: `restic_${VERSION}_linux_arm64.bz2`, binary: "restic", type: "bz2" },
+  {
+    triple: "x86_64-pc-windows-msvc",
+    asset: `restic_${VERSION}_windows_amd64.zip`,
+    binary: "restic.exe",
+    type: "zip",
+  },
+  {
+    triple: "x86_64-apple-darwin",
+    asset: `restic_${VERSION}_darwin_amd64.bz2`,
+    binary: "restic",
+    type: "bz2",
+  },
+  {
+    triple: "aarch64-apple-darwin",
+    asset: `restic_${VERSION}_darwin_arm64.bz2`,
+    binary: "restic",
+    type: "bz2",
+  },
+  {
+    triple: "x86_64-unknown-linux-gnu",
+    asset: `restic_${VERSION}_linux_amd64.bz2`,
+    binary: "restic",
+    type: "bz2",
+  },
+  {
+    triple: "aarch64-unknown-linux-gnu",
+    asset: `restic_${VERSION}_linux_arm64.bz2`,
+    binary: "restic",
+    type: "bz2",
+  },
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,9 +106,11 @@ const CACHE_DIR = path.join(RESTIC_DIR, ".cache");
 /// we don't vendor a binary for it. Node reports arch as `x64`/`arm64`.
 function hostTriple() {
   const arch =
-    process.arch === "x64" ? "x86_64"
-    : process.arch === "arm64" ? "aarch64"
-    : null;
+    process.arch === "x64"
+      ? "x86_64"
+      : process.arch === "arm64"
+        ? "aarch64"
+        : null;
   if (!arch) return null;
   switch (process.platform) {
     case "win32":
@@ -352,8 +381,14 @@ async function main() {
   // clobber the committed all-targets manifest with a partial view.
   if (!hostOnly && !targetFilter) {
     const present = await presentTargets();
-    await writeFile(path.join(RESTIC_DIR, "manifest.toml"), manifestContent(present));
-    await writeFile(path.join(RESTIC_DIR, "checksums.txt"), checksumsContent(present));
+    await writeFile(
+      path.join(RESTIC_DIR, "manifest.toml"),
+      manifestContent(present),
+    );
+    await writeFile(
+      path.join(RESTIC_DIR, "checksums.txt"),
+      checksumsContent(present),
+    );
     console.log(
       `wrote manifest.toml + checksums.txt (${present.length} target${present.length === 1 ? "" : "s"} present)`,
     );
