@@ -394,6 +394,61 @@ fn mime_for_file(file_name: &str) -> &'static str {
     }
 }
 
+const THUMBNAIL_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+#[tauri::command]
+pub async fn qinbixin_thumbnail(path: String, kind: String) -> Result<Option<String>, String> {
+    if !matches!(kind.as_str(), "image" | "video") {
+        return Ok(None);
+    }
+    let file = PathBuf::from(&path);
+    let metadata = fs::metadata(&file).map_err(|e| format!("unable to stat media file: {e}"))?;
+    if metadata.len() > THUMBNAIL_MAX_BYTES {
+        return Ok(None);
+    }
+    let read_path = file.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(read_path))
+        .await
+        .map_err(|e| format!("unable to read media file: {e}"))?
+        .map_err(|e| format!("unable to read media file: {e}"))?;
+    let mime = mime_for_file(&file_name(&file));
+    let data_url = format!("data:{mime};base64,{}", base64_encode(&bytes));
+    Ok(Some(data_url))
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        out.push(CHARS[((n >> 18) & 0x3F) as usize] as char);
+        out.push(CHARS[((n >> 12) & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            CHARS[((n >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            CHARS[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 fn multipart_file_body(file_name: &str, content_type: &str, bytes: Vec<u8>) -> Bytes {
     let escaped_name = file_name.replace('\\', "\\\\").replace('"', "\\\"");
     let mut body = Vec::with_capacity(bytes.len() + 512);

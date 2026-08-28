@@ -60,6 +60,7 @@ export const enUS = {
     send: "Send",
     sendSucceeded: "Letter sent",
     sendFailed: "Failed to send",
+    titleRequired: "Please enter a title",
   },
   sidebar: {
     vault: "Vault",

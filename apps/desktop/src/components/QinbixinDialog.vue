@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { File, Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
 
@@ -49,6 +49,7 @@ interface PendingMedia {
   url: string; // empty while uploading
   title: string;
   localPath: string;
+  thumb: string | null;
   progress: number;
 }
 
@@ -201,11 +202,12 @@ async function submitMessage() {
     media.imageUrls.length > 0 ||
     media.videoUrls.length > 0 ||
     media.fileUrls.length > 0;
-  if (
-    !conversation ||
-    !sendTitle.value.trim() ||
-    (!sendContent.value.trim() && !hasMedia)
-  ) {
+  if (!conversation) return;
+  if (!sendTitle.value.trim()) {
+    sendFeedback.value = t("qinbixin.titleRequired");
+    return;
+  }
+  if (!sendContent.value.trim() && !hasMedia) {
     return;
   }
   const result = await sendMessage(
@@ -229,14 +231,29 @@ async function pickMedia(kind: PendingMedia["kind"]): Promise<void> {
   const paths = await pickMediaPaths(kind);
   if (paths.length === 0) return;
 
-  // Create placeholder items with progress 0 and local paths for thumbnails.
-  const placeholders = paths.map((path) => ({
-    kind,
-    url: "",
-    title: path.split(/[\\/]/).pop() || path,
-    localPath: path,
-    progress: 0,
-  }));
+  const placeholders = await Promise.all(
+    paths.map(async (path) => {
+      let thumb: string | null = null;
+      if (kind !== "file") {
+        try {
+          thumb = await invoke<string | null>("qinbixin_thumbnail", {
+            path,
+            kind,
+          });
+        } catch {
+          thumb = null;
+        }
+      }
+      return {
+        kind,
+        url: "",
+        title: path.split(/[\\/]/).pop() || path,
+        localPath: path,
+        thumb,
+        progress: 0,
+      };
+    }),
+  );
   if (kind === "file") {
     pendingMedia.value = pendingMedia.value.filter(
       (item) => item.kind !== "file",
@@ -456,13 +473,13 @@ async function openExternalUrl(url: string): Promise<void> {
               >
                 <div class="media-thumb">
                   <img
-                    v-if="item.kind === 'image'"
-                    :src="convertFileSrc(item.localPath)"
+                    v-if="item.kind === 'image' && item.thumb"
+                    :src="item.thumb"
                     :alt="item.title"
                   />
                   <video
-                    v-else-if="item.kind === 'video'"
-                    :src="convertFileSrc(item.localPath)"
+                    v-else-if="item.kind === 'video' && item.thumb"
+                    :src="item.thumb"
                     preload="metadata"
                   />
                   <File v-else aria-hidden="true" />
@@ -470,7 +487,7 @@ async function openExternalUrl(url: string): Promise<void> {
                     v-if="item.progress < 100"
                     class="progress-ring"
                     :style="{
-                      background: `conic-gradient(var(--accent) ${item.progress * 3.6}deg, transparent ${item.progress * 3.6}deg)`,
+                      background: `conic-gradient(var(--accent) ${item.progress * 3.6}deg, rgba(0, 0, 0, 0.45) ${item.progress * 3.6}deg)`,
                     }"
                   >
                     <span>{{ Math.round(item.progress) }}%</span>
