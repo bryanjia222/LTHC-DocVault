@@ -78,6 +78,7 @@ const uploadingMedia = ref(false);
 const switchingEnvironment = ref(false);
 const switchingAccount = ref(false);
 const error = ref("");
+const uploadError = ref("");
 const devAccounts = ref<QinbixinDevAccount[]>([]);
 
 let pollTimer: number | null = null;
@@ -354,10 +355,9 @@ async function sendMessage(
   }
 }
 
-async function uploadMedia(
+async function pickMediaPaths(
   kind: "image" | "video" | "file",
-): Promise<QinbixinUploadedFile[]> {
-  if (!isTauri() || uploadingMedia.value) return [];
+): Promise<string[]> {
   const filters =
     kind === "image"
       ? [
@@ -390,15 +390,23 @@ async function uploadMedia(
           ];
   const selected = await open({ multiple: kind !== "file", filters });
   const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-  if (paths.length === 0) return [];
+  return paths;
+}
+
+async function uploadMedia(
+  paths: string[],
+  uploadType: number,
+): Promise<QinbixinUploadedFile[]> {
+  if (!isTauri() || uploadingMedia.value || paths.length === 0) return [];
+  uploadError.value = "";
   uploadingMedia.value = true;
   try {
     return await invoke<QinbixinUploadedFile[]>("qinbixin_upload", {
       paths,
-      uploadType: kind === "image" ? 0 : kind === "file" ? 1 : 2,
+      uploadType,
     });
   } catch (e) {
-    error.value = String(e);
+    uploadError.value = String(e);
     return [];
   } finally {
     uploadingMedia.value = false;
@@ -416,6 +424,7 @@ export function useQinbixin() {
     loadingMessages,
     sending,
     uploadingMedia,
+    uploadError,
     switchingEnvironment,
     switchingAccount,
     error,
@@ -428,6 +437,7 @@ export function useQinbixin() {
     logout,
     sendMessage,
     uploadMedia,
+    pickMediaPaths,
     setEnvironment,
     loadDevAccounts,
     loginDevAccount,

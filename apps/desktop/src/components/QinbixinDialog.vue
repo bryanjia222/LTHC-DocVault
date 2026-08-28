@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
-import { Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { File, Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
 
 import BaseModal from "./BaseModal.vue";
 import { openUrl } from "../composables/useVault";
@@ -30,7 +32,9 @@ const {
   selectConversation,
   login,
   sendMessage,
+  pickMediaPaths,
   uploadMedia,
+  uploadError,
 } = useQinbixin();
 
 const userName = ref("");
@@ -42,11 +46,30 @@ const sendFeedback = ref("");
 
 interface PendingMedia {
   kind: "image" | "video" | "file";
-  url: string;
+  url: string; // empty while uploading
   title: string;
+  localPath: string;
+  progress: number;
 }
 
 const pendingMedia = ref<PendingMedia[]>([]);
+
+let progressUnlisten: (() => void) | null = null;
+
+async function initProgressListener(): Promise<void> {
+  if (progressUnlisten) return;
+  progressUnlisten = await listen<{
+    index: number;
+    fileName: string;
+    percent: number;
+  }>("qinbixin-upload-progress", (event) => {
+    const { fileName, percent } = event.payload;
+    const item = pendingMedia.value.find(
+      (m) => m.url === "" && m.title === fileName,
+    );
+    if (item) item.progress = Math.max(0, Math.min(100, percent));
+  });
+}
 
 const dialogTitle = computed(() => {
   if (!status.value.logged_in) {
@@ -119,7 +142,7 @@ const sanitizedMessages = computed(() =>
 
 function mediaUrls(kind: PendingMedia["kind"]): string[] {
   return pendingMedia.value
-    .filter((item) => item.kind === kind)
+    .filter((item) => item.kind === kind && item.url !== "")
     .map((item) => item.url);
 }
 
@@ -153,6 +176,8 @@ watch(
 
 onBeforeUnmount(() => {
   stopMailboxPolling();
+  progressUnlisten?.();
+  progressUnlisten = null;
 });
 
 async function submitLogin() {
@@ -200,19 +225,49 @@ async function submitMessage() {
 }
 
 async function pickMedia(kind: PendingMedia["kind"]): Promise<void> {
-  const files = await uploadMedia(kind);
+  void initProgressListener();
+  const paths = await pickMediaPaths(kind);
+  if (paths.length === 0) return;
+
+  // Create placeholder items with progress 0 and local paths for thumbnails.
+  const placeholders = paths.map((path) => ({
+    kind,
+    url: "",
+    title: path.split(/[\\/]/).pop() || path,
+    localPath: path,
+    progress: 0,
+  }));
   if (kind === "file") {
     pendingMedia.value = pendingMedia.value.filter(
       (item) => item.kind !== "file",
     );
   }
-  pendingMedia.value.push(
-    ...files.map((file) => ({ kind, url: file.url, title: file.title })),
-  );
+  pendingMedia.value.push(...placeholders);
+
+  const uploadType = kind === "image" ? 0 : kind === "file" ? 1 : 2;
+  try {
+    const files = await uploadMedia(paths, uploadType);
+    // Replace placeholders with actual URLs
+    for (let i = 0; i < Math.min(paths.length, files.length); i++) {
+      const item = pendingMedia.value.find(
+        (m) => m.url === "" && m.localPath === paths[i],
+      );
+      if (item) {
+        item.url = files[i].url;
+        item.title = files[i].title;
+        item.progress = 100;
+      }
+    }
+  } finally {
+    // Remove any placeholders that did not get a URL (failed uploads)
+    pendingMedia.value = pendingMedia.value.filter((item) => item.url !== "");
+  }
 }
 
-function removeMedia(url: string): void {
-  pendingMedia.value = pendingMedia.value.filter((item) => item.url !== url);
+function removeMedia(localPath: string): void {
+  pendingMedia.value = pendingMedia.value.filter(
+    (item) => item.localPath !== localPath,
+  );
 }
 
 async function openMessageLink(event: MouseEvent) {
@@ -394,16 +449,42 @@ async function openExternalUrl(url: string): Promise<void> {
               :placeholder="t('qinbixin.contentPlaceholder')"
             />
             <div v-if="pendingMedia.length" class="pending-media">
-              <span v-for="item in pendingMedia" :key="item.url" class="chip">
-                {{ item.title }}
+              <div
+                v-for="item in pendingMedia"
+                :key="item.localPath"
+                class="media-chip"
+              >
+                <div class="media-thumb">
+                  <img
+                    v-if="item.kind === 'image'"
+                    :src="convertFileSrc(item.localPath)"
+                    :alt="item.title"
+                  />
+                  <video
+                    v-else-if="item.kind === 'video'"
+                    :src="convertFileSrc(item.localPath)"
+                    preload="metadata"
+                  />
+                  <File v-else aria-hidden="true" />
+                  <div
+                    v-if="item.progress < 100"
+                    class="progress-ring"
+                    :style="{
+                      background: `conic-gradient(var(--accent) ${item.progress * 3.6}deg, transparent ${item.progress * 3.6}deg)`,
+                    }"
+                  >
+                    <span>{{ Math.round(item.progress) }}%</span>
+                  </div>
+                </div>
+                <span class="media-title">{{ item.title }}</span>
                 <button
                   type="button"
                   :title="t('qinbixin.removeAttachment')"
-                  @click="removeMedia(item.url)"
+                  @click="removeMedia(item.localPath)"
                 >
                   <X aria-hidden="true" />
                 </button>
-              </span>
+              </div>
             </div>
             <div class="compose-actions">
               <div class="media-actions">
@@ -441,7 +522,7 @@ async function openExternalUrl(url: string): Promise<void> {
               <button
                 class="primary send-button"
                 type="button"
-                :disabled="sending"
+                :disabled="sending || uploadingMedia"
                 @click="submitMessage"
               >
                 <Loader2 v-if="sending" class="spin" aria-hidden="true" />
@@ -454,6 +535,12 @@ async function openExternalUrl(url: string): Promise<void> {
       </section>
     </div>
 
+    <div v-if="uploadError" class="upload-error">
+      <span>{{ uploadError }}</span>
+      <button type="button" @click="uploadError = ''">
+        <X aria-hidden="true" />
+      </button>
+    </div>
     <p v-if="error" class="backend-error">{{ error }}</p>
   </BaseModal>
 </template>
@@ -751,25 +838,59 @@ async function openExternalUrl(url: string): Promise<void> {
   gap: 6px;
 }
 
-.chip {
-  display: inline-flex;
-  max-width: 220px;
+.media-chip {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 2px 4px 2px 8px;
+  position: relative;
+  width: 72px;
+}
+
+.media-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
   background: var(--bg-subtle);
-  color: var(--text-secondary);
+}
+
+.media-thumb img,
+.media-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.progress-ring {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
   font-size: 12px;
+  font-weight: 600;
 }
 
-.chip span,
-.chip {
-  min-width: 0;
+.media-title {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
-.chip button {
+.media-chip button {
+  position: absolute;
+  top: -4px;
+  right: -4px;
   display: grid;
   width: 18px;
   height: 18px;
@@ -777,12 +898,13 @@ async function openExternalUrl(url: string): Promise<void> {
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: transparent;
+  background: var(--bg-subtle);
   color: var(--text-muted);
   cursor: pointer;
+  z-index: 1;
 }
 
-.chip button svg {
+.media-chip button svg {
   width: 12px;
   height: 12px;
 }
@@ -819,6 +941,33 @@ async function openExternalUrl(url: string): Promise<void> {
   margin-top: 10px;
   color: var(--danger-text);
   font-size: 12px;
+}
+
+.upload-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: var(--danger-text);
+  font-size: 12px;
+}
+
+.upload-error button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 @keyframes qinbixin-spin {

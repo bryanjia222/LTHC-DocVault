@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use http_body::{Body as HttpBody, Frame, SizeHint};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper_rustls::HttpsConnector;
@@ -15,7 +16,7 @@ use hyper_util::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const PRODUCTION_BASE_URL: &str = "https://qinbixin.com.cn";
 const TEST_BASE_URL: &str = "http://admin.ymcs.top:928";
@@ -291,7 +292,8 @@ fn format_error_chain<E: std::error::Error>(error: E) -> String {
     message
 }
 
-type QinbixinHttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+type QinbixinBody = http_body_util::combinators::BoxBody<Bytes, std::convert::Infallible>;
+type QinbixinHttpClient = Client<HttpsConnector<HttpConnector>, QinbixinBody>;
 
 static HTTP_CLIENT: LazyLock<QinbixinHttpClient> = LazyLock::new(|| {
     let https = hyper_rustls::HttpsConnectorBuilder::new()
@@ -325,11 +327,13 @@ async fn request_json<T: serde::de::DeserializeOwned>(
     let request = if let Some(body) = body {
         let text =
             serde_json::to_vec(&body).map_err(|e| format!("unable to encode request: {e}"))?;
-        request
-            .header("content-type", "application/json")
-            .body(Full::new(Bytes::from(text)))
+        request.header("content-type", "application/json").body(
+            http_body_util::combinators::BoxBody::new(Full::new(Bytes::from(text))),
+        )
     } else {
-        request.body(Full::new(Bytes::new()))
+        request.body(http_body_util::combinators::BoxBody::new(Full::new(
+            Bytes::new(),
+        )))
     }
     .map_err(|e| format!("unable to create request: {e}"))?;
     let response = tokio::time::timeout(Duration::from_secs(10), HTTP_CLIENT.request(request))
@@ -407,12 +411,61 @@ fn multipart_file_body(file_name: &str, content_type: &str, bytes: Vec<u8>) -> B
     Bytes::from(body)
 }
 
+struct ProgressBody {
+    data: Bytes,
+    offset: usize,
+    chunk_size: usize,
+    total: usize,
+    on_progress: Box<dyn Fn(usize, usize) + Send + Sync>,
+}
+
+impl ProgressBody {
+    fn new(data: Bytes, on_progress: Box<dyn Fn(usize, usize) + Send + Sync>) -> Self {
+        let total = data.len();
+        Self {
+            data,
+            offset: 0,
+            chunk_size: 64 * 1024,
+            total,
+            on_progress,
+        }
+    }
+}
+
+impl HttpBody for ProgressBody {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        if self.offset >= self.total {
+            return std::task::Poll::Ready(None);
+        }
+        let end = (self.offset + self.chunk_size).min(self.total);
+        let chunk = self.data.slice(self.offset..end);
+        self.offset = end;
+        (self.on_progress)(self.offset, self.total);
+        std::task::Poll::Ready(Some(Ok(Frame::data(chunk))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.offset >= self.total
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::with_exact(self.total as u64)
+    }
+}
+
 async fn request_multipart<T: serde::de::DeserializeOwned>(
     base_url: &str,
     token: &str,
     path: &str,
     file_name: &str,
     bytes: Vec<u8>,
+    on_progress: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
 ) -> Result<(RawEnvelope<T>, Option<String>), String> {
     let uri = format!("{base_url}{path}")
         .parse::<hyper::Uri>()
@@ -427,7 +480,10 @@ async fn request_multipart<T: serde::de::DeserializeOwned>(
         .header("user-agent", "DocVault/0.2")
         .header("content-type", content_type)
         .header("content-length", body.len())
-        .body(Full::new(body))
+        .body(match on_progress {
+            Some(cb) => http_body_util::combinators::BoxBody::new(ProgressBody::new(body, cb)),
+            None => http_body_util::combinators::BoxBody::new(Full::new(body)),
+        })
         .map_err(|e| format!("unable to create upload request: {e}"))?;
     let response = tokio::time::timeout(Duration::from_secs(120), HTTP_CLIENT.request(request))
         .await
@@ -473,7 +529,7 @@ pub async fn qinbixin_upload(
     }
 
     let mut uploaded = Vec::with_capacity(paths.len());
-    for path_text in paths {
+    for (index, path_text) in paths.iter().enumerate() {
         let path = PathBuf::from(&path_text);
         let file_name = path
             .file_name()
@@ -492,12 +548,30 @@ pub async fn qinbixin_upload(
             return Err(format!("文件 {file_name} 超过上传大小限制"));
         }
         let upload_path = format!("/API/Web/Upload?uploadType={upload_type}");
+        let app_for_progress = app.clone();
+        let file_for_progress = file_name.clone();
+        let on_progress = move |sent: usize, total: usize| {
+            let percent = if total == 0 {
+                100
+            } else {
+                ((sent as u64 * 100) / total as u64) as i32
+            };
+            let _ = app_for_progress.emit(
+                "qinbixin-upload-progress",
+                json!({
+                    "index": index,
+                    "fileName": file_for_progress,
+                    "percent": percent,
+                }),
+            );
+        };
         let (envelope, new_token) = request_multipart::<RawUploadedFile>(
             environment.base_url(),
             &token,
             &upload_path,
             &file_name,
             bytes,
+            Some(Box::new(on_progress)),
         )
         .await?;
         let raw = mapped_error(envelope)?;

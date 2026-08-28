@@ -979,6 +979,7 @@ dependencies = [
  "docvault-storage",
  "docvault-types",
  "encoding_rs",
+ "http-body",
  "http-body-util",
  "hyper",
  "hyper-rustls",

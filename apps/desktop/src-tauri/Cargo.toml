@@ -39,6 +39,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # not expose Hyper's HTTP/1 buffer limit, so this API uses a tuned legacy
 # Hyper client directly.
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+http-body = "1"
 hyper-util = { version = "0.1", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "logging", "ring", "tls12", "webpki-roots"] }
 http-body-util = "0.1"
