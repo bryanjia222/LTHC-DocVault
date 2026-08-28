@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
 import { Loader2, Send } from "@lucide/vue";
@@ -25,7 +25,7 @@ const {
   loadingMessages,
   sending,
   error,
-  loadConversations,
+  refreshQinbixinMailbox,
   selectConversation,
   login,
   sendMessage,
@@ -56,18 +56,37 @@ const sanitizedMessages = computed(() =>
   })),
 );
 
+let mailboxTimer: number | null = null;
+
+function startMailboxPolling(): void {
+  if (mailboxTimer !== null) return;
+  void refreshQinbixinMailbox();
+  mailboxTimer = window.setInterval(() => {
+    void refreshQinbixinMailbox();
+  }, 5_000);
+}
+
+function stopMailboxPolling(): void {
+  if (mailboxTimer !== null) {
+    window.clearInterval(mailboxTimer);
+    mailboxTimer = null;
+  }
+}
+
 watch(
   () => [props.open, status.value.logged_in] as const,
-  async ([open, loggedIn]) => {
-    if (!open) return;
-    sendFeedback.value = "";
-    if (!loggedIn) return;
-    await loadConversations();
-    if (!selectedConversationId.value && conversations.value.length) {
-      await selectConversation(conversations.value[0]);
+  ([open, loggedIn]) => {
+    if (open && loggedIn) {
+      startMailboxPolling();
+    } else {
+      stopMailboxPolling();
     }
   },
 );
+
+onBeforeUnmount(() => {
+  stopMailboxPolling();
+});
 
 async function submitLogin() {
   if (!userName.value.trim() || !password.value || loggingIn.value) return;

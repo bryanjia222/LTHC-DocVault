@@ -142,15 +142,6 @@ struct RawProfile {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct RawUnreadFlags {
-    #[serde(default)]
-    flag_friend: i64,
-    #[serde(default)]
-    flag_group: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 struct RawConversation {
     id: i64,
     #[serde(default)]
@@ -383,17 +374,49 @@ fn map_conversation(base_url: &str, raw: RawConversation) -> QinbixinConversatio
     }
 }
 
-async fn load_unread(base_url: &str, token: &str) -> Result<bool, String> {
-    let (envelope, _) = request_json::<RawUnreadFlags>(
+async fn load_conversations(
+    app: &AppHandle,
+    state: &tauri::State<'_, crate::state::AppState>,
+) -> Result<Vec<QinbixinConversation>, String> {
+    let environment = load_environment(app);
+    let base_url = environment.base_url();
+    let session = state.qinbixin.lock().unwrap().clone();
+    let token = session.token;
+    if token.is_empty() {
+        return Err("AUTH_EXPIRED".to_owned());
+    }
+    let (friend_envelope, token1) = request_json::<Vec<RawConversation>>(
         base_url,
-        token,
+        &token,
         reqwest::Method::GET,
-        "/API/Web/Relationship/GetFriendRequestUnreadFlag",
+        "/API/Web/Relationship/GetPageList?PageIndex=1&PageSize=200&IsFirend=true",
         None,
     )
     .await?;
-    let flags = mapped_error(envelope)?;
-    Ok(flags.flag_friend > 0 || flags.flag_group > 0)
+    let friends = mapped_error(friend_envelope)?;
+    store_new_token(app, &state.qinbixin, &token1)?;
+    let active_token = token1.unwrap_or(token);
+    let (group_envelope, token2) = request_json::<Vec<RawConversation>>(
+        base_url,
+        &active_token,
+        reqwest::Method::GET,
+        "/API/Web/Relationship/GetPageList?PageIndex=1&PageSize=200&IsFirend=false",
+        None,
+    )
+    .await?;
+    let groups = mapped_error(group_envelope)?;
+    store_new_token(app, &state.qinbixin, &token2)?;
+    let mut conversations: Vec<_> = friends
+        .into_iter()
+        .map(|item| map_conversation(base_url, item))
+        .chain(
+            groups
+                .into_iter()
+                .map(|item| map_conversation(base_url, item)),
+        )
+        .collect();
+    conversations.sort_by_key(|item| std::cmp::Reverse(item.unread));
+    Ok(conversations)
 }
 
 #[tauri::command]
@@ -414,11 +437,11 @@ pub async fn qinbixin_status(
             environment,
         });
     }
-    match load_unread(environment.base_url(), &session.token).await {
-        Ok(has_unread) => Ok(QinbixinStatusDto {
+    match load_conversations(&app, &state).await {
+        Ok(conversations) => Ok(QinbixinStatusDto {
             logged_in: true,
             profile: Some(session.profile),
-            has_unread,
+            has_unread: conversations.iter().any(|item| item.unread),
             environment,
         }),
         Err(e) if e == "AUTH_EXPIRED" => {
@@ -469,7 +492,6 @@ async fn login_with_credentials(
         nickname: raw_profile.nickname.unwrap_or_default(),
         image_url: absolute_url(base_url, raw_profile.image_url.unwrap_or_default()),
     };
-    let has_unread = load_unread(base_url, &data.token).await.unwrap_or(false);
     {
         let mut guard = state.qinbixin.lock().unwrap();
         guard.token = data.token;
@@ -481,6 +503,10 @@ async fn login_with_credentials(
         drop(guard);
         save_session(app, &snapshot)?;
     }
+    let has_unread = load_conversations(app, state)
+        .await
+        .map(|items| items.iter().any(|item| item.unread))
+        .unwrap_or(false);
     Ok(QinbixinStatusDto {
         logged_in: true,
         profile: Some(profile),
@@ -527,45 +553,7 @@ pub async fn qinbixin_conversations(
     app: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Vec<QinbixinConversation>, String> {
-    let environment = load_environment(&app);
-    let base_url = environment.base_url();
-    let session = state.qinbixin.lock().unwrap().clone();
-    let token = session.token;
-    if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
-    }
-    let (friend_envelope, token1) = request_json::<Vec<RawConversation>>(
-        base_url,
-        &token,
-        reqwest::Method::GET,
-        "/API/Web/Relationship/GetPageList?PageIndex=1&PageSize=200&IsFirend=true",
-        None,
-    )
-    .await?;
-    let friends = mapped_error(friend_envelope)?;
-    store_new_token(&app, &state.qinbixin, &token1)?;
-    let active_token = token1.unwrap_or(token);
-    let (group_envelope, token2) = request_json::<Vec<RawConversation>>(
-        base_url,
-        &active_token,
-        reqwest::Method::GET,
-        "/API/Web/Relationship/GetPageList?PageIndex=1&PageSize=200&IsFirend=false",
-        None,
-    )
-    .await?;
-    let groups = mapped_error(group_envelope)?;
-    store_new_token(&app, &state.qinbixin, &token2)?;
-    let mut conversations: Vec<_> = friends
-        .into_iter()
-        .map(|item| map_conversation(base_url, item))
-        .chain(
-            groups
-                .into_iter()
-                .map(|item| map_conversation(base_url, item)),
-        )
-        .collect();
-    conversations.sort_by_key(|item| std::cmp::Reverse(item.unread));
-    Ok(conversations)
+    load_conversations(&app, &state).await
 }
 
 #[tauri::command]

@@ -64,10 +64,17 @@ const devAccounts = ref<QinbixinDevAccount[]>([]);
 
 let pollTimer: number | null = null;
 
+function statusEquals(left: QinbixinStatus, right: QinbixinStatus): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export async function refreshQinbixinStatus(): Promise<void> {
   if (!isTauri()) return;
   try {
-    status.value = await invoke<QinbixinStatus>("qinbixin_status");
+    const next = await invoke<QinbixinStatus>("qinbixin_status");
+    if (!statusEquals(status.value, next)) {
+      status.value = next;
+    }
     error.value = "";
   } catch (e) {
     error.value = String(e);
@@ -89,13 +96,25 @@ function stopPolling(): void {
   }
 }
 
-async function loadConversations(): Promise<void> {
+async function loadConversations(background = false): Promise<void> {
   if (!isTauri()) return;
-  loadingConversations.value = true;
+  if (!background) {
+    loadingConversations.value = true;
+  }
   try {
-    conversations.value = await invoke<QinbixinConversation[]>(
-      "qinbixin_conversations",
-    );
+    const next = await invoke<QinbixinConversation[]>("qinbixin_conversations");
+    if (JSON.stringify(conversations.value) !== JSON.stringify(next)) {
+      conversations.value = next;
+      const selectedId = selectedConversationId.value;
+      if (selectedId !== null) {
+        selectedConversation.value =
+          next.find((conversation) => conversation.id === selectedId) ?? null;
+      }
+    }
+    const hasUnread = next.some((conversation) => conversation.unread);
+    if (status.value.has_unread !== hasUnread) {
+      status.value = { ...status.value, has_unread: hasUnread };
+    }
     error.value = "";
   } catch (e) {
     if (String(e).includes("AUTH_EXPIRED")) {
@@ -107,17 +126,27 @@ async function loadConversations(): Promise<void> {
     }
     error.value = String(e);
   } finally {
-    loadingConversations.value = false;
+    if (!background) {
+      loadingConversations.value = false;
+    }
   }
 }
 
-async function loadMessages(relationshipId: number): Promise<void> {
+async function loadMessages(
+  relationshipId: number,
+  background = false,
+): Promise<void> {
   if (!isTauri()) return;
-  loadingMessages.value = true;
+  if (!background) {
+    loadingMessages.value = true;
+  }
   try {
-    messages.value = await invoke<QinbixinMessage[]>("qinbixin_messages", {
+    const next = await invoke<QinbixinMessage[]>("qinbixin_messages", {
       relationshipId,
     });
+    if (JSON.stringify(messages.value) !== JSON.stringify(next)) {
+      messages.value = next;
+    }
     error.value = "";
   } catch (e) {
     if (String(e).includes("AUTH_EXPIRED")) {
@@ -129,7 +158,20 @@ async function loadMessages(relationshipId: number): Promise<void> {
     }
     error.value = String(e);
   } finally {
-    loadingMessages.value = false;
+    if (!background) {
+      loadingMessages.value = false;
+    }
+  }
+}
+
+async function refreshQinbixinMailbox(): Promise<void> {
+  if (!isTauri() || !status.value.logged_in) return;
+  await loadConversations(true);
+  const selectedId = selectedConversationId.value;
+  if (selectedId !== null) {
+    await loadMessages(selectedId, true);
+  } else if (conversations.value.length) {
+    await selectConversation(conversations.value[0]);
   }
 }
 
@@ -288,6 +330,7 @@ export function useQinbixin() {
     devAccounts,
     refreshQinbixinStatus,
     loadConversations,
+    refreshQinbixinMailbox,
     selectConversation,
     login,
     logout,
