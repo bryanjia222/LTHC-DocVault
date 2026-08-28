@@ -57,6 +57,7 @@ export const enUS = {
     removeAttachment: "Remove attachment",
     attachmentDownload: "Download attachment",
     openExternally: "Open in external browser",
+    previewImage: "Preview image",
     send: "Send",
     sendSucceeded: "Letter sent",
     sendFailed: "Failed to send",

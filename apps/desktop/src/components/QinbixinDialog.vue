@@ -54,6 +54,7 @@ interface PendingMedia {
 }
 
 const pendingMedia = ref<PendingMedia[]>([]);
+const previewImage = ref<string | null>(null);
 
 let progressUnlisten: (() => void) | null = null;
 
@@ -287,6 +288,14 @@ function removeMedia(localPath: string): void {
   );
 }
 
+function openImagePreview(url: string): void {
+  previewImage.value = url;
+}
+
+function closeImagePreview(): void {
+  previewImage.value = null;
+}
+
 async function openMessageLink(event: MouseEvent) {
   if (!(event.target instanceof Element)) return;
   const link = event.target.closest("a");
@@ -426,8 +435,8 @@ async function openExternalUrl(url: string): Promise<void> {
                   :key="image"
                   class="media-thumb"
                   type="button"
-                  :title="t('qinbixin.openExternally')"
-                  @click="openExternalUrl(image)"
+                  :title="t('qinbixin.previewImage')"
+                  @click="openImagePreview(image)"
                 >
                   <img :src="image" :alt="message.title" />
                 </button>
@@ -558,6 +567,18 @@ async function openExternalUrl(url: string): Promise<void> {
         <X aria-hidden="true" />
       </button>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="previewImage"
+        class="image-lightbox"
+        @click="closeImagePreview"
+      >
+        <img :src="previewImage" alt="" @click.stop />
+        <button class="lightbox-close" type="button" @click="closeImagePreview">
+          <X aria-hidden="true" />
+        </button>
+      </div>
+    </Teleport>
     <p v-if="error" class="backend-error">{{ error }}</p>
   </BaseModal>
 </template>
@@ -991,5 +1012,52 @@ async function openExternalUrl(url: string): Promise<void> {
   to {
     transform: rotate(360deg);
   }
+}
+</style>
+
+<style>
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.75);
+  cursor: zoom-out;
+}
+
+.image-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  object-fit: contain;
+  cursor: default;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+}
+
+.lightbox-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 </style>

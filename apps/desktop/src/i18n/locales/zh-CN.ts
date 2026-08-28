@@ -55,6 +55,7 @@ export const zhCN = {
     removeAttachment: "移除附件",
     attachmentDownload: "附件下载",
     openExternally: "使用外部浏览器打开",
+    previewImage: "预览图片",
     send: "发送",
     sendSucceeded: "信件已发送",
     sendFailed: "发送失败",
