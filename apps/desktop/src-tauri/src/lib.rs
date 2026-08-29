@@ -1,5 +1,6 @@
 mod bridge;
 mod commands;
+#[cfg(debug_assertions)]
 mod devtools;
 mod dto;
 mod jobs;
@@ -126,7 +127,6 @@ pub fn run() {
             commands::set_log_level,
             commands::connect_vault,
             commands::probe_vault,
-            commands::open_devtools,
             commands::repo_size,
             commands::preview_version,
             jobs::commit_document,
@@ -173,6 +173,9 @@ pub fn run() {
             qinbixin::qinbixin_dev_accounts,
             #[cfg(debug_assertions)]
             qinbixin::qinbixin_login_dev_account,
+            #[cfg(debug_assertions)]
+            commands::open_devtools,
+            #[cfg(debug_assertions)]
             devtools::reset_to_stage,
         ])
         .build(tauri::generate_context!())

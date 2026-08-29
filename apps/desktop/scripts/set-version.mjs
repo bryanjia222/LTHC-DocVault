@@ -14,9 +14,8 @@ import { fileURLToPath } from "node:url";
 // version is passed explicitly as argv[2].
 const version =
   process.argv[2] ||
-  JSON.parse(
-    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-  ).version;
+  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+    .version;
 const cargoPath =
   process.argv[3] ||
   fileURLToPath(new URL("../src-tauri/Cargo.toml", import.meta.url));

@@ -461,7 +461,10 @@ dev/test functionality into release builds.
 
 When touching dev-gated code, confirm the release output is clean:
 
-* Frontend: build once and grep `dist/` for dev-only strings.
+* Frontend: build once and confirm dev-only capabilities are unreachable -
+  gated UI never renders and gated `invoke()` calls target backend commands
+  that release builds do not register. Small inert string references inside
+  the JS bundle are acceptable; unreachable backend commands are what matter.
 * Rust: `cargo build --release` binaries must not contain dev-only strings
   (use `strings` or an equivalent search when unsure).
 

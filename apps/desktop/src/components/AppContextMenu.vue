@@ -18,6 +18,7 @@ import { useVaultActions } from "../composables/useVaultActions";
  */
 
 const { t } = useI18n();
+const isDev = import.meta.env.DEV;
 const { isDevMode } = useDevMode();
 const { refreshAll } = useVaultActions();
 
@@ -86,7 +87,7 @@ onBeforeUnmount(() => {
         {{ t("actions.refresh") }}
       </button>
       <button
-        v-if="isDevMode"
+        v-if="isDev && isDevMode"
         type="button"
         class="context-item"
         @click="inspect"

@@ -147,6 +147,7 @@ pub fn probe_vault(root_dir: String) -> Result<VaultProbe, String> {
 
 /// Open the webview devtools (developer mode -> right-click -> inspect). Requires
 /// the `devtools` tauri feature, which is enabled for this crate.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub fn open_devtools(app: AppHandle) -> Result<(), String> {
     let window = app

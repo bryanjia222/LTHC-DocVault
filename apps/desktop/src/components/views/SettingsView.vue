@@ -222,7 +222,7 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
                 </select>
               </dd>
             </div>
-            <div>
+            <div v-if="isDev">
               <dt>{{ t("settings.devMode") }}</dt>
               <dd>
                 <div class="segmented-control">
