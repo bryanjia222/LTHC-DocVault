@@ -202,8 +202,7 @@ fn decode_html(bytes: &[u8]) -> String {
     // Strip quotes so `<meta charset="gbk">` and `charset=gbk` both match.
     let head_norm = String::from_utf8_lossy(head)
         .to_ascii_lowercase()
-        .replace('"', "")
-        .replace('\'', "");
+        .replace(['"', '\''], "");
     let encoding = if head_norm.contains("charset=gbk") || head_norm.contains("charset=gb2312") {
         Some(encoding_rs::GBK)
     } else if head_norm.contains("charset=big5") {
@@ -243,14 +242,8 @@ fn extract_icon_href(html: &str) -> Option<String> {
     let lower = html.to_ascii_lowercase();
     let mut search_from = 0usize;
     while search_from < lower.len() {
-        let Some(lt) = lower[search_from..].find("<link") else {
-            return None;
-        };
-        let lt = lt + search_from;
-        let Some(gt) = lower[lt..].find('>') else {
-            return None;
-        };
-        let gt = gt + lt;
+        let lt = lower[search_from..].find("<link")? + search_from;
+        let gt = lower[lt..].find('>')? + lt;
         let tag = &html[lt..gt];
         if let Some(rel) = attr_value(tag, "rel") {
             if rel.to_ascii_lowercase().contains("icon") {
@@ -272,9 +265,7 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
     let needle = format!("{name}=");
     let mut idx = 0usize;
     while idx < lower.len() {
-        let Some(pos) = lower[idx..].find(&needle) else {
-            return None;
-        };
+        let pos = lower[idx..].find(&needle)?;
         let eq = idx + pos + needle.len();
         let after = &lower[eq..];
         let value = if after.starts_with('"') || after.starts_with('\'') {
@@ -286,9 +277,7 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
             }
             &tag[vs..ve]
         } else {
-            let end = after
-                .find(|c: char| c == ' ' || c == '>')
-                .unwrap_or(after.len());
+            let end = after.find([' ', '>']).unwrap_or(after.len());
             let ve = eq + end;
             if lower[eq..ve].contains('<') {
                 return None;

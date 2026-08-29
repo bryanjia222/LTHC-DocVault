@@ -40,12 +40,16 @@ function onContentClickCapture(event: MouseEvent): void {
       <span>{{ t("qinbixin.songTitle") }}:</span>
       {{ props.message.song_title }}
     </p>
-    <!-- eslint-disable-next-line vue/no-v-html -->
+    <!-- eslint-disable vue/no-v-html --
+      safeContent is DOMPurify-sanitized in QinbixinDialog before it reaches
+      this card. The disable spans the multi-line element because
+      disable-next-line only covers the immediately following line. -->
     <div
       class="message-content"
       @click.capture="onContentClickCapture"
       v-html="props.message.safeContent"
     />
+    <!-- eslint-enable vue/no-v-html -->
     <div v-if="props.message.tags.length" class="message-tags">
       <span v-for="tag in props.message.tags" :key="tag"># {{ tag }}</span>
     </div>
