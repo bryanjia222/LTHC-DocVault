@@ -253,10 +253,6 @@ async function submitMessage() {
     videoUrls: mediaUrls("video"),
     fileUrls: mediaUrls("file"),
   };
-  const hasMedia =
-    media.imageUrls.length > 0 ||
-    media.videoUrls.length > 0 ||
-    media.fileUrls.length > 0;
   const recipientId = sendRecipientId.value;
   if (!recipientId) {
     sendFeedback.value = t("qinbixin.recipientRequired");
@@ -264,9 +260,6 @@ async function submitMessage() {
   }
   if (!sendTitle.value.trim()) {
     sendFeedback.value = t("qinbixin.titleRequired");
-    return;
-  }
-  if (!sendContent.value.trim() && !hasMedia) {
     return;
   }
   const result = await sendMessage(
@@ -621,6 +614,7 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .mail-root {
+  height: min(72vh, 680px);
   min-height: 420px;
   user-select: text;
   -webkit-user-select: text;
@@ -697,9 +691,10 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .message-panel {
+  flex: 1;
   display: flex;
   min-width: 0;
-  min-height: 420px;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
   user-select: text;
@@ -707,8 +702,8 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .message-scroll {
+  flex: 1;
   min-height: 0;
-  max-height: 300px;
   overflow: auto;
   display: grid;
   gap: 10px;
@@ -721,9 +716,10 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .outbox-panel {
+  flex: 1;
   display: flex;
   min-width: 0;
-  min-height: 420px;
+  min-height: 0;
   flex-direction: column;
   gap: 10px;
   user-select: text;
@@ -731,7 +727,7 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .compose-view {
-  min-height: 420px;
+  min-height: 0;
   user-select: text;
   -webkit-user-select: text;
 }
