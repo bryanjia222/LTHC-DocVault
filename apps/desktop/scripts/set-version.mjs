@@ -1,7 +1,7 @@
-// Stamp a release version (derived from a git tag) into src-tauri/Cargo.toml's
-// [package] version, so the bundled app version matches the tag. tauri.conf.json
-// omits `version`, so Tauri reads it from Cargo.toml. Run by the release CI only;
-// the change is not committed (it lives in the CI checkout for that one build).
+// Stamp the desktop version into src-tauri/Cargo.toml's [package] version, so
+// the bundled app version matches package.json/release tags. tauri.conf.json
+// omits `version`, so Tauri reads it from Cargo.toml. Release CI passes the tag
+// version; `npm version` calls it without an argument to read package.json.
 //
 //   node scripts/set-version.mjs <version> [path/to/Cargo.toml]
 //

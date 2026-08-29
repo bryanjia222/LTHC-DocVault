@@ -1,7 +1,7 @@
 {
   "name": "docvault-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "tauri": "node scripts/tauri.cjs",
     "restic:fetch": "node scripts/fetch-restic.mjs",
     "format": "prettier --write .",
-    "version": "node scripts/set-version.mjs && git add src-tauri/Cargo.toml",
+    "version": "node scripts/set-version.mjs && cargo update --manifest-path src-tauri/Cargo.toml --package docvault-desktop && git add src-tauri/Cargo.toml src-tauri/Cargo.lock",
+    "postversion": "node scripts/version-release.mjs",
     "lint": "eslint . --ext .ts,.vue",
     "test": "vitest run",
     "test:watch": "vitest",

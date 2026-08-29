@@ -411,3 +411,16 @@ level = "info"
 - 协作与权限系统
 - 存储层扩展能力
 - 企业级部署模式
+
+
+
+
+
+# 发布命令
+
+在 `apps/desktop` 中执行 `npm version patch|minor|major`。版本脚本会同步
+`package.json` 与 Cargo 版本，提交并推送 tag；tag push 触发 GitHub Actions release。
+
+## 构建dev版本
+
+npm run tauri dev
