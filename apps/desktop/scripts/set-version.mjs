@@ -7,11 +7,19 @@
 //
 // Only the [package] version is touched; dependency versions are left alone.
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const version = process.argv[2];
+// When called without an argument (npm version lifecycle), read the version
+// that npm just wrote into package.json. When called by release CI, the tag
+// version is passed explicitly as argv[2].
+const version =
+  process.argv[2] ||
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ).version;
 const cargoPath =
   process.argv[3] ||
-  new URL("../src-tauri/Cargo.toml", import.meta.url).pathname;
+  fileURLToPath(new URL("../src-tauri/Cargo.toml", import.meta.url));
 
 if (!version) {
   console.error("set-version: missing <version> argument");
