@@ -424,6 +424,49 @@ Do not wait until architecture becomes difficult to change.
 
 ---
 
+## 3.10 Dev-Only Code Gating
+
+Development-only functionality (test backends, dev accounts, seed/reset
+actions, dev tooling) must be excluded from release builds at compile time.
+Never ship dev code guarded only by a runtime flag.
+
+### Rust
+
+* Gate dev-only items (functions, commands, constants, modules) with
+  `#[cfg(debug_assertions)]`; provide the production variant with
+  `#[cfg(not(debug_assertions))]` when a counterpart is required.
+* NEVER use runtime ifs such as `if cfg!(debug_assertions)`. They leave the
+  dev branch in the source and invite accidental edits to production paths.
+* Register dev-only Tauri commands in `generate_handler!` behind the same
+  `#[cfg(debug_assertions)]` attribute (see the Qinbixin dev commands).
+* Build scripts (`build.rs`) may inject single-value differences
+  (e.g. `cargo:rustc-env`) only when a branch-free single code path is
+  genuinely required; prefer cfg-split functions.
+
+### Frontend
+
+* Gate dev-only UI and behavior with `import.meta.env.DEV`. Vite statically
+  replaces it with `false` and tree-shakes the dead branch in production
+  builds, so gated code never ships.
+* Do not invent custom runtime dev flags for build-time gating.
+
+### Runtime Toggles Are Not Dev Gating
+
+A user-facing toggle persisted at runtime (e.g. a localStorage-backed
+preference) is a product decision, not build-time gating. If such a toggle
+ships, it must be intentional and documented; do not use it to smuggle
+dev/test functionality into release builds.
+
+### Verification
+
+When touching dev-gated code, confirm the release output is clean:
+
+* Frontend: build once and grep `dist/` for dev-only strings.
+* Rust: `cargo build --release` binaries must not contain dev-only strings
+  (use `strings` or an equivalent search when unsure).
+
+---
+
 # 4. Testing Requirements
 
 ## 4.1 Required Test Types

@@ -55,6 +55,20 @@ fn dev_restic_asset() -> Option<PathBuf> {
     }
 }
 
+/// Title stamped onto the main window at startup so the title bar always
+/// matches Cargo.toml (the version the release CI stamps from the git tag).
+/// cfg-split per the dev-gating rule in AGENTS.md: the dev variant - and its
+/// suffix string - is absent from release builds entirely.
+#[cfg(debug_assertions)]
+fn window_title() -> String {
+    format!("兰天嗨彩办公文档管理（Dev） v{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[cfg(not(debug_assertions))]
+fn window_title() -> String {
+    format!("兰天嗨彩办公文档管理 v{}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn run() {
     // Linux graphics-compat prep (first-run EGL probe + software-rendering env
     // injection) runs before the builder so the env vars are in place before
@@ -80,11 +94,7 @@ pub fn run() {
             // release tag). tauri.conf.json carries the title without a version
             // as the pre-load value.
             if let Some(window) = app.get_webview_window("main") {
-                let dev_suffix = if cfg!(debug_assertions) { "（Dev）" } else { "" };
-                let _ = window.set_title(&format!(
-                    "兰天嗨彩办公文档管理{dev_suffix} v{}",
-                    env!("CARGO_PKG_VERSION")
-                ));
+                let _ = window.set_title(&window_title());
             }
             // Resolve the bundled restic binary once and stash it in app state;
             // every vault open/init injects it as an explicit override. `None`
