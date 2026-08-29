@@ -24,6 +24,7 @@ const version = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ).version;
 const tag = `v${version}`;
+const shouldPush = process.argv.includes("--push");
 const branch = git("symbolic-ref", "--short", "HEAD");
 const versionFiles = [
   "package.json",
@@ -37,7 +38,7 @@ if (branch !== "main") {
   process.exit(1);
 }
 
-if (tagExists(tag)) {
+if (!shouldPush && tagExists(tag)) {
   console.error(`version-release: tag ${tag} already exists`);
   process.exit(1);
 }
@@ -67,7 +68,15 @@ if (hasVersionChanges) {
   );
 }
 
-git("tag", tag);
-git("push", "origin", "main", tag);
+if (!tagExists(tag)) {
+  git("tag", tag);
+}
 
-console.log(`version-release: pushed ${branch} and ${tag}`);
+if (shouldPush) {
+  git("push", "origin", "main", tag);
+  console.log(`version-release: pushed ${branch} and ${tag}`);
+} else {
+  console.log(
+    `version-release: created local ${tag}; run npm run release to publish`,
+  );
+}

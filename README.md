@@ -419,7 +419,13 @@ level = "info"
 # 发布命令
 
 在 `apps/desktop` 中执行 `npm version patch|minor|major`。版本脚本会同步
-`package.json` 与 Cargo 版本，提交并推送 tag；tag push 触发 GitHub Actions release。
+`package.json` 与 Cargo 版本，提交并创建本地 tag；默认不推送，也不触发 release。
+
+正式发布时执行：
+
+npm run release
+
+该命令会推送 `main` 与当前版本 tag，并由 tag push 触发 GitHub Actions release。
 
 ## 构建dev版本
 
