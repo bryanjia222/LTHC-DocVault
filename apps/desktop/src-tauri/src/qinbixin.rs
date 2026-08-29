@@ -96,6 +96,8 @@ pub struct QinbixinMessage {
     pub sender_name: String,
     pub sender_avatar: String,
     #[serde(skip_serializing_if = "String::is_empty")]
+    pub conversation_title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub sent_time: String,
     #[serde(default)]
     pub images: Vec<String>,
@@ -882,20 +884,65 @@ pub async fn qinbixin_messages(
     if token.is_empty() {
         return Err("AUTH_EXPIRED".to_owned());
     }
+    let raw =
+        fetch_raw_messages(&environment, &app, &state.qinbixin, &token, relationship_id).await?;
+    Ok(map_raw_messages(raw, environment.base_url()))
+}
+
+async fn fetch_raw_messages(
+    environment: &QinbixinEnvironment,
+    app: &AppHandle,
+    session: &std::sync::Mutex<QinbixinSession>,
+    token: &str,
+    relationship_id: i64,
+) -> Result<Vec<RawMessage>, String> {
     let path = format!(
         "/API/Web/Works/GetWorksPageList?PageIndex=1&PageSize=50&RelationshipId={relationship_id}"
     );
     let (envelope, new_token) = request_json::<Vec<RawMessage>>(
         environment.base_url(),
-        &token,
+        token,
         reqwest::Method::GET,
         &path,
         None,
     )
     .await?;
     let raw = mapped_error(envelope)?;
-    store_new_token(&app, &state.qinbixin, &new_token)?;
-    Ok(raw
+    store_new_token(app, session, &new_token)?;
+    Ok(raw)
+}
+
+#[tauri::command]
+pub async fn qinbixin_inbox(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Vec<QinbixinMessage>, String> {
+    let environment = load_environment(&app);
+    let conversations = load_conversations(&app, &state).await?;
+    let mut messages = Vec::new();
+
+    for conversation in conversations {
+        let token = state.qinbixin.lock().unwrap().token.clone();
+        if token.is_empty() {
+            return Err("AUTH_EXPIRED".to_owned());
+        }
+        let raw_messages =
+            fetch_raw_messages(&environment, &app, &state.qinbixin, &token, conversation.id)
+                .await?;
+        let mut mapped = map_raw_messages(raw_messages, environment.base_url());
+        for message in &mut mapped {
+            message.conversation_title = conversation.title.clone();
+        }
+        messages.extend(mapped);
+    }
+
+    messages.sort_by_key(|message| std::cmp::Reverse(message.id));
+    messages.dedup_by(|left, right| left.id == right.id);
+    Ok(messages)
+}
+
+fn map_raw_messages(items: Vec<RawMessage>, base_url: &str) -> Vec<QinbixinMessage> {
+    items
         .into_iter()
         .map(|item| QinbixinMessage {
             id: item.id,
@@ -911,27 +958,51 @@ pub async fn qinbixin_messages(
                     nick_name
                 }
             },
-            sender_avatar: absolute_url(
-                environment.base_url(),
-                item.avatar_url.unwrap_or_default(),
-            ),
+            conversation_title: String::new(),
+            sender_avatar: absolute_url(base_url, item.avatar_url.unwrap_or_default()),
             sent_time: item.send_time.unwrap_or_default(),
             images: item
                 .images
                 .unwrap_or_default()
                 .into_iter()
-                .map(|url| absolute_url(environment.base_url(), url))
+                .map(|url| absolute_url(base_url, url))
                 .collect(),
             videos: item
                 .videos
                 .unwrap_or_default()
                 .into_iter()
-                .map(|url| absolute_url(environment.base_url(), url))
+                .map(|url| absolute_url(base_url, url))
                 .collect(),
-            file_url: absolute_url(environment.base_url(), item.file_url.unwrap_or_default()),
+            file_url: absolute_url(base_url, item.file_url.unwrap_or_default()),
             tags: item.tags.unwrap_or_default(),
         })
-        .collect())
+        .collect()
+}
+
+#[tauri::command]
+pub async fn qinbixin_outbox(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Vec<QinbixinMessage>, String> {
+    let environment = load_environment(&app);
+    let token = state.qinbixin.lock().unwrap().token.clone();
+    if token.is_empty() {
+        return Err("AUTH_EXPIRED".to_owned());
+    }
+    let path =
+        "/API/Web/Works/GetSelfWorksPageList?PageIndex=1&PageSize=50&WorkType=5&WorkAuditType=15"
+            .to_owned();
+    let (envelope, new_token) = request_json::<Vec<RawMessage>>(
+        environment.base_url(),
+        &token,
+        reqwest::Method::GET,
+        &path,
+        None,
+    )
+    .await?;
+    let raw = mapped_error(envelope)?;
+    store_new_token(&app, &state.qinbixin, &new_token)?;
+    Ok(map_raw_messages(raw, environment.base_url()))
 }
 
 #[tauri::command]

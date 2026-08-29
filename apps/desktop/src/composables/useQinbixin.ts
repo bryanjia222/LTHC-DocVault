@@ -42,6 +42,7 @@ export interface QinbixinMessage {
   sender_id: number;
   sender_name: string;
   sender_avatar: string;
+  conversation_title?: string;
   sent_time: string;
   images: string[];
   videos: string[];
@@ -71,8 +72,10 @@ const conversations = ref<QinbixinConversation[]>([]);
 const selectedConversationId = ref<number | null>(null);
 const selectedConversation = ref<QinbixinConversation | null>(null);
 const messages = ref<QinbixinMessage[]>([]);
+const outboxMessages = ref<QinbixinMessage[]>([]);
 const loadingConversations = ref(false);
 const loadingMessages = ref(false);
+const loadingOutbox = ref(false);
 const sending = ref(false);
 const uploadingMedia = ref(false);
 const switchingEnvironment = ref(false);
@@ -185,15 +188,34 @@ async function loadMessages(
 
 async function refreshQinbixinMailbox(): Promise<void> {
   if (!isTauri() || !status.value.logged_in) return;
-  await loadConversations(true);
-  const selectedId = selectedConversationId.value;
-  if (selectedId !== null) {
-    await loadMessages(selectedId, true);
-  } else if (conversations.value.length) {
-    const conversation = conversations.value[0];
-    selectedConversationId.value = conversation.id;
-    selectedConversation.value = conversation;
-    await loadMessages(conversation.id, true);
+  await loadInbox(true);
+}
+
+async function loadOutbox(): Promise<void> {
+  if (!isTauri()) return;
+  const background = outboxMessages.value.length > 0;
+  if (!background) {
+    loadingOutbox.value = true;
+  }
+  try {
+    const next = await invoke<QinbixinMessage[]>("qinbixin_outbox");
+    if (JSON.stringify(outboxMessages.value) !== JSON.stringify(next)) {
+      outboxMessages.value = next;
+    }
+    error.value = "";
+  } catch (e) {
+    if (String(e).includes("AUTH_EXPIRED")) {
+      status.value = {
+        ...status.value,
+        logged_in: false,
+        has_unread: false,
+      };
+    }
+    error.value = String(e);
+  } finally {
+    if (!background) {
+      loadingOutbox.value = false;
+    }
   }
 }
 
@@ -212,6 +234,33 @@ async function selectConversation(
   await loadMessages(conversation.id);
   if (conversation.unread) {
     await markConversationRead(conversation);
+  }
+}
+
+async function loadInbox(background = false): Promise<void> {
+  if (!isTauri()) return;
+  if (!background) {
+    loadingMessages.value = true;
+  }
+  try {
+    const next = await invoke<QinbixinMessage[]>("qinbixin_inbox");
+    if (JSON.stringify(messages.value) !== JSON.stringify(next)) {
+      messages.value = next;
+    }
+    error.value = "";
+  } catch (e) {
+    if (String(e).includes("AUTH_EXPIRED")) {
+      status.value = {
+        ...status.value,
+        logged_in: false,
+        has_unread: false,
+      };
+    }
+    error.value = String(e);
+  } finally {
+    if (!background) {
+      loadingMessages.value = false;
+    }
   }
 }
 
@@ -256,6 +305,7 @@ async function logout(): Promise<void> {
   selectedConversationId.value = null;
   selectedConversation.value = null;
   messages.value = [];
+  outboxMessages.value = [];
   error.value = "";
 }
 
@@ -264,6 +314,7 @@ function clearConversationState(): void {
   selectedConversationId.value = null;
   selectedConversation.value = null;
   messages.value = [];
+  outboxMessages.value = [];
 }
 
 async function setEnvironment(environment: QinbixinEnvironment): Promise<void> {
@@ -344,7 +395,8 @@ async function sendMessage(
       },
     );
     if (result.success) {
-      await loadMessages(relationshipId);
+      await loadInbox();
+      await loadOutbox();
       await refreshQinbixinStatus();
     }
     return result;
@@ -420,8 +472,10 @@ export function useQinbixin() {
     selectedConversationId,
     selectedConversation,
     messages,
+    outboxMessages,
     loadingConversations,
     loadingMessages,
+    loadingOutbox,
     sending,
     uploadingMedia,
     uploadError,
@@ -432,6 +486,8 @@ export function useQinbixin() {
     refreshQinbixinStatus,
     loadConversations,
     refreshQinbixinMailbox,
+    loadInbox,
+    loadOutbox,
     selectConversation,
     login,
     logout,

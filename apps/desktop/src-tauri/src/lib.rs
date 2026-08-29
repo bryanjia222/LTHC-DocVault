@@ -149,6 +149,8 @@ pub fn run() {
             qinbixin::qinbixin_logout,
             qinbixin::qinbixin_conversations,
             qinbixin::qinbixin_messages,
+            qinbixin::qinbixin_inbox,
+            qinbixin::qinbixin_outbox,
             qinbixin::qinbixin_send,
             qinbixin::qinbixin_upload,
             qinbixin::qinbixin_thumbnail,

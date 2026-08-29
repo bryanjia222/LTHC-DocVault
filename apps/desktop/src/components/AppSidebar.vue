@@ -19,6 +19,7 @@ import {
   Pencil,
   Plus,
   Settings,
+  Send,
   Trash2,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
@@ -98,8 +99,12 @@ function openQuickLink(link: QuickLink) {
 
 const qinbixinDialogOpen = ref(false);
 
-function openQinbixin() {
+type QinbixinView = "inbox" | "outbox" | "compose";
+const qinbixinInitialView = ref<QinbixinView>("inbox");
+
+function openQinbixin(view: QinbixinView = "inbox") {
   closeMenu();
+  qinbixinInitialView.value = view;
   qinbixinDialogOpen.value = true;
 }
 
@@ -478,8 +483,8 @@ function indentFor(depth: number): string {
         <button
           class="nav-main"
           type="button"
-          :title="t('qinbixin.openMail')"
-          @click="openQinbixin"
+          :title="t('qinbixin.openInbox')"
+          @click="openQinbixin()"
         >
           <Mail class="nav-icon" aria-hidden="true" />
           <span class="qinbixin-name">{{ t("qinbixin.title") }}</span>
@@ -508,6 +513,7 @@ function indentFor(depth: number): string {
 
       <QinbixinDialog
         :open="qinbixinDialogOpen"
+        :initial-view="qinbixinInitialView"
         @close="qinbixinDialogOpen = false"
       />
 
@@ -826,9 +832,21 @@ function indentFor(depth: number): string {
           </template>
           <template v-else-if="menuTarget?.kind === 'qinbixin'">
             <li>
-              <button type="button" @click="openQinbixin">
+              <button type="button" @click="openQinbixin('inbox')">
                 <Mail class="nav-icon" aria-hidden="true" />
-                {{ t("qinbixin.mail") }}
+                {{ t("qinbixin.inboxTab") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="openQinbixin('outbox')">
+                <Send class="nav-icon" aria-hidden="true" />
+                {{ t("qinbixin.outboxTab") }}
+              </button>
+            </li>
+            <li>
+              <button type="button" @click="openQinbixin('compose')">
+                <Pencil class="nav-icon" aria-hidden="true" />
+                {{ t("qinbixin.composeTab") }}
               </button>
             </li>
             <li class="ctx-divider" />
@@ -836,7 +854,7 @@ function indentFor(depth: number): string {
               <button
                 v-if="!qinbixinStatus.logged_in"
                 type="button"
-                @click="openQinbixin"
+                @click="openQinbixin('inbox')"
               >
                 <LogIn class="nav-icon" aria-hidden="true" />
                 {{ t("qinbixin.login") }}

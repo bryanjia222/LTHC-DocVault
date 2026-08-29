@@ -9,11 +9,15 @@ import { listen } from "@tauri-apps/api/event";
 import { File, Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
 
 import BaseModal from "./BaseModal.vue";
+import QinbixinMessageCard from "./QinbixinMessageCard.vue";
 import { openUrl } from "../composables/useVault";
 import { useQinbixin, type QinbixinMedia } from "../composables/useQinbixin";
 
+type QinbixinView = "inbox" | "outbox" | "compose";
+
 const props = defineProps<{
   open: boolean;
+  initialView?: QinbixinView;
 }>();
 
 const emit = defineEmits<{ close: [] }>();
@@ -23,15 +27,16 @@ const {
   status,
   conversations,
   selectedConversationId,
-  selectedConversation,
   messages,
-  loadingConversations,
+  outboxMessages,
   loadingMessages,
+  loadingOutbox,
   sending,
   uploadingMedia,
   error,
+  loadConversations,
   refreshQinbixinMailbox,
-  selectConversation,
+  loadOutbox,
   login,
   sendMessage,
   pickMediaPaths,
@@ -45,6 +50,8 @@ const loggingIn = ref(false);
 const sendTitle = ref("");
 const sendContent = ref("");
 const sendFeedback = ref("");
+const activeView = ref<QinbixinView>("inbox");
+const sendRecipientId = ref<number | null>(null);
 
 interface PendingMedia {
   kind: "image" | "video" | "file";
@@ -56,6 +63,62 @@ interface PendingMedia {
 }
 
 const pendingMedia = ref<PendingMedia[]>([]);
+
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    "p",
+    "br",
+    "strong",
+    "em",
+    "b",
+    "i",
+    "u",
+    "s",
+    "strike",
+    "span",
+    "a",
+    "img",
+    "video",
+    "audio",
+    "source",
+    "ol",
+    "ul",
+    "li",
+    "blockquote",
+    "pre",
+    "code",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "td",
+    "th",
+  ],
+  ALLOWED_ATTR: [
+    "href",
+    "target",
+    "rel",
+    "src",
+    "alt",
+    "type",
+    "controls",
+    "preload",
+    "width",
+    "height",
+    "style",
+    "class",
+    "colspan",
+    "rowspan",
+  ],
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|data:image\/|\/|#)/i,
+};
 
 let progressUnlisten: (() => void) | null = null;
 
@@ -78,70 +141,47 @@ const dialogTitle = computed(() => {
   if (!status.value.logged_in) {
     return t("qinbixin.loginTitle");
   }
-  return t("qinbixin.mailTitle");
+  const keys: Record<QinbixinView, string> = {
+    inbox: "qinbixin.inboxTitle",
+    outbox: "qinbixin.outboxTitle",
+    compose: "qinbixin.composeTitle",
+  };
+  return t(keys[activeView.value]);
 });
 
 const sanitizedMessages = computed(() =>
-  messages.value.map((message) => ({
+  messages.value
+    .filter((message) => message.sender_id !== status.value.profile?.id)
+    .map((message) => ({
+      ...message,
+      safeContent: DOMPurify.sanitize(message.content, SANITIZE_CONFIG),
+      incoming: true,
+    })),
+);
+
+const sanitizedOutbox = computed(() =>
+  outboxMessages.value.map((message) => ({
     ...message,
-    safeContent: DOMPurify.sanitize(message.content, {
-      ALLOWED_TAGS: [
-        "p",
-        "br",
-        "strong",
-        "em",
-        "b",
-        "i",
-        "u",
-        "s",
-        "strike",
-        "span",
-        "a",
-        "img",
-        "video",
-        "audio",
-        "source",
-        "ol",
-        "ul",
-        "li",
-        "blockquote",
-        "pre",
-        "code",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "hr",
-        "table",
-        "thead",
-        "tbody",
-        "tr",
-        "td",
-        "th",
-      ],
-      ALLOWED_ATTR: [
-        "href",
-        "target",
-        "rel",
-        "src",
-        "alt",
-        "type",
-        "controls",
-        "preload",
-        "width",
-        "height",
-        "style",
-        "class",
-        "colspan",
-        "rowspan",
-      ],
-      ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|data:image\/|\/|#)/i,
-    }),
-    incoming: message.sender_id !== status.value.profile?.id,
+    safeContent: DOMPurify.sanitize(message.content, SANITIZE_CONFIG),
   })),
 );
+
+const inboxConversationById = computed(() => {
+  const titles = new Map<number, string>();
+  for (const message of messages.value) {
+    if (message.conversation_title) {
+      titles.set(message.id, message.conversation_title);
+    }
+  }
+  return titles;
+});
+
+function outboxParticipant(message: { id: number }): string {
+  return (
+    inboxConversationById.value.get(message.id) ||
+    t("qinbixin.unknownRecipient")
+  );
+}
 
 function mediaUrls(kind: PendingMedia["kind"]): string[] {
   return pendingMedia.value
@@ -170,12 +210,26 @@ watch(
   () => [props.open, status.value.logged_in] as const,
   ([open, loggedIn]) => {
     if (open && loggedIn) {
+      activeView.value = props.initialView ?? "inbox";
+      if (activeView.value === "compose") {
+        sendRecipientId.value = selectedConversationId.value;
+      }
+      void loadConversations(true);
       startMailboxPolling();
     } else {
       stopMailboxPolling();
     }
   },
 );
+
+watch(activeView, (view) => {
+  if (view === "compose" && sendRecipientId.value === null) {
+    sendRecipientId.value = selectedConversationId.value;
+  }
+  if (view === "outbox" && status.value.logged_in) {
+    void loadOutbox();
+  }
+});
 
 onBeforeUnmount(() => {
   stopMailboxPolling();
@@ -194,7 +248,6 @@ async function submitLogin() {
 }
 
 async function submitMessage() {
-  const conversation = selectedConversation.value;
   const media: QinbixinMedia = {
     imageUrls: mediaUrls("image"),
     videoUrls: mediaUrls("video"),
@@ -204,7 +257,11 @@ async function submitMessage() {
     media.imageUrls.length > 0 ||
     media.videoUrls.length > 0 ||
     media.fileUrls.length > 0;
-  if (!conversation) return;
+  const recipientId = sendRecipientId.value;
+  if (!recipientId) {
+    sendFeedback.value = t("qinbixin.recipientRequired");
+    return;
+  }
   if (!sendTitle.value.trim()) {
     sendFeedback.value = t("qinbixin.titleRequired");
     return;
@@ -213,7 +270,7 @@ async function submitMessage() {
     return;
   }
   const result = await sendMessage(
-    conversation.id,
+    recipientId,
     sendTitle.value.trim(),
     sendContent.value,
     media,
@@ -371,205 +428,179 @@ async function openExternalUrl(url: string): Promise<void> {
       </button>
     </form>
 
-    <div v-else class="message-layout">
-      <aside class="conversation-list">
-        <div v-if="loadingConversations" class="list-state">
+    <div v-else class="mail-root">
+      <nav class="mail-tabs">
+        <button
+          type="button"
+          :class="{ active: activeView === 'inbox' }"
+          @click="activeView = 'inbox'"
+        >
+          {{ t("qinbixin.inboxTab") }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'outbox' }"
+          @click="activeView = 'outbox'"
+        >
+          {{ t("qinbixin.outboxTab") }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'compose' }"
+          @click="activeView = 'compose'"
+        >
+          {{ t("qinbixin.composeTab") }}
+        </button>
+      </nav>
+
+      <section v-if="activeView === 'inbox'" class="message-panel">
+        <div v-if="loadingMessages" class="list-state">
           <Loader2 class="spin" aria-hidden="true" />
         </div>
-        <p v-else-if="conversations.length === 0" class="list-state">
-          {{ t("qinbixin.noConversations") }}
-        </p>
-        <button
-          v-for="conversation in conversations"
-          v-else
-          :key="conversation.id"
-          class="conversation"
-          :class="{ selected: selectedConversationId === conversation.id }"
-          type="button"
-          @click="selectConversation(conversation)"
-        >
-          <img
-            v-if="conversation.avatar"
-            class="avatar"
-            :src="conversation.avatar"
-            alt=""
+        <div v-else-if="sanitizedMessages.length" class="message-scroll">
+          <QinbixinMessageCard
+            v-for="message in sanitizedMessages"
+            :key="message.id"
+            :message="message"
+            :incoming="message.incoming"
+            :participant="message.sender_name || t('qinbixin.unknownSender')"
+            @preview-image="openImagePreview"
+            @open-link="openMessageLink"
+            @open-external="openExternalUrl"
           />
-          <span v-else class="avatar fallback">{{
-            conversation.title.slice(0, 1)
-          }}</span>
-          <span class="conversation-text">
-            <span class="conversation-title">{{ conversation.title }}</span>
-            <span class="conversation-preview">{{
-              conversation.preview || t("qinbixin.noPreview")
-            }}</span>
-          </span>
-          <span v-if="conversation.unread" class="unread-dot" />
-        </button>
-      </aside>
-
-      <section class="message-panel">
-        <div v-if="!selectedConversation" class="list-state">
-          {{ t("qinbixin.selectConversation") }}
         </div>
-        <template v-else>
-          <div class="message-scroll">
-            <div v-if="loadingMessages" class="list-state">
-              <Loader2 class="spin" aria-hidden="true" />
-            </div>
-            <article
-              v-for="message in sanitizedMessages"
-              v-else-if="sanitizedMessages.length > 0"
-              :key="message.id"
-              class="message"
-              :class="{ incoming: message.incoming }"
-            >
-              <header class="message-header">
-                <strong>{{ message.title }}</strong>
-                <span class="message-time">{{ message.sent_time }}</span>
-              </header>
-              <p v-if="message.song_title" class="message-song">
-                <span>{{ t("qinbixin.songTitle") }}:</span>
-                {{ message.song_title }}
-              </p>
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div
-                class="message-content"
-                @click.capture="openMessageLink"
-                v-html="message.safeContent"
-              />
-              <div v-if="message.tags.length" class="message-tags">
-                <span v-for="tag in message.tags" :key="tag"># {{ tag }}</span>
-              </div>
-              <div v-if="message.images.length" class="media-grid">
-                <button
-                  v-for="image in message.images"
-                  :key="image"
-                  class="media-thumb"
-                  type="button"
-                  :title="t('qinbixin.previewImage')"
-                  @click="openImagePreview(image)"
-                >
-                  <img :src="image" :alt="message.title" />
-                </button>
-              </div>
-              <div v-if="message.videos.length" class="media-grid">
-                <video
-                  v-for="video in message.videos"
-                  :key="video"
-                  controls
-                  preload="metadata"
-                  :src="video"
-                />
-              </div>
-              <a
-                v-if="message.file_url"
-                class="attachment-link"
-                :href="message.file_url"
-                @click.prevent="openExternalUrl(message.file_url)"
-              >
-                {{ t("qinbixin.attachmentDownload") }}
-              </a>
-            </article>
-            <p v-else class="list-state">{{ t("qinbixin.noMessages") }}</p>
-          </div>
+        <p v-else class="list-state">{{ t("qinbixin.noMessages") }}</p>
+      </section>
 
-          <div class="compose-form">
-            <input
-              v-model="sendTitle"
-              class="text-input"
-              type="text"
-              :placeholder="t('qinbixin.titlePlaceholder')"
-            />
-            <textarea
-              v-model="sendContent"
-              class="text-input content-input"
-              :placeholder="t('qinbixin.contentPlaceholder')"
-            />
-            <div v-if="pendingMedia.length" class="pending-media">
-              <div
-                v-for="item in pendingMedia"
-                :key="item.localPath"
-                class="media-chip"
+      <section v-else-if="activeView === 'outbox'" class="outbox-panel">
+        <div v-if="loadingOutbox" class="list-state">
+          <Loader2 class="spin" aria-hidden="true" />
+        </div>
+        <div v-else-if="sanitizedOutbox.length" class="message-scroll">
+          <QinbixinMessageCard
+            v-for="message in sanitizedOutbox"
+            :key="message.id"
+            :message="message"
+            :incoming="false"
+            :participant="outboxParticipant(message)"
+            @preview-image="openImagePreview"
+            @open-link="openMessageLink"
+            @open-external="openExternalUrl"
+          />
+        </div>
+        <p v-else class="list-state">{{ t("qinbixin.noMessages") }}</p>
+      </section>
+
+      <form v-else class="compose-view" @submit.prevent="submitMessage">
+        <div class="compose-form">
+          <label class="field">
+            <span>{{ t("qinbixin.recipient") }}</span>
+            <select v-model="sendRecipientId" class="text-input">
+              <option :value="null" disabled>
+                {{ t("qinbixin.selectRecipient") }}
+              </option>
+              <option
+                v-for="conversation in conversations"
+                :key="conversation.id"
+                :value="conversation.id"
               >
-                <div class="media-thumb">
-                  <img
-                    v-if="item.kind === 'image' && item.thumb"
-                    :src="item.thumb"
-                    :alt="item.title"
-                  />
-                  <video
-                    v-else-if="item.kind === 'video' && item.thumb"
-                    :src="item.thumb"
-                    preload="metadata"
-                  />
-                  <File v-else aria-hidden="true" />
-                  <div
-                    v-if="item.progress < 100"
-                    class="progress-ring"
-                    :style="{
-                      background: `conic-gradient(var(--accent) ${item.progress * 3.6}deg, rgba(0, 0, 0, 0.45) ${item.progress * 3.6}deg)`,
-                    }"
-                  >
-                    <span>{{ Math.round(item.progress) }}%</span>
-                  </div>
+                {{ conversation.title }}
+              </option>
+            </select>
+          </label>
+          <input
+            v-model="sendTitle"
+            class="text-input"
+            type="text"
+            :placeholder="t('qinbixin.titlePlaceholder')"
+          />
+          <textarea
+            v-model="sendContent"
+            class="text-input content-input"
+            :placeholder="t('qinbixin.contentPlaceholder')"
+          />
+          <div v-if="pendingMedia.length" class="pending-media">
+            <div
+              v-for="item in pendingMedia"
+              :key="item.localPath"
+              class="media-chip"
+            >
+              <div class="media-thumb">
+                <img
+                  v-if="item.kind === 'image' && item.thumb"
+                  :src="item.thumb"
+                  :alt="item.title"
+                />
+                <video
+                  v-else-if="item.kind === 'video' && item.thumb"
+                  :src="item.thumb"
+                  preload="metadata"
+                />
+                <File v-else aria-hidden="true" />
+                <div
+                  v-if="item.progress < 100"
+                  class="progress-ring"
+                  :style="{
+                    background: `conic-gradient(var(--accent) ${item.progress * 3.6}deg, rgba(0, 0, 0, 0.45) ${item.progress * 3.6}deg)`,
+                  }"
+                >
+                  <span>{{ Math.round(item.progress) }}%</span>
                 </div>
-                <span class="media-title">{{ item.title }}</span>
-                <button
-                  type="button"
-                  :title="t('qinbixin.removeAttachment')"
-                  @click="removeMedia(item.localPath)"
-                >
-                  <X aria-hidden="true" />
-                </button>
               </div>
-            </div>
-            <div class="compose-actions">
-              <div class="media-actions">
-                <button
-                  class="icon-button media-button"
-                  type="button"
-                  :title="t('qinbixin.addImage')"
-                  :disabled="uploadingMedia"
-                  @click="pickMedia('image')"
-                >
-                  <Image aria-hidden="true" />
-                </button>
-                <button
-                  class="icon-button media-button"
-                  type="button"
-                  :title="t('qinbixin.addVideo')"
-                  :disabled="uploadingMedia"
-                  @click="pickMedia('video')"
-                >
-                  <Video aria-hidden="true" />
-                </button>
-                <button
-                  class="icon-button media-button"
-                  type="button"
-                  :title="t('qinbixin.addAttachment')"
-                  :disabled="uploadingMedia"
-                  @click="pickMedia('file')"
-                >
-                  <Paperclip aria-hidden="true" />
-                </button>
-              </div>
-              <span v-if="sendFeedback" class="feedback">{{
-                sendFeedback
-              }}</span>
+              <span class="media-title">{{ item.title }}</span>
               <button
-                class="primary send-button"
                 type="button"
-                :disabled="sending || uploadingMedia"
-                @click="submitMessage"
+                :title="t('qinbixin.removeAttachment')"
+                @click="removeMedia(item.localPath)"
               >
-                <Loader2 v-if="sending" class="spin" aria-hidden="true" />
-                <Send v-else class="small-icon" aria-hidden="true" />
-                {{ t("qinbixin.send") }}
+                <X aria-hidden="true" />
               </button>
             </div>
           </div>
-        </template>
-      </section>
+          <div class="compose-actions">
+            <div class="media-actions">
+              <button
+                class="icon-button media-button"
+                type="button"
+                :title="t('qinbixin.addImage')"
+                :disabled="uploadingMedia"
+                @click="pickMedia('image')"
+              >
+                <Image aria-hidden="true" />
+              </button>
+              <button
+                class="icon-button media-button"
+                type="button"
+                :title="t('qinbixin.addVideo')"
+                :disabled="uploadingMedia"
+                @click="pickMedia('video')"
+              >
+                <Video aria-hidden="true" />
+              </button>
+              <button
+                class="icon-button media-button"
+                type="button"
+                :title="t('qinbixin.addAttachment')"
+                :disabled="uploadingMedia"
+                @click="pickMedia('file')"
+              >
+                <Paperclip aria-hidden="true" />
+              </button>
+            </div>
+            <span v-if="sendFeedback" class="feedback">{{ sendFeedback }}</span>
+            <button
+              class="primary send-button"
+              type="button"
+              :disabled="sending || uploadingMedia"
+              @click="submitMessage"
+            >
+              <Loader2 v-if="sending" class="spin" aria-hidden="true" />
+              <Send v-else class="small-icon" aria-hidden="true" />
+              {{ t("qinbixin.send") }}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
 
     <div v-if="uploadError" class="upload-error">
@@ -584,16 +615,43 @@ async function openExternalUrl(url: string): Promise<void> {
 
 <style scoped>
 .login-form,
-.message-layout {
+.mail-root {
   display: grid;
   gap: 14px;
 }
 
-.message-layout {
-  grid-template-columns: 220px minmax(0, 1fr);
+.mail-root {
   min-height: 420px;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.mail-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.mail-tabs button {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mail-tabs button.active {
+  background: var(--bg-surface);
+  color: var(--accent-text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
 .field {
@@ -638,84 +696,14 @@ async function openExternalUrl(url: string): Promise<void> {
   justify-self: start;
 }
 
-.conversation-list {
-  min-width: 0;
-  overflow: auto;
-  border-right: 1px solid var(--border-soft);
-  padding-right: 10px;
-}
-
-.conversation {
-  position: relative;
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-
-.conversation:hover,
-.conversation.selected {
-  background: var(--bg-hover);
-}
-
-.avatar,
-.avatar.fallback {
-  display: grid;
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.conversation-text {
-  display: grid;
-  min-width: 0;
-}
-
-.conversation-title {
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-preview {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.unread-dot {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--danger);
-}
-
 .message-panel {
   display: flex;
   min-width: 0;
+  min-height: 420px;
   flex-direction: column;
   gap: 12px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .message-scroll {
@@ -727,121 +715,25 @@ async function openExternalUrl(url: string): Promise<void> {
   padding-right: 4px;
 }
 
-.message {
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  background: var(--bg-surface);
-}
-
-.message.incoming {
-  background: var(--bg-subtle);
-}
-
-.message-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-
-.message-header strong {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.message-time {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.message-song {
-  margin-bottom: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.message-song span {
-  color: var(--text-muted);
-}
-
-.message-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.message-tags span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.media-thumb {
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  cursor: zoom-in;
-}
-
-.media-thumb img {
-  display: block;
-  aspect-ratio: 1;
-  width: 100%;
-  height: auto;
-  object-fit: cover;
-}
-
-.media-grid video {
-  display: block;
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  height: auto;
-  border-radius: var(--radius-sm);
-  background: var(--bg-inset);
-}
-
-.attachment-link {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 8px;
-  color: var(--accent);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.attachment-link:hover {
-  text-decoration: underline;
-}
-
-.message-content {
-  color: var(--text-secondary);
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.message-content :deep(p) {
-  margin: 0 0 6px;
-}
-
-.message-content :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
 .compose-form {
   display: grid;
   gap: 8px;
+}
+
+.outbox-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 420px;
+  flex-direction: column;
+  gap: 10px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.compose-view {
+  min-height: 420px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .content-input {
