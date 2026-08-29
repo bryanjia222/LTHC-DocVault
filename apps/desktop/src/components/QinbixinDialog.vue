@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
+import Viewer from "viewerjs";
+import "viewerjs/dist/viewer.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { File, Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
@@ -54,7 +56,6 @@ interface PendingMedia {
 }
 
 const pendingMedia = ref<PendingMedia[]>([]);
-const previewImage = ref<string | null>(null);
 
 let progressUnlisten: (() => void) | null = null;
 
@@ -289,11 +290,21 @@ function removeMedia(localPath: string): void {
 }
 
 function openImagePreview(url: string): void {
-  previewImage.value = url;
-}
-
-function closeImagePreview(): void {
-  previewImage.value = null;
+  const container = document.createElement("div");
+  container.style.display = "none";
+  const img = document.createElement("img");
+  img.src = url;
+  container.appendChild(img);
+  document.body.appendChild(container);
+  const viewer = new Viewer(container, {
+    navbar: false,
+    toolbar: true,
+    hide: () => {
+      viewer.destroy();
+      container.remove();
+    },
+  });
+  viewer.show();
 }
 
 async function openMessageLink(event: MouseEvent) {
@@ -567,18 +578,6 @@ async function openExternalUrl(url: string): Promise<void> {
         <X aria-hidden="true" />
       </button>
     </div>
-    <Teleport to="body">
-      <div
-        v-if="previewImage"
-        class="image-lightbox"
-        @click="closeImagePreview"
-      >
-        <img :src="previewImage" alt="" @click.stop />
-        <button class="lightbox-close" type="button" @click="closeImagePreview">
-          <X aria-hidden="true" />
-        </button>
-      </div>
-    </Teleport>
     <p v-if="error" class="backend-error">{{ error }}</p>
   </BaseModal>
 </template>
@@ -1012,52 +1011,5 @@ async function openExternalUrl(url: string): Promise<void> {
   to {
     transform: rotate(360deg);
   }
-}
-</style>
-
-<style>
-.image-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: grid;
-  place-items: center;
-  padding: 32px;
-  background: rgba(0, 0, 0, 0.75);
-  cursor: zoom-out;
-}
-
-.image-lightbox img {
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: 4px;
-  object-fit: contain;
-  cursor: default;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-
-.lightbox-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  cursor: pointer;
-}
-
-.lightbox-close svg {
-  width: 18px;
-  height: 18px;
-}
-
-.lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 </style>
