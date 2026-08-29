@@ -80,8 +80,9 @@ pub fn run() {
             // release tag). tauri.conf.json carries the title without a version
             // as the pre-load value.
             if let Some(window) = app.get_webview_window("main") {
+                let dev_suffix = if cfg!(debug_assertions) { "（Dev）" } else { "" };
                 let _ = window.set_title(&format!(
-                    "兰天嗨彩办公文档管理 v{}",
+                    "兰天嗨彩办公文档管理{dev_suffix} v{}",
                     env!("CARGO_PKG_VERSION")
                 ));
             }
