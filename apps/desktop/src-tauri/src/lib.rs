@@ -153,6 +153,7 @@ pub fn run() {
             qinbixin::qinbixin_outbox,
             qinbixin::qinbixin_send,
             qinbixin::qinbixin_upload,
+            qinbixin::qinbixin_upload_bytes,
             qinbixin::qinbixin_thumbnail,
             qinbixin::qinbixin_mark_read,
             #[cfg(debug_assertions)]

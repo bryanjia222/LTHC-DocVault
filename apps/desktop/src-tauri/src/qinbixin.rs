@@ -597,46 +597,121 @@ pub async fn qinbixin_upload(
             .await
             .map_err(|e| format!("unable to read media file: {e}"))?
             .map_err(|e| format!("unable to read media file: {e}"))?;
-        if bytes.is_empty() {
-            return Err(format!("文件 {file_name} 容量为0KB"));
-        }
-        if bytes.len() as u64 > MAX_UPLOAD_BYTES {
-            return Err(format!("文件 {file_name} 超过上传大小限制"));
-        }
-        let upload_path = format!("/API/Web/Upload?uploadType={upload_type}");
-        let app_for_progress = app.clone();
-        let file_for_progress = file_name.clone();
-        let on_progress = move |sent: usize, total: usize| {
-            let percent = if total == 0 {
-                100
-            } else {
-                ((sent as u64 * 100) / total as u64) as i32
-            };
-            let _ = app_for_progress.emit(
-                "qinbixin-upload-progress",
-                json!({
-                    "index": index,
-                    "fileName": file_for_progress,
-                    "percent": percent,
-                }),
-            );
-        };
-        let (envelope, new_token) = request_multipart::<RawUploadedFile>(
-            environment.base_url(),
-            &token,
-            &upload_path,
-            &file_name,
-            bytes,
-            Some(Box::new(on_progress)),
-        )
-        .await?;
-        let raw = mapped_error(envelope)?;
-        uploaded.push(QinbixinUploadedFile {
-            url: absolute_url(environment.base_url(), raw.location),
-            title: raw.title.unwrap_or_else(|| file_name.clone()),
-        });
-        store_new_token(&app, &state.qinbixin, &new_token)?;
+        uploaded.push(
+            upload_media_bytes(
+                QinbixinUploadContext {
+                    app: &app,
+                    session: &state.qinbixin,
+                    environment,
+                    token: token.clone(),
+                },
+                file_name,
+                bytes,
+                upload_type,
+                index,
+            )
+            .await?,
+        );
     }
+    Ok(uploaded)
+}
+
+#[tauri::command]
+pub async fn qinbixin_upload_bytes(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+    file_name: String,
+    bytes: Vec<u8>,
+    upload_type: u8,
+) -> Result<QinbixinUploadedFile, String> {
+    if !matches!(upload_type, 0..=2) {
+        return Err("invalid media type".to_owned());
+    }
+    let file_name = Path::new(&file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "invalid media file".to_owned())?
+        .to_owned();
+    let environment = load_environment(&app);
+    let token = state.qinbixin.lock().unwrap().token.clone();
+    if token.is_empty() {
+        return Err("AUTH_EXPIRED".to_owned());
+    }
+    upload_media_bytes(
+        QinbixinUploadContext {
+            app: &app,
+            session: &state.qinbixin,
+            environment,
+            token,
+        },
+        file_name,
+        bytes,
+        upload_type,
+        0,
+    )
+    .await
+}
+
+struct QinbixinUploadContext<'a> {
+    app: &'a AppHandle,
+    session: &'a Mutex<QinbixinSession>,
+    environment: QinbixinEnvironment,
+    token: String,
+}
+
+async fn upload_media_bytes(
+    context: QinbixinUploadContext<'_>,
+    file_name: String,
+    bytes: Vec<u8>,
+    upload_type: u8,
+    index: usize,
+) -> Result<QinbixinUploadedFile, String> {
+    let QinbixinUploadContext {
+        app,
+        session,
+        environment,
+        token,
+    } = context;
+    if bytes.is_empty() {
+        return Err(format!("文件 {file_name} 容量为0KB"));
+    }
+    if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+        return Err(format!("文件 {file_name} 超过上传大小限制"));
+    }
+    let upload_path = format!("/API/Web/Upload?uploadType={upload_type}");
+    let app_for_progress = app.clone();
+    let file_for_progress = file_name.clone();
+    let on_progress = move |sent: usize, total: usize| {
+        let percent = if total == 0 {
+            100
+        } else {
+            ((sent as u64 * 100) / total as u64) as i32
+        };
+        let _ = app_for_progress.emit(
+            "qinbixin-upload-progress",
+            json!({
+                "index": index,
+                "fileName": file_for_progress,
+                "percent": percent,
+            }),
+        );
+    };
+    let (envelope, new_token) = request_multipart::<RawUploadedFile>(
+        environment.base_url(),
+        &token,
+        &upload_path,
+        &file_name,
+        bytes,
+        Some(Box::new(on_progress)),
+    )
+    .await?;
+    let raw = mapped_error(envelope)?;
+    let uploaded = QinbixinUploadedFile {
+        url: absolute_url(environment.base_url(), raw.location),
+        title: raw.title.unwrap_or_else(|| file_name.clone()),
+    };
+    store_new_token(app, session, &new_token)?;
     Ok(uploaded)
 }
 
@@ -1019,16 +1094,10 @@ pub async fn qinbixin_send(
     if token.is_empty() {
         return Err("AUTH_EXPIRED".to_owned());
     }
-    let paragraphs = content
-        .split('\n')
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| format!("<p>{}</p>", line))
-        .collect::<String>();
     let media = media.unwrap_or_default();
     let body = json!({
         "Title": title,
-        "Content": paragraphs,
+        "Content": content,
         "ImageUrl": media.image_urls.join("*"),
         "VideoUrl": media.video_urls.join("*"),
         "FileUrl": media.file_urls.first().cloned().unwrap_or_default(),

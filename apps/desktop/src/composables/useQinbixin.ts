@@ -186,9 +186,17 @@ async function loadMessages(
   }
 }
 
-async function refreshQinbixinMailbox(): Promise<void> {
+async function refreshQinbixinMailbox(markRead = false): Promise<void> {
   if (!isTauri() || !status.value.logged_in) return;
+  await loadConversations(true);
   await loadInbox(true);
+  if (markRead) {
+    for (const conversation of conversations.value.filter(
+      (item) => item.unread,
+    )) {
+      await markConversationRead(conversation);
+    }
+  }
 }
 
 async function loadOutbox(): Promise<void> {

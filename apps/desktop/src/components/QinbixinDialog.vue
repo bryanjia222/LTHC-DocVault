@@ -10,6 +10,7 @@ import { File, Image, Loader2, Paperclip, Send, Video, X } from "@lucide/vue";
 
 import BaseModal from "./BaseModal.vue";
 import QinbixinMessageCard from "./QinbixinMessageCard.vue";
+import RichTextEditor from "./RichTextEditor.vue";
 import { openUrl } from "../composables/useVault";
 import { useQinbixin, type QinbixinMedia } from "../composables/useQinbixin";
 
@@ -34,7 +35,6 @@ const {
   sending,
   uploadingMedia,
   error,
-  loadConversations,
   refreshQinbixinMailbox,
   loadOutbox,
   login,
@@ -100,6 +100,14 @@ const SANITIZE_CONFIG = {
     "tr",
     "td",
     "th",
+    "sub",
+    "sup",
+    "figure",
+    "figcaption",
+    "caption",
+    "colgroup",
+    "col",
+    "tfoot",
   ],
   ALLOWED_ATTR: [
     "href",
@@ -116,7 +124,20 @@ const SANITIZE_CONFIG = {
     "class",
     "colspan",
     "rowspan",
+    "id",
+    "name",
+    "start",
+    "dir",
+    "lang",
+    "span",
+    "poster",
+    "srcset",
+    "sizes",
+    "datetime",
+    "cite",
+    "data-pagebreak",
   ],
+  ALLOW_DATA_ATTR: false,
   ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|data:image\/|\/|#)/i,
 };
 
@@ -189,13 +210,21 @@ function mediaUrls(kind: PendingMedia["kind"]): string[] {
     .map((item) => item.url);
 }
 
+function sanitizeRichContent(html: string): string {
+  const content = DOMPurify.sanitize(html, SANITIZE_CONFIG).trim();
+  const emptyHtml = /^(?:<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>|<br\s*\/?>)+$/i.test(
+    content,
+  );
+  return emptyHtml ? "" : content;
+}
+
 let mailboxTimer: number | null = null;
 
 function startMailboxPolling(): void {
   if (mailboxTimer !== null) return;
-  void refreshQinbixinMailbox();
+  void refreshQinbixinMailbox(activeView.value === "inbox");
   mailboxTimer = window.setInterval(() => {
-    void refreshQinbixinMailbox();
+    void refreshQinbixinMailbox(activeView.value === "inbox");
   }, 5_000);
 }
 
@@ -214,7 +243,6 @@ watch(
       if (activeView.value === "compose") {
         sendRecipientId.value = selectedConversationId.value;
       }
-      void loadConversations(true);
       startMailboxPolling();
     } else {
       stopMailboxPolling();
@@ -223,6 +251,9 @@ watch(
 );
 
 watch(activeView, (view) => {
+  if (view === "inbox" && status.value.logged_in) {
+    void refreshQinbixinMailbox(true);
+  }
   if (view === "compose" && sendRecipientId.value === null) {
     sendRecipientId.value = selectedConversationId.value;
   }
@@ -265,7 +296,7 @@ async function submitMessage() {
   const result = await sendMessage(
     recipientId,
     sendTitle.value.trim(),
-    sendContent.value,
+    sanitizeRichContent(sendContent.value),
     media,
   );
   sendFeedback.value = result.success
@@ -507,9 +538,9 @@ async function openExternalUrl(url: string): Promise<void> {
             type="text"
             :placeholder="t('qinbixin.titlePlaceholder')"
           />
-          <textarea
+          <RichTextEditor
             v-model="sendContent"
-            class="text-input content-input"
+            class="rich-editor"
             :placeholder="t('qinbixin.contentPlaceholder')"
           />
           <div v-if="pendingMedia.length" class="pending-media">
@@ -742,10 +773,13 @@ async function openExternalUrl(url: string): Promise<void> {
   -webkit-user-select: text;
 }
 
-.content-input {
-  height: 110px;
-  padding: 8px 10px;
-  resize: vertical;
+.rich-editor {
+  min-width: 0;
+}
+
+.rich-editor :deep(.tox-tinymce) {
+  border-color: var(--border-strong);
+  border-radius: var(--radius-sm);
 }
 
 .compose-actions {

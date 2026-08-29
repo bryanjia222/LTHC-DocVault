@@ -138,6 +138,73 @@ function onContentClickCapture(event: MouseEvent): void {
   margin: 0 0 6px;
 }
 
+.message-content :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+.message-content :deep(video),
+.message-content :deep(audio) {
+  display: block;
+  max-width: 100%;
+  margin: 6px 0;
+}
+
+.message-content :deep(video) {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.message-content :deep(blockquote) {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.message-content :deep(pre) {
+  overflow: auto;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: 12px;
+}
+
+.message-content :deep(a) {
+  color: var(--accent);
+}
+
+.message-content :deep(table) {
+  max-width: 100%;
+  margin: 6px 0;
+  border-collapse: collapse;
+}
+
+.message-content :deep(th),
+.message-content :deep(td) {
+  min-width: 36px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-strong);
+  vertical-align: top;
+}
+
+.message-content :deep(figure) {
+  margin: 8px 0;
+}
+
+.message-content :deep(figcaption) {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .message-content :deep(p:last-child) {
   margin-bottom: 0;
 }
