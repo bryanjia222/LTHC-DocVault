@@ -607,13 +607,15 @@ async function openExternalUrl(url: string): Promise<void> {
 </template>
 
 <style scoped>
-.login-form,
-.mail-root {
+.login-form {
   display: grid;
   gap: 14px;
 }
 
 .mail-root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   height: min(72vh, 680px);
   min-height: 420px;
   user-select: text;
@@ -621,10 +623,12 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .mail-tabs {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 3px;
+  overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
@@ -645,7 +649,11 @@ async function openExternalUrl(url: string): Promise<void> {
 .mail-tabs button.active {
   background: var(--bg-surface);
   color: var(--accent-text);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.mail-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .field {
@@ -727,7 +735,9 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 .compose-view {
+  flex: 1;
   min-height: 0;
+  overflow: auto;
   user-select: text;
   -webkit-user-select: text;
 }
