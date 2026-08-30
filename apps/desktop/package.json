@@ -10,6 +10,7 @@
     "prebuild": "node scripts/fetch-restic.mjs --host --best-effort",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.cjs",
+    "preversion": "node scripts/check-clean-tree.mjs",
     "restic:fetch": "node scripts/fetch-restic.mjs",
     "format": "prettier --write .",
     "version": "node scripts/set-version.mjs && cargo update --manifest-path src-tauri/Cargo.toml --package docvault-desktop && git add src-tauri/Cargo.toml src-tauri/Cargo.lock",
