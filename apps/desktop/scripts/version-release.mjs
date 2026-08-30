@@ -8,7 +8,7 @@ function git(...args) {
   return execFileSync("git", args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
-  }).trim();
+  });
 }
 
 function tagExists(tag) {
@@ -25,13 +25,19 @@ const version = JSON.parse(
 ).version;
 const tag = `v${version}`;
 const shouldPush = process.argv.includes("--push");
-const branch = git("symbolic-ref", "--short", "HEAD");
+const branch = git("symbolic-ref", "--short", "HEAD").trim();
 const versionFiles = [
   "package.json",
   "package-lock.json",
   "src-tauri/Cargo.toml",
   "src-tauri/Cargo.lock",
 ];
+
+// git status --porcelain prints paths relative to the repository root, while
+// this script (and the version files) live in apps/desktop. Translate the
+// version files to root-relative paths before comparing.
+const repoPrefix = git("rev-parse", "--show-prefix").trim();
+const versionStatusPaths = versionFiles.map((file) => `${repoPrefix}${file}`);
 
 if (branch !== "main") {
   console.error(`version-release: releases must run on main, not ${branch}`);
@@ -47,7 +53,7 @@ const unrelatedChanges = git("status", "--porcelain")
   .split("\n")
   .filter(Boolean)
   .map((line) => line.slice(3))
-  .filter((path) => !versionFiles.includes(path));
+  .filter((path) => !versionStatusPaths.includes(path));
 
 if (unrelatedChanges.length > 0) {
   console.error(
