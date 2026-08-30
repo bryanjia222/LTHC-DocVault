@@ -85,6 +85,30 @@ CommonHelper
 
 ---
 
+## 1.4 Commit Message Conventions
+
+Use Conventional Commits style:
+
+```text
+type(scope): short imperative summary
+```
+
+Rules:
+
+* Allowed types: `feat`, `fix`, `refactor`, `chore`, plus `ci`, `docs`,
+  `test` when they describe the whole change.
+* `scope` is the affected module or feature area, such as `desktop`,
+  `qinbixin`, `addin`, `installer`, `i18n`, `core`, `storage`, or `cli`.
+  It is not a file path.
+* Omit the scope only for genuinely cross-cutting changes.
+* Keep the summary short, imperative, and specific. Use the optional body
+  to explain why, not what.
+
+Do not rewrite pushed history only to reformat old commit messages.
+Follow this convention for new commits.
+
+---
+
 # 2. Project Structure Rules
 
 ## 2.1 Monorepo Layout
