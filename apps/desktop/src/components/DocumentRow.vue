@@ -10,7 +10,7 @@ import type { Document } from "../data/mock";
  * A single document row in the DocumentsView table. Renders the cells for every
  * visible column (`data-col` + inner class names are part of the parent's
  * content-minimum width measurement contract - keep them in sync with the
- * MEASURE_SELECTOR in DocumentsView). Selection, double-click, drag, and
+ * MEASURE_SELECTOR in useColumnResize). Selection, double-click, drag, and
  * right-click are emitted for the parent to act on, so all action handlers
  * stay in the view.
  */

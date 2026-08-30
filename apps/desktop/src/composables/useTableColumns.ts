@@ -6,7 +6,7 @@ import { SORT_KEYS, type SortKey } from "../utils/sort";
  * width and whether it's shown. A global client UI pref (like double-click
  * action & theme) - no backend state needed - so it lives in localStorage.
  *
- * Resize interaction ("knob" feel, driven by DocumentsView):
+ * Resize interaction ("knob" feel, driven by useColumnResize/DocumentTable):
  *  - The component measures a per-column content minimum (e.g. the width of the
  *    "已同步" pill) before dragging. While dragging, the width follows the mouse
  *    linearly down to that minimum, then FREEZES there (stops following) while
