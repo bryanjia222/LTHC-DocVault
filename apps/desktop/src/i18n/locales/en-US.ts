@@ -73,6 +73,11 @@ export const enUS = {
     sendSucceeded: "Letter sent",
     sendFailed: "Failed to send",
     titleRequired: "Please enter a title",
+    reply: "Reply",
+    noComments: "No replies",
+    commentPlaceholder: "Write a reply…",
+    commentSend: "Send",
+    markAllRead: "Mark all read",
   },
   sidebar: {
     vault: "Vault",

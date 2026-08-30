@@ -88,6 +88,21 @@ pub struct QinbixinMessage {
     pub file_url: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    pub comment_count: i64,
+    #[serde(default)]
+    pub relationship_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QinbixinComment {
+    pub id: i64,
+    pub member_id: i64,
+    pub author: String,
+    pub avatar: String,
+    pub content: String,
+    pub sent_time: String,
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,6 +208,29 @@ pub(super) struct RawMessage {
     pub(super) file_url: Option<String>,
     #[serde(default)]
     pub(super) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) comment_qty: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct RawComment {
+    #[serde(default)]
+    pub(super) id: i64,
+    #[serde(default)]
+    pub(super) member_id: i64,
+    #[serde(default)]
+    pub(super) avatar_url: Option<String>,
+    #[serde(default)]
+    pub(super) nickname: Option<String>,
+    #[serde(default)]
+    pub(super) nick_name: Option<String>,
+    #[serde(default)]
+    pub(super) content: Option<String>,
+    #[serde(default)]
+    pub(super) send_time: Option<String>,
+    #[serde(default)]
+    pub(super) images: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,5 +289,22 @@ mod tests {
         assert_eq!(message.videos, Some(vec!["/videos/demo.mp4".to_owned()]));
         assert_eq!(message.file_url.as_deref(), Some("/files/demo.pdf"));
         assert_eq!(message.tags, Some(vec!["demo".to_owned()]));
+    }
+
+    #[test]
+    fn maps_comment_fields() {
+        let comment: RawComment = serde_json::from_str(
+            r#"{
+                "Id": 9,
+                "MemberId": 42,
+                "Nickname": "Demo",
+                "Content": "reply",
+                "Images": ["/images/reply.png"]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(comment.id, 9);
+        assert_eq!(comment.nickname.as_deref(), Some("Demo"));
+        assert_eq!(comment.images, Some(vec!["/images/reply.png".to_owned()]));
     }
 }

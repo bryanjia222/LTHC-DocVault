@@ -164,7 +164,11 @@ pub async fn qinbixin_messages(
     }
     let raw =
         fetch_raw_messages(&environment, &app, &state.qinbixin, &token, relationship_id).await?;
-    Ok(map_raw_messages(raw, environment.base_url()))
+    Ok(map_raw_messages(
+        raw,
+        environment.base_url(),
+        relationship_id,
+    ))
 }
 
 #[tauri::command]
@@ -184,7 +188,7 @@ pub async fn qinbixin_inbox(
         let raw_messages =
             fetch_raw_messages(&environment, &app, &state.qinbixin, &token, conversation.id)
                 .await?;
-        let mut mapped = map_raw_messages(raw_messages, environment.base_url());
+        let mut mapped = map_raw_messages(raw_messages, environment.base_url(), conversation.id);
         for message in &mut mapped {
             message.conversation_title = conversation.title.clone();
         }
@@ -219,7 +223,7 @@ pub async fn qinbixin_outbox(
     .await?;
     let raw = mapped_error(envelope)?;
     store_new_token(&app, &state.qinbixin, &new_token)?;
-    Ok(map_raw_messages(raw, environment.base_url()))
+    Ok(map_raw_messages(raw, environment.base_url(), 0))
 }
 
 #[tauri::command]

@@ -96,7 +96,11 @@ pub(super) async fn fetch_raw_messages(
     Ok(raw)
 }
 
-pub(super) fn map_raw_messages(items: Vec<RawMessage>, base_url: &str) -> Vec<QinbixinMessage> {
+pub(super) fn map_raw_messages(
+    items: Vec<RawMessage>,
+    base_url: &str,
+    relationship_id: i64,
+) -> Vec<QinbixinMessage> {
     items
         .into_iter()
         .map(|item| QinbixinMessage {
@@ -130,13 +134,15 @@ pub(super) fn map_raw_messages(items: Vec<RawMessage>, base_url: &str) -> Vec<Qi
                 .collect(),
             file_url: absolute_url(base_url, item.file_url.unwrap_or_default()),
             tags: item.tags.unwrap_or_default(),
+            comment_count: item.comment_qty.unwrap_or_default(),
+            relationship_id,
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::map_conversation;
+    use super::{map_conversation, map_raw_messages};
     use crate::qinbixin::types::PRODUCTION_BASE_URL;
 
     #[test]
@@ -148,5 +154,21 @@ mod tests {
         let mapped = map_conversation(PRODUCTION_BASE_URL, conversation);
         assert_eq!(mapped.title, "兰天");
         assert_eq!(mapped.preview, "");
+    }
+
+    #[test]
+    fn maps_message_notification_fields() {
+        let messages = vec![
+            serde_json::from_str::<crate::qinbixin::types::RawMessage>(
+                r#"{"Id":10,"CommentQty":2}"#,
+            )
+            .unwrap(),
+            serde_json::from_str::<crate::qinbixin::types::RawMessage>(r#"{"Id":11}"#).unwrap(),
+        ];
+        let mapped = map_raw_messages(messages, PRODUCTION_BASE_URL, 21);
+        assert_eq!(mapped[0].comment_count, 2);
+        assert_eq!(mapped[0].relationship_id, 21);
+        assert_eq!(mapped[1].comment_count, 0);
+        assert_eq!(mapped[1].relationship_id, 21);
     }
 }

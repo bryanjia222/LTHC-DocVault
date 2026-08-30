@@ -26,6 +26,7 @@ const desktop = useDesktopState();
 const { openNewDocument } = useDialogs();
 const {
   status: qinbixinStatus,
+  hasQinbixinUnread,
   startPolling: startQinbixinPolling,
   stopPolling: stopQinbixinPolling,
   logout: logoutQinbixinAccount,
@@ -126,6 +127,7 @@ function actDeleteLink(linkId: string) {
     <div class="nav-section" :aria-label="t('nav.primary')">
       <QinbixinNavRow
         :status="qinbixinStatus"
+        :has-unread="hasQinbixinUnread"
         @open="openQinbixin()"
         @open-menu="openKebab($event, { kind: 'qinbixin' })"
       />

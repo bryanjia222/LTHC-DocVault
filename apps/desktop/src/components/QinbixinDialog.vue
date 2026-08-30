@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { X } from "@lucide/vue";
+import { CheckCheck, X } from "@lucide/vue";
+import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 import BaseModal from "./BaseModal.vue";
@@ -19,7 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
-const { status, error, uploadError } = useQinbixin();
+const { status, error, uploadError, markAllQinbixinRead } = useQinbixin();
 
 const mailbox = useQinbixinMailbox(props);
 const compose = useQinbixinCompose(mailbox.activeView);
@@ -31,6 +32,15 @@ function setView(view: QinbixinView) {
 
 function clearUploadError() {
   uploadError.value = "";
+}
+
+const markingAllRead = ref(false);
+
+async function markAllRead() {
+  if (markingAllRead.value) return;
+  markingAllRead.value = true;
+  await markAllQinbixinRead();
+  markingAllRead.value = false;
 }
 </script>
 
@@ -47,34 +57,44 @@ function clearUploadError() {
     <QinbixinLoginPanel v-if="!status.logged_in" />
 
     <div v-else class="mail-root">
-      <nav class="mail-tabs">
+      <div class="mail-toolbar">
+        <nav class="mail-tabs">
+          <button
+            type="button"
+            :class="{ active: activeView === 'inbox' }"
+            @click="setView('inbox')"
+          >
+            {{ t("qinbixin.inboxTab") }}
+            <span v-if="mailbox.inboxUnread.value" class="tab-dot" />
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'outbox' }"
+            @click="setView('outbox')"
+          >
+            {{ t("qinbixin.outboxTab") }}
+            <span v-if="mailbox.outboxUnread.value" class="tab-dot" />
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'compose' }"
+            @click="setView('compose')"
+          >
+            {{ t("qinbixin.composeTab") }}
+          </button>
+        </nav>
         <button
+          class="mark-all-read"
           type="button"
-          :class="{ active: activeView === 'inbox' }"
-          @click="setView('inbox')"
+          :disabled="markingAllRead"
+          @click="markAllRead"
         >
-          {{ t("qinbixin.inboxTab") }}
+          <CheckCheck aria-hidden="true" />
+          {{ t("qinbixin.markAllRead") }}
         </button>
-        <button
-          type="button"
-          :class="{ active: activeView === 'outbox' }"
-          @click="setView('outbox')"
-        >
-          {{ t("qinbixin.outboxTab") }}
-        </button>
-        <button
-          type="button"
-          :class="{ active: activeView === 'compose' }"
-          @click="setView('compose')"
-        >
-          {{ t("qinbixin.composeTab") }}
-        </button>
-      </nav>
+      </div>
 
-      <QinbixinMailbox
-        v-if="activeView !== 'compose'"
-        :mailbox="mailbox"
-      />
+      <QinbixinMailbox v-if="activeView !== 'compose'" :mailbox="mailbox" />
       <QinbixinCompose v-else :compose="compose" />
     </div>
 
@@ -109,6 +129,47 @@ function clearUploadError() {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
+}
+
+.mail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.mail-toolbar .mail-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.mark-all-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mark-all-read:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tab-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 .mail-tabs button {

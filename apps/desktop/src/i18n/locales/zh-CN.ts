@@ -71,6 +71,11 @@ export const zhCN = {
     sendSucceeded: "信件已发送",
     sendFailed: "发送失败",
     titleRequired: "请输入信件标题",
+    reply: "回复",
+    noComments: "暂无回复",
+    commentPlaceholder: "输入回复内容…",
+    commentSend: "发送",
+    markAllRead: "全部已读",
   },
   sidebar: {
     vault: "仓库",

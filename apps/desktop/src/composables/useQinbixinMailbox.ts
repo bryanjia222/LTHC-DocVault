@@ -22,6 +22,7 @@ export function useQinbixinMailbox(source: QinbixinMailboxSource) {
     loadingOutbox,
     refreshQinbixinMailbox,
     loadOutbox,
+    unreadCommentCount,
   } = useQinbixin();
 
   const activeView = ref<QinbixinView>("inbox");
@@ -45,6 +46,16 @@ export function useQinbixinMailbox(source: QinbixinMailboxSource) {
 
   const outgoingMessages = computed(() =>
     outboxMessages.value.map(sanitizeQinbixinMessage),
+  );
+
+  const inboxUnread = computed(
+    () =>
+      status.value.has_unread ||
+      inboxMessages.value.some((message) => unreadCommentCount(message) > 0),
+  );
+
+  const outboxUnread = computed(() =>
+    outgoingMessages.value.some((message) => unreadCommentCount(message) > 0),
   );
 
   const inboxConversationById = computed(() => {
@@ -107,6 +118,8 @@ export function useQinbixinMailbox(source: QinbixinMailboxSource) {
     loadingOutbox,
     inboxMessages,
     outgoingMessages,
+    inboxUnread,
+    outboxUnread,
     selectedConversationId,
     outboxParticipant,
     setActiveView,

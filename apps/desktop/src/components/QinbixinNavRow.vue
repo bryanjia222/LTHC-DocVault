@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 import { Mail, MoreVertical } from "@lucide/vue";
 import type { QinbixinStatus } from "../composables/useQinbixin";
 
-defineProps<{ status: QinbixinStatus }>();
+defineProps<{ status: QinbixinStatus; hasUnread: boolean }>();
 
 const emit = defineEmits<{
   open: [];
@@ -30,7 +30,7 @@ const { t } = useI18n();
             : t("qinbixin.loggedOut")
         }}
       </span>
-      <span v-if="status.logged_in && status.has_unread" class="qinbixin-dot" />
+      <span v-if="status.logged_in && hasUnread" class="qinbixin-dot" />
     </button>
     <button
       class="icon-btn kebab-btn"
