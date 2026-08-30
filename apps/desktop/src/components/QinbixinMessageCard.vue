@@ -428,6 +428,12 @@ function onContentClickCapture(event: MouseEvent): void {
   cursor: pointer;
 }
 
+.reply-button > svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+}
+
 .reply-button:hover {
   background: var(--bg-hover);
   color: var(--text-primary);

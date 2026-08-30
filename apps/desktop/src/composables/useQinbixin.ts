@@ -162,6 +162,23 @@ function initializeCommentWatermarks(items: QinbixinMessage[]): void {
   }
 }
 
+function syncOutboxCommentCounts(): void {
+  if (outboxMessages.value.length === 0 || messages.value.length === 0) return;
+  const inboxCounts = new Map(
+    messages.value.map((message) => [message.id, message.comment_count]),
+  );
+  let changed = false;
+  const next = outboxMessages.value.map((message) => {
+    const count = inboxCounts.get(message.id);
+    if (count === undefined || count === message.comment_count) return message;
+    changed = true;
+    return { ...message, comment_count: count };
+  });
+  if (changed) {
+    outboxMessages.value = next;
+  }
+}
+
 function unreadCommentCount(message: QinbixinMessage): number {
   const watermark = readWatermarks.value[String(message.id)] ?? 0;
   return Math.max(0, message.comment_count - watermark);
@@ -324,6 +341,7 @@ async function loadOutbox(background = false): Promise<void> {
     if (JSON.stringify(outboxMessages.value) !== JSON.stringify(next)) {
       outboxMessages.value = next;
     }
+    syncOutboxCommentCounts();
     error.value = "";
   } catch (e) {
     if (String(e).includes("AUTH_EXPIRED")) {
@@ -370,6 +388,7 @@ async function loadInbox(background = false): Promise<void> {
     if (JSON.stringify(messages.value) !== JSON.stringify(next)) {
       messages.value = next;
     }
+    syncOutboxCommentCounts();
     error.value = "";
   } catch (e) {
     if (String(e).includes("AUTH_EXPIRED")) {
