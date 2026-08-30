@@ -9,9 +9,20 @@ export const supportedLocales = [
   { code: "en-US", label: "English" },
 ] as const;
 
+const localeStorageKey = "docvault-locale";
+
+function readInitialLocale(): string {
+  if (typeof localStorage === "undefined") return defaultLocale;
+  const stored = localStorage.getItem(localeStorageKey);
+  return typeof stored === "string" &&
+    supportedLocales.some((locale) => locale.code === stored)
+    ? stored
+    : defaultLocale;
+}
+
 export const i18n = createI18n({
   legacy: false,
-  locale: defaultLocale,
+  locale: readInitialLocale(),
   fallbackLocale: "en-US",
   messages: {
     "zh-CN": zhCN,

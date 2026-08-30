@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { supportedLocales } from "../../i18n";
 import { useTheme } from "../../theme";
 import { confirmDialog, useVault } from "../../composables/useVault";
+import BaseModal from "../BaseModal.vue";
 import {
   useNavigation,
   type SettingsTab,
@@ -26,6 +27,12 @@ import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
 
 const { t, locale } = useI18n();
+const localeStorageKey = "docvault-locale";
+const previousLocale = ref(locale.value);
+const localeRestartOpen = ref(false);
+const localeRestartPending = ref(false);
+const pendingLocale = ref("");
+const pendingLocaleTarget = ref<HTMLSelectElement | null>(null);
 const { theme, setTheme } = useTheme();
 const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
@@ -80,6 +87,49 @@ async function onLogLevelChange(event: Event) {
     await setLogLevel(level);
   } catch (e) {
     console.error("set_log_level failed", e);
+  }
+}
+
+/** Language selection is restart-gated: TinyMCE initializes its UI language
+ * once. The user can apply now and restart later, or discard the change. */
+async function onLocaleChange(event: Event) {
+  const target = event.target as HTMLSelectElement;
+  const nextLocale = target.value;
+  if (nextLocale === locale.value) return;
+
+  pendingLocale.value = nextLocale;
+  pendingLocaleTarget.value = target;
+  localeRestartOpen.value = true;
+}
+
+function cancelLocaleRestart() {
+  localeRestartOpen.value = false;
+  if (pendingLocaleTarget.value) {
+    pendingLocaleTarget.value.value = previousLocale.value;
+  }
+  pendingLocale.value = "";
+  pendingLocaleTarget.value = null;
+}
+
+async function applyLocaleRestart(restart: boolean) {
+  const nextLocale = pendingLocale.value;
+  if (!nextLocale) {
+    cancelLocaleRestart();
+    return;
+  }
+
+  locale.value = nextLocale;
+  previousLocale.value = nextLocale;
+  localStorage.setItem(localeStorageKey, nextLocale);
+  localeRestartPending.value = !restart;
+  localeRestartOpen.value = false;
+  pendingLocale.value = "";
+  pendingLocaleTarget.value = null;
+
+  if (restart) {
+    // Language and TinyMCE both live in the WebView. Reloading it avoids the
+    // dev-mode process-restart races around Tauri/Cargo/WebView teardown.
+    location.reload();
   }
 }
 
@@ -211,7 +261,11 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
             <div>
               <dt>{{ t("settings.language") }}</dt>
               <dd>
-                <select v-model="locale" class="locale-select">
+                <select
+                  :value="locale"
+                  class="locale-select"
+                  @change="onLocaleChange"
+                >
                   <option
                     v-for="supportedLocale in supportedLocales"
                     :key="supportedLocale.code"
@@ -220,6 +274,9 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
                     {{ supportedLocale.label }}
                   </option>
                 </select>
+                <p v-if="localeRestartPending" class="field-hint">
+                  {{ t("settings.languageRestartPendingHint") }}
+                </p>
               </dd>
             </div>
             <div v-if="isDev">
@@ -304,6 +361,33 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
           {{ t("settings.resetDefaults") }}
         </button>
       </div>
+
+      <BaseModal
+        :open="localeRestartOpen"
+        :title="t('settings.languageRestartTitle')"
+        @close="cancelLocaleRestart"
+      >
+        <p>{{ t("settings.languageRestartConfirm") }}</p>
+        <template #footer>
+          <button class="secondary" type="button" @click="cancelLocaleRestart">
+            {{ t("settings.cancel") }}
+          </button>
+          <button
+            class="secondary"
+            type="button"
+            @click="applyLocaleRestart(false)"
+          >
+            {{ t("settings.restartLater") }}
+          </button>
+          <button
+            class="primary"
+            type="button"
+            @click="applyLocaleRestart(true)"
+          >
+            {{ t("settings.restartApp") }}
+          </button>
+        </template>
+      </BaseModal>
 
       <div v-if="isDev" class="surface settings-card dev-card">
         <h3>{{ t("dev.title") }}</h3>

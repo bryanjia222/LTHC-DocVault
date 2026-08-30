@@ -554,6 +554,14 @@ export const enUS = {
     themeSystem: "System",
     themeDark: "Dark",
     language: "Language",
+    languageRestartTitle: "Restart app",
+    languageRestartConfirm:
+      "The language has changed. Restart the app for it to take full effect.",
+    restartApp: "Restart app",
+    restartLater: "Restart later",
+    languageRestartPendingHint:
+      "Restart the app for the language to take full effect.",
+    cancel: "Cancel",
     devMode: "Developer mode",
     devModeHint: "Shows inspect and other dev tools in the right-click menu.",
     on: "On",

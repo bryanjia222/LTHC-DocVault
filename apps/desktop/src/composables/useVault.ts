@@ -54,10 +54,16 @@ export function isTauri(): boolean {
  * Outside Tauri (browser dev) falls back to `window.confirm` so the flow still
  * works without a backend. Returns false if the native dialog fails to open.
  */
-export async function confirmDialog(message: string): Promise<boolean> {
+export async function confirmDialog(
+  message: string,
+  options: Parameters<typeof confirmNative>[1] = {},
+): Promise<boolean> {
   if (isTauri()) {
     try {
-      return await confirmNative(message);
+      if (Object.keys(options).length === 0) {
+        return await confirmNative(message);
+      }
+      return await confirmNative(message, options);
     } catch {
       return false;
     }
