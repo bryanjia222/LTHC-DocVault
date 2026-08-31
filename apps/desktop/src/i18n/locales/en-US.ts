@@ -78,6 +78,7 @@ export const enUS = {
     commentPlaceholder: "Write a reply…",
     commentSend: "Send",
     markAllRead: "Mark all read",
+    editorMoreTools: "More tools",
   },
   sidebar: {
     vault: "Vault",

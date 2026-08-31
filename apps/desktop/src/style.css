@@ -5,6 +5,13 @@
  * live here. Component-specific styles are scoped inside each .vue component.
  */
 
+/* Bundled handwriting font for Qinbixin composing and message previews. */
+@font-face {
+  font-family: "汪志刚体";
+  src: url("./assets/fonts/WangZhiGangTi.ttf") format("truetype");
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
 

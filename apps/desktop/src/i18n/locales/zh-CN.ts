@@ -76,6 +76,7 @@ export const zhCN = {
     commentPlaceholder: "输入回复内容…",
     commentSend: "发送",
     markAllRead: "全部已读",
+    editorMoreTools: "更多工具",
   },
   sidebar: {
     vault: "仓库",
