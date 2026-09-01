@@ -253,10 +253,15 @@ td {
   transition: opacity 0.12s ease;
 }
 
-.row-action:hover {
+.row-action:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.row-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 tr:hover .row-action,

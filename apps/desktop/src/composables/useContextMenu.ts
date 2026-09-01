@@ -1,4 +1,4 @@
-import { nextTick, ref } from "vue";
+import { nextTick, onScopeDispose, ref } from "vue";
 
 export interface MenuPosition {
   x: number;
@@ -16,6 +16,12 @@ const EDGE_MARGIN = 4;
  * bottom edge flips inward instead of being clipped. Before this, only the
  * global menu clamped, so a right-click on a version row near the window's right
  * edge rendered its menu half-off-screen.
+ *
+ * Transient menus also auto-close when the window itself loses focus (the
+ * global menu already did this at its call sites; the doc/version/sidebar menus
+ * kept lingering next to the collapsed detail panel after an app-level
+ * alt-tab). Centralizing it here keeps every menu instance on the same
+ * lifecycle: the blur listener is bound while open and removed on close.
  */
 export function useContextMenu() {
   const open = ref(false);
@@ -41,12 +47,20 @@ export function useContextMenu() {
   function openAt(event: MouseEvent) {
     pos.value = { x: event.clientX, y: event.clientY };
     open.value = true;
+    window.addEventListener("blur", close);
     void nextTick(clamp);
   }
 
   function close() {
-    open.value = false;
+    if (open.value) {
+      open.value = false;
+      window.removeEventListener("blur", close);
+    }
   }
+
+  // A component can unmount while its menu is open (e.g. the view switch);
+  // without this the blur listener would leak into later windows.
+  onScopeDispose(() => window.removeEventListener("blur", close));
 
   return { open, pos, menuRef, openAt, close, clamp };
 }
