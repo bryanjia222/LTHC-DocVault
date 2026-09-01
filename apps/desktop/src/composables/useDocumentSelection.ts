@@ -98,10 +98,10 @@ export function useDocumentSelection(actions: DocumentSelectionActions) {
   }
 
   function onDocDoubleClick(document: Document) {
+    selectDocument(document);
     if (doubleClickAction.value === "open") {
       void openDocument(document.id);
     } else {
-      selectDocument(document);
       actions.openPreview();
     }
   }

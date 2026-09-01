@@ -14,6 +14,7 @@ import {
   type SortDirection,
   type SortKey,
 } from "../utils/sort";
+import { currentVersion } from "../utils/documentLabel";
 import type { TypeCategory } from "../utils/typeCategory";
 import type { Document, Version } from "../data/mock";
 
@@ -38,7 +39,9 @@ const desktop = useDesktopState();
 
 const selectedDocumentId = ref<string>(vaultDocuments.value[0]?.id ?? "");
 const selectedVersionId = ref<string>(
-  vaultDocuments.value[0]?.versions[0]?.id ?? "",
+  vaultDocuments.value[0]
+    ? (currentVersion(vaultDocuments.value[0])?.id ?? "")
+    : "",
 );
 const searchQuery = ref("");
 
@@ -93,14 +96,15 @@ const selectedVersion = computed<Version | undefined>(() => {
   const doc = selectedDocument.value;
   if (!doc) return undefined;
   // A trashed version is hidden from the history, so never let it be the
-  // active selection - fall back to the first visible version instead. This
-  // keeps the detail panel parked on something the user can still see after a
-  // version is soft-deleted.
+  // active selection - fall back to the current version (or the first visible
+  // version when no current pointer exists). This keeps the detail panel parked
+  // on something the user can still see after a version is soft-deleted.
   const visible = doc.versions.filter(
     (version) => !desktop.isVersionTrashed(doc.id, version.id),
   );
   return (
     visible.find((version) => version.id === selectedVersionId.value) ??
+    visible.find((version) => version.status === "current") ??
     visible[0]
   );
 });
@@ -177,7 +181,11 @@ export function useDocuments() {
 
   function selectDocument(document: Document) {
     selectedDocumentId.value = document.id;
-    selectedVersionId.value = document.versions[0]?.id ?? "";
+    const visible = document.versions.filter(
+      (version) => !desktop.isVersionTrashed(document.id, version.id),
+    );
+    selectedVersionId.value =
+      currentVersion(document)?.id ?? visible[0]?.id ?? "";
   }
 
   function selectVersion(version: Version) {
@@ -230,19 +238,14 @@ export function useDocuments() {
   }
 
   /**
-   * Select the first non-trashed document (or clear selection when none remain),
-   * used after a soft-delete so the detail panel doesn't stay parked on the doc
-   * that was just moved to the recycle bin.
+   * Select the first document in the current visible/sorted/project-scoped list
+   * (or clear selection when none remain), used after a soft-delete so the
+   * detail panel doesn't stay parked on the doc that was just moved to the bin.
    */
   function selectFirstVisible() {
-    const first = documents.value.find((d) => !desktop.isTrashed(d.id));
-    if (first) {
-      selectedDocumentId.value = first.id;
-      selectedVersionId.value = first.versions[0]?.id ?? "";
-    } else {
-      selectedDocumentId.value = "";
-      selectedVersionId.value = "";
-    }
+    const first = filteredDocuments.value[0];
+    if (first) selectDocument(first);
+    else clearSelection();
   }
 
   return {

@@ -276,7 +276,21 @@ describe("useDocuments - sorting", () => {
 });
 
 describe("useDocuments - selection", () => {
-  it("selecting a document defaults to its first version", () => {
+  it("selecting a document defaults to its current version", () => {
+    const archivedFirst: Document = {
+      ...docA,
+      id: "docArchivedFirst",
+      versions: [
+        { ...docA.versions[1], id: "af2", label: "af2", status: "current" },
+        { ...docA.versions[0], id: "af1", label: "af1", status: "archived" },
+      ],
+    };
+    docs.selectDocument(archivedFirst);
+    expect(docs.selectedDocumentId.value).toBe("docArchivedFirst");
+    expect(docs.selectedVersionId.value).toBe("af2");
+  });
+
+  it("selecting a document defaults to its first version when no current exists", () => {
     docs.selectDocument(docB);
     expect(docs.selectedDocumentId.value).toBe("docB");
     expect(docs.selectedVersionId.value).toBe("b1");
@@ -305,6 +319,15 @@ describe("useDocuments - selection", () => {
     docs.selectDocument(docA);
     docs.selectedVersionId.value = "gone";
     expect(docs.selectedVersion.value?.id).toBe("a1");
+  });
+
+  it("selects the first document in the active project scope", () => {
+    desktop.assignments.value = { docA: "p1", docB: "p2" };
+    docs.selectDocument(docB);
+    docs.selectProject("p1");
+    docs.selectFirstVisible();
+    expect(docs.selectedDocumentId.value).toBe("docA");
+    expect(docs.selectedVersionId.value).toBe("a1");
   });
 
   it("selecting a document with no versions leaves the version id empty", () => {
