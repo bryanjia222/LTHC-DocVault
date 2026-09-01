@@ -28,15 +28,15 @@ pub(crate) fn phase_a_commit(
 ) -> Result<(docvault_types::Document, docvault_types::Version), String> {
     let vault = match vault.lock() {
         Ok(guard) => guard,
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(crate::logging::log_error(e)),
     };
     let Some(vault) = vault.as_ref() else {
-        return Err("vault not initialized".to_owned());
+        return Err(crate::logging::log_warn("vault not initialized"));
     };
     let source_path = path.as_ref();
     let (document, version) = match vault.begin_commit(source_path, document_ref, metadata) {
         Ok(result) => result,
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(crate::logging::log_error(e)),
     };
     // Library model: when the committed source was an external file (add /
     // manual commit), materialize a library copy from the now-current version so
@@ -51,9 +51,9 @@ pub(crate) fn phase_a_commit(
                 &lib_path,
                 &docvault_storage::NEVER_CANCELLED,
             ) {
-                return Err(format!(
+                return Err(crate::logging::log_error(format!(
                     "committed but failed to materialize library copy: {e}"
-                ));
+                )));
             }
         }
         _ => {} // source is the library copy, or path unknown - nothing to materialize
@@ -182,15 +182,19 @@ pub(crate) fn write_blank_source(
     format: &str,
     aspect_ratio: Option<&str>,
 ) -> Result<(PathBuf, tempfile::TempDir), String> {
-    let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let temp_dir = tempfile::tempdir().map_err(crate::logging::log_error)?;
     let source_path = temp_dir.path().join(format!("blank.{format}"));
     match format {
-        "txt" | "md" => std::fs::write(&source_path, b"").map_err(|e| e.to_string())?,
+        "txt" | "md" => std::fs::write(&source_path, b"").map_err(crate::logging::log_error)?,
         "docx" | "xlsx" | "pptx" => {
             docvault_ooxml::create_empty_package(format, aspect_ratio, &source_path)
-                .map_err(|e| e.to_string())?
+                .map_err(crate::logging::log_error)?
         }
-        other => return Err(format!("unsupported document format: {other}")),
+        other => {
+            return Err(crate::logging::log_warn(format!(
+                "unsupported document format: {other}"
+            )))
+        }
     }
     Ok((source_path, temp_dir))
 }

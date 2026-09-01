@@ -41,7 +41,7 @@ const { t } = useI18n();
 const { filteredDocuments, activeProjectId } = useDocuments();
 const desktop = useDesktopState();
 const { openNoteEdit } = useDialogs();
-const { log } = useActivityLog();
+const { log, logBlocked } = useActivityLog();
 const { runAction } = useVaultActions();
 useVersionPolling();
 
@@ -142,7 +142,7 @@ function openPreview(version?: Version | null) {
     }),
   );
   if (!document) {
-    log(t("log.noSelection", { action: t("actionLogs.preview") }));
+    logBlocked(t("log.noSelection", { action: t("actionLogs.preview") }));
     return;
   }
   openPreviewOverlay(version);
@@ -150,7 +150,7 @@ function openPreview(version?: Version | null) {
 
 function setViewMode(mode: "list" | "tree") {
   if (mode === "tree" && !hasBranching.value) {
-    log(t("log.versionTreeUnavailable"));
+    logBlocked(t("log.versionTreeUnavailable"));
     return;
   }
 

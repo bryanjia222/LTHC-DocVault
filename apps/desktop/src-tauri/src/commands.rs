@@ -37,14 +37,16 @@ pub fn list_documents_with_versions(
     state: State<AppState>,
 ) -> Result<Vec<DocumentWithVersions>, String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
-    let documents = vault.list_documents().map_err(|e| e.to_string())?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
+    let documents = vault.list_documents().map_err(crate::logging::log_error)?;
     let mut result = Vec::with_capacity(documents.len());
     for document in documents {
         let document_ref = DocumentRef::IdPrefix(document.id.as_str().to_owned());
         let versions = vault
             .list_versions(&document_ref)
-            .map_err(|e| e.to_string())?;
+            .map_err(crate::logging::log_error)?;
         result.push(DocumentWithVersions { document, versions });
     }
     Ok(result)
@@ -53,7 +55,9 @@ pub fn list_documents_with_versions(
 #[tauri::command]
 pub fn get_config(app: AppHandle, state: State<AppState>) -> Result<ConfigDto, String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     let paths = vault.paths();
     let log_level = crate::logging::read_level(&paths.config_path);
     // Show where logs actually roll (the fixed app-level logs dir), not the
@@ -83,7 +87,9 @@ pub fn set_log_level(state: State<AppState>, level: String) -> Result<(), String
     validate_level(&level)?;
     let config_path = {
         let vault = state::lock_vault(&state.vault);
-        let vault = vault.as_ref().ok_or("vault not initialized")?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
         vault.paths().config_path.clone()
     };
     write_log_level(&config_path, &level)?;
@@ -94,7 +100,9 @@ pub fn set_log_level(state: State<AppState>, level: String) -> Result<(), String
 fn validate_level(level: &str) -> Result<(), String> {
     match level {
         "error" | "warn" | "info" | "debug" | "trace" => Ok(()),
-        _ => Err(format!("invalid log level: {level}")),
+        _ => Err(crate::logging::log_warn(format!(
+            "invalid log level: {level}"
+        ))),
     }
 }
 
@@ -103,11 +111,11 @@ fn validate_level(level: &str) -> Result<(), String> {
 /// `write_initial_config` writes the file). Preserves every other field and
 /// adds the `[logging]` section when absent (its other fields default).
 fn write_log_level(config_path: &std::path::Path, level: &str) -> Result<(), String> {
-    let text = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
-    let mut config: VaultConfig = toml::from_str(&text).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(config_path).map_err(crate::logging::log_error)?;
+    let mut config: VaultConfig = toml::from_str(&text).map_err(crate::logging::log_error)?;
     config.logging.level = level.to_owned();
-    let rendered = toml::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(config_path, rendered).map_err(|e| e.to_string())?;
+    let rendered = toml::to_string_pretty(&config).map_err(crate::logging::log_error)?;
+    std::fs::write(config_path, rendered).map_err(crate::logging::log_error)?;
     Ok(())
 }
 
@@ -124,6 +132,7 @@ pub fn connect_vault(
 ) -> Result<ConnectOutcome, ConnectError> {
     if let Some(expected_root) = state::dev_vault_root(&app) {
         if std::path::Path::new(&root_dir) != expected_root.as_path() {
+            tracing::warn!(root_dir = %root_dir, "vault connect refused: dev builds are vault-scoped");
             return Err(ConnectError::Other(format!(
                 "development builds may only connect to the isolated vault at {}",
                 expected_root.display()
@@ -132,7 +141,10 @@ pub fn connect_vault(
     }
     let outcome = state::connect_vault_core(state.inner(), &root_dir, &backend, restic_password)?;
     prefs::save_root(&app, std::path::Path::new(&outcome.root_dir))
-        .map_err(|e| ConnectError::Other(e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!(root_dir = %outcome.root_dir, error = %e, "vault connect: saving preference failed");
+            ConnectError::Other(e.to_string())
+        })?;
     Ok(outcome)
 }
 
@@ -152,8 +164,17 @@ pub fn probe_vault(root_dir: String) -> Result<VaultProbe, String> {
 pub fn open_devtools(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_owned())?;
+        .ok_or_else(|| crate::logging::log_warn("main window not found"))?;
     window.open_devtools();
+    Ok(())
+}
+
+/// Persist an error that originated in the webview and never crossed a backend
+/// command boundary. The frontend only calls this for actionable failures; it
+/// always returns `Ok` so a logging failure cannot start an error-report loop.
+#[tauri::command(rename_all = "snake_case")]
+pub fn log_frontend_error(scope: String, message: String) -> Result<(), String> {
+    tracing::error!(scope = %scope, message = %message, "frontend error");
     Ok(())
 }
 
@@ -164,8 +185,10 @@ pub fn open_devtools(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn repo_size(state: State<AppState>) -> Result<u64, String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
-    vault.repo_size().map_err(|e| e.to_string())
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
+    vault.repo_size().map_err(crate::logging::log_error)
 }
 
 /// Return a version's bytes for in-app preview. Exports the resolved version to
@@ -183,9 +206,11 @@ pub async fn preview_version(
     let vault = state.vault.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<Response, String> {
         let guard = state::lock_vault(&vault);
-        let vault = guard.as_ref().ok_or("vault not initialized")?;
+        let vault = guard
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
         let document_ref = DocumentRef::IdPrefix(document_id);
-        let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let temp_dir = tempfile::tempdir().map_err(crate::logging::log_error)?;
         // No extension => export writes `temp_dir/original_filename` and returns
         // that path, so read the path export reports (not `preview` itself).
         let exported = vault
@@ -195,12 +220,12 @@ pub async fn preview_version(
                 temp_dir.path().join("preview"),
                 &NEVER_CANCELLED,
             )
-            .map_err(|e| e.to_string())?;
-        let bytes = std::fs::read(&exported).map_err(|e| e.to_string())?;
+            .map_err(crate::logging::log_error)?;
+        let bytes = std::fs::read(&exported).map_err(crate::logging::log_error)?;
         // Drop the temp dir (and its file) now that bytes are in memory.
         drop(temp_dir);
         Ok(Response::new(bytes))
     })
     .await
-    .map_err(|e| format!("preview task failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview task failed: {e}")))?
 }

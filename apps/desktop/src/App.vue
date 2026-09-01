@@ -30,6 +30,7 @@ import { useDialogs } from "./composables/useDialogs";
 import { bulkSetPreviewCache } from "./utils/previewCache";
 import { filterDocumentPaths } from "./utils/file";
 import { useFlash } from "./composables/useFlash";
+import { reportBackendCommandError, reportError } from "./utils/reportError";
 
 const { t } = useI18n();
 const { activeSection } = useNavigation();
@@ -82,7 +83,7 @@ async function setupDragDrop(): Promise<void> {
       }
     });
   } catch (e) {
-    console.warn("drag-drop registration failed", e);
+    reportError("drag-drop", e);
   }
 }
 
@@ -143,7 +144,7 @@ async function onJobTerminal(raw: RawJob): Promise<void> {
       }
     }
   } catch (e) {
-    console.error("pending track resolution failed", e);
+    reportBackendCommandError("pending-track", e);
   }
 }
 
@@ -185,8 +186,8 @@ async function runPostConnectSetup(): Promise<void> {
 async function prefetchPreviewCache(): Promise<void> {
   try {
     bulkSetPreviewCache(await listPreviewCache());
-  } catch {
-    // Best-effort: a failed prefetch just means a cold cache this session.
+  } catch (e) {
+    reportBackendCommandError("preview.prefetch", e);
   }
 }
 

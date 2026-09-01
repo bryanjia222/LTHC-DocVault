@@ -207,10 +207,12 @@ pub fn rename_document(
     new_name: String,
 ) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     vault
         .rename_document(&DocumentRef::IdPrefix(document_id), &new_name)
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::logging::log_error)?;
     Ok(())
 }
 
@@ -225,14 +227,16 @@ pub fn set_version_note(
     note: Option<String>,
 ) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     vault
         .set_version_note(
             &DocumentRef::IdPrefix(document_id),
             &version_id,
             note.as_deref(),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::logging::log_error)?;
     Ok(())
 }
 
@@ -263,7 +267,9 @@ fn resolve_commit_ref(
             Ok((DocumentRef::IdPrefix(id), name))
         }
         (None, Some(name)) => Ok((DocumentRef::NewName(name.clone()), name)),
-        (None, None) => Err("either document_id or new_name is required".into()),
+        (None, None) => Err(crate::logging::log_warn(
+            "either document_id or new_name is required",
+        )),
     }
 }
 
@@ -274,6 +280,6 @@ fn lookup_document_name(state: &State<AppState>, id: &str) -> Result<String, Str
     let vault = state::lock_vault(&state.vault);
     let vault = vault
         .as_ref()
-        .ok_or_else(|| "vault not initialized".to_owned())?;
-    vault.document_name(id).map_err(|e| e.to_string())
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
+    vault.document_name(id).map_err(crate::logging::log_error)
 }

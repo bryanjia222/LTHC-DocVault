@@ -84,10 +84,10 @@ pub async fn read_preview_cache(
     tauri::async_runtime::spawn_blocking(move || match fs::read_to_string(&path) {
         Ok(text) => Ok(Some(text)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(crate::logging::log_error(e)),
     })
     .await
-    .map_err(|e| format!("preview cache read failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview cache read failed: {e}")))?
 }
 
 /// Write a cached preview's HTML (overwrite), creating the dir if needed.
@@ -107,11 +107,11 @@ pub async fn write_preview_cache(
     };
     let path = cache_file_path(&dir, &key);
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        fs::write(&path, html).map_err(|e| e.to_string())
+        fs::create_dir_all(&dir).map_err(crate::logging::log_error)?;
+        fs::write(&path, html).map_err(crate::logging::log_error)
     })
     .await
-    .map_err(|e| format!("preview cache write failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview cache write failed: {e}")))?
 }
 
 /// Clear the active vault's entire preview cache (its vault-keyed subdir only;
@@ -128,10 +128,10 @@ pub async fn clear_preview_cache(app: AppHandle, state: State<'_, AppState>) -> 
     tauri::async_runtime::spawn_blocking(move || match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(crate::logging::log_error(e)),
     })
     .await
-    .map_err(|e| format!("preview cache clear failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview cache clear failed: {e}")))?
 }
 
 /// List the active vault's cached previews as `{ key, html }`, sorted by
@@ -155,12 +155,12 @@ pub async fn list_preview_cache(
         let read = match fs::read_dir(&dir) {
             Ok(r) => r,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(crate::logging::log_error(e)),
         };
         // (mtime, key, html) collected then sorted by mtime ascending.
         let mut entries: Vec<(std::time::SystemTime, String, String)> = Vec::new();
         for entry in read {
-            let entry = entry.map_err(|e| e.to_string())?;
+            let entry = entry.map_err(crate::logging::log_error)?;
             let path = entry.path();
             let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
@@ -168,11 +168,11 @@ pub async fn list_preview_cache(
             let Some(key) = cache_key_from_name(file_name) else {
                 continue; // not a reversible cache filename - skip
             };
-            let meta = entry.metadata().map_err(|e| e.to_string())?;
+            let meta = entry.metadata().map_err(crate::logging::log_error)?;
             // `modified()` is unsupported on some platforms/filesystems; treat
             // those as the epoch so they sort first deterministically.
             let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-            let html = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let html = fs::read_to_string(&path).map_err(crate::logging::log_error)?;
             entries.push((mtime, key, html));
         }
         entries.sort_by_key(|(mtime, _, _)| *mtime);
@@ -182,7 +182,7 @@ pub async fn list_preview_cache(
             .collect())
     })
     .await
-    .map_err(|e| format!("preview cache list failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview cache list failed: {e}")))?
 }
 
 #[cfg(test)]

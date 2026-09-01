@@ -129,6 +129,7 @@ pub fn run() {
             commands::probe_vault,
             commands::repo_size,
             commands::preview_version,
+            commands::log_frontend_error,
             jobs::commit_document,
             jobs::create_blank_document,
             jobs::export_version,

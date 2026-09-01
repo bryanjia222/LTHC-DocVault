@@ -17,6 +17,64 @@ fn help_lists_core_commands() {
 }
 
 #[test]
+fn command_failure_is_persisted_to_cli_log() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path().join("vault");
+
+    docvault(&root).arg("init").assert().success();
+
+    let missing_source = root.join("missing.docx");
+    docvault(&root)
+        .args([
+            "commit",
+            missing_source.to_str().unwrap(),
+            "--name",
+            "report",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("The system cannot find the file specified"));
+
+    let log_dir = root.join("logs");
+    let log_path = fs::read_dir(&log_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("docvault-cli.log"))
+        })
+        .expect("rolling CLI log file");
+    let log = fs::read_to_string(&log_path).unwrap();
+    assert!(log.contains("docvault command failed"));
+}
+
+#[test]
+fn parse_failure_is_persisted_to_cli_log() {
+    // An explicit root is trusted even when the subcommand itself is invalid;
+    // this keeps the diagnostic out of the developer's real default vault.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path().join("vault");
+
+    docvault(&root)
+        .arg("definitely-not-a-command")
+        .assert()
+        .failure()
+        .stderr(contains("unrecognized subcommand"));
+
+    let log_dir = root.join("logs");
+    let log_path = fs::read_dir(&log_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("docvault-cli.log"))
+        })
+        .expect("rolling CLI log file");
+    let log = fs::read_to_string(&log_path).unwrap();
+    assert!(log.contains("command-line parse failed"));
+}
+
+#[test]
 fn init_then_list_empty_vault() {
     let temp_dir = tempfile::tempdir().unwrap();
 

@@ -37,7 +37,7 @@ pub(super) async fn load_conversations(
     let session = state.qinbixin.lock().unwrap().clone();
     let token = session.token;
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let (friend_envelope, token1) = request_json::<Vec<RawConversation>>(
         base_url,

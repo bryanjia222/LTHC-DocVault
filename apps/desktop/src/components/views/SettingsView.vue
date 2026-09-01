@@ -25,6 +25,10 @@ import {
 import StatusVaultCard from "../status/StatusVaultCard.vue";
 import StatusTasksPanel from "../status/StatusTasksPanel.vue";
 import StatusArchivePanel from "../status/StatusArchivePanel.vue";
+import {
+  reportBackendCommandError,
+  reportError,
+} from "../../utils/reportError";
 
 const { t, locale } = useI18n();
 const localeStorageKey = "docvault-locale";
@@ -86,7 +90,7 @@ async function onLogLevelChange(event: Event) {
   try {
     await setLogLevel(level);
   } catch (e) {
-    console.error("set_log_level failed", e);
+    reportBackendCommandError("settings.log-level", e);
   }
 }
 
@@ -120,7 +124,11 @@ async function applyLocaleRestart(restart: boolean) {
 
   locale.value = nextLocale;
   previousLocale.value = nextLocale;
-  localStorage.setItem(localeStorageKey, nextLocale);
+  try {
+    localStorage.setItem(localeStorageKey, nextLocale);
+  } catch (error) {
+    reportError("locale.persist", error);
+  }
   localeRestartPending.value = !restart;
   localeRestartOpen.value = false;
   pendingLocale.value = "";

@@ -15,7 +15,7 @@ fn dotenv_path() -> PathBuf {
 
 fn read_env_map() -> Result<HashMap<String, String>, String> {
     let text = fs::read_to_string(dotenv_path())
-        .map_err(|e| format!("unable to read dev credentials: {e}"))?;
+        .map_err(|e| crate::logging::log_warn(format!("unable to read dev credentials: {e}")))?;
     Ok(text
         .lines()
         .filter_map(|line| {
@@ -96,7 +96,7 @@ pub async fn qinbixin_login_dev_account(
     let env = read_env_map()?;
     let index = account_id
         .parse::<usize>()
-        .map_err(|_| "invalid dev account".to_owned())?;
+        .map_err(|_| crate::logging::log_warn("invalid dev account"))?;
     let user_name = env
         .get(&format!("DEV_QBX_ID_{index}"))
         .map(|value| value.trim())
@@ -106,7 +106,7 @@ pub async fn qinbixin_login_dev_account(
         .map(|value| value.trim())
         .unwrap_or_default();
     if user_name.is_empty() || password.is_empty() {
-        return Err("missing dev account credentials".to_owned());
+        return Err(crate::logging::log_warn("missing dev account credentials"));
     }
     login_with_credentials(&app, &state, user_name.to_owned(), password.to_owned()).await
 }

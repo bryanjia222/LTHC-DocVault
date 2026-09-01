@@ -1,5 +1,7 @@
 import type { Version } from "../data/mock";
 
+import { reportError } from "./reportError";
+
 /** Maximum rendered previews kept in memory. Past this, the least-recently-used
  * entry is evicted (the disk cache still holds it, so a miss here just falls
  * through to disk). */
@@ -114,8 +116,8 @@ export async function captureHtml(container: HTMLElement): Promise<string> {
     if (img.src.startsWith("blob:")) {
       try {
         img.src = await blobToDataUrl(img.src);
-      } catch {
-        // Best-effort: keep the (now-dangling) src.
+      } catch (error) {
+        reportError("preview.blob-image", error);
       }
     }
   }

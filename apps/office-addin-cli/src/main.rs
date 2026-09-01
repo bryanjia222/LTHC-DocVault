@@ -15,10 +15,14 @@
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitCode};
 
 use anyhow::{bail, Context, Result};
+use clap::error::ErrorKind;
 use clap::{Parser, Subcommand};
+use tracing::error;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::filter::LevelFilter;
 use winreg::enums::*;
 use winreg::RegKey;
 
@@ -29,7 +33,10 @@ const REG_BASE: &str = r"Software\Microsoft\Office\16.0\WEF\TrustedCatalogs";
 const OFFICE_EXES: &[&str] = &["WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE"];
 
 #[derive(Parser)]
-#[command(name = "docvault-addin", about = "安装/卸载 DocVault 的 Office 插件(Word/Excel/PPT)")]
+#[command(
+    name = "docvault-addin",
+    about = "安装/卸载 DocVault 的 Office 插件(Word/Excel/PPT)"
+)]
 struct Cli {
     #[command(subcommand)]
     action: Action,
@@ -55,18 +62,78 @@ enum Action {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     // 保存原始参数,供"非管理员→自动重提权"时原样传给提权后的实例。
     let raw_args: Vec<String> = env::args().skip(1).collect();
-    let cli = Cli::parse();
-    match cli.action {
+    let _guard = init_logging();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(parse_error)
+            if matches!(
+                parse_error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            return match parse_error.print() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(print_error) => {
+                    error!(error = %print_error, "failed to print add-in diagnostic");
+                    eprintln!("{print_error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
+        Err(parse_error) => {
+            error!(error = %parse_error, "office add-in command-line parse failed");
+            eprintln!("{parse_error}");
+            return ExitCode::from(2);
+        }
+    };
+    match run_action(&raw_args, cli.action) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(command_error) => {
+            error!(error = %command_error, "office add-in command failed");
+            eprintln!("{command_error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run_action(raw_args: &[String], action: Action) -> Result<()> {
+    match action {
         Action::Install { manifest, restart } => {
             let manifest = resolve_manifest(manifest.as_deref())?;
-            install(&manifest, restart, &raw_args)?
+            install(&manifest, restart, raw_args)
         }
-        Action::Uninstall { remove_share } => uninstall(remove_share, &raw_args)?,
+        Action::Uninstall { remove_share } => uninstall(remove_share, raw_args),
     }
-    Ok(())
+}
+
+fn init_logging() -> Option<WorkerGuard> {
+    let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) else {
+        eprintln!("warning: could not determine the log directory; logging to stderr only");
+        return None;
+    };
+    let log_dir = local_app_data.join("DocVault").join("logs");
+    if let Err(create_error) = std::fs::create_dir_all(&log_dir) {
+        eprintln!(
+            "warning: could not create add-in log directory ({}): {create_error}",
+            log_dir.display()
+        );
+        return None;
+    }
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "docvault-addin.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    if let Err(init_error) = tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::WARN)
+        .with_writer(non_blocking)
+        .with_target(false)
+        .try_init()
+    {
+        eprintln!("warning: could not install add-in file logger: {init_error}");
+    }
+    Some(guard)
 }
 
 /// 定位 manifest.xml:`--manifest` 显式指定则校验;否则从当前目录与可执行文件
@@ -95,9 +162,7 @@ fn resolve_manifest(explicit: Option<&Path>) -> Result<PathBuf> {
             }
         }
     }
-    bail!(
-        "未找到 manifest.xml。请在仓库目录内运行本工具,或用 --manifest 指定其绝对路径。"
-    )
+    bail!("未找到 manifest.xml。请在仓库目录内运行本工具,或用 --manifest 指定其绝对路径。")
 }
 
 /// 是否为管理员进程:`net session` 对非管理员返回访问拒绝。
@@ -144,7 +209,9 @@ fn install(manifest: &Path, restart: bool, raw_args: &[String]) -> Result<()> {
     }
 
     let localappdata = env::var("LOCALAPPDATA").context("缺少 LOCALAPPDATA 环境变量")?;
-    let catalog_dir = Path::new(&localappdata).join("DocVault").join("office-catalog");
+    let catalog_dir = Path::new(&localappdata)
+        .join("DocVault")
+        .join("office-catalog");
     std::fs::create_dir_all(&catalog_dir).context("创建目录清单目录")?;
     std::fs::copy(manifest, catalog_dir.join("manifest.xml"))
         .context("拷贝 manifest 到目录清单目录")?;
@@ -177,7 +244,9 @@ fn uninstall(remove_share: bool, raw_args: &[String]) -> Result<()> {
     }
     unregister_catalog()?;
     if remove_share {
-        let _ = Command::new("net").args(["share", SHARE_NAME, "/delete"]).output();
+        let _ = Command::new("net")
+            .args(["share", SHARE_NAME, "/delete"])
+            .output();
         println!("已删除共享 {SHARE_NAME}。");
     }
     println!("已卸载。请关闭并重新打开 Office 应用以移除插件。");
@@ -188,7 +257,9 @@ fn uninstall(remove_share: bool, raw_args: &[String]) -> Result<()> {
 /// 便于同一台机器上的 Office 与本机访问;局域网分发时,其他机器把同样的注册表
 /// `Url` 指向 `\\<本机>\DocVaultAddins` 即可(本工具暂未内置该模式)。
 fn ensure_share(catalog_dir: &Path) -> Result<()> {
-    let _ = Command::new("net").args(["share", SHARE_NAME, "/delete"]).output();
+    let _ = Command::new("net")
+        .args(["share", SHARE_NAME, "/delete"])
+        .output();
     let share_arg = format!("{SHARE_NAME}={}", catalog_dir.display());
     let out = Command::new("net")
         .args(["share", &share_arg, "/grant:everyone,READ"])

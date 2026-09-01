@@ -1,4 +1,5 @@
 import { ref, watch } from "vue";
+import { reportError } from "../utils/reportError";
 
 /*
  * What double-clicking a document row does, persisted in localStorage. A
@@ -13,8 +14,12 @@ const STORAGE_KEY = "docvault.doubleClickAction";
 
 function readInitial(): DoubleClickAction {
   if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "preview" || stored === "open") return stored;
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored === "preview" || stored === "open") return stored;
+    } catch (error) {
+      reportError("doubleClick.read", error);
+    }
   }
   return "preview";
 }
@@ -23,7 +28,11 @@ const doubleClickAction = ref<DoubleClickAction>(readInitial());
 
 watch(doubleClickAction, (value) => {
   if (typeof localStorage !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, value);
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+    } catch (error) {
+      reportError("doubleClick.persist", error);
+    }
   }
 });
 

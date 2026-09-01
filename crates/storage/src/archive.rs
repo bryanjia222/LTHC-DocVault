@@ -356,23 +356,60 @@ impl VaultStorage {
     /// next recovery - is preserved. Safe at startup: no archive is in flight
     /// then except the recovery that runs immediately before this.
     pub fn gc_intake(&self) {
-        let Ok(doc_entries) = fs::read_dir(&self.paths.intake_dir) else {
-            return;
+        let doc_entries = match fs::read_dir(&self.paths.intake_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => {
+                warn!(
+                    path = %self.paths.intake_dir.display(),
+                    error = %error,
+                    "failed to scan intake for garbage collection"
+                );
+                return;
+            }
         };
         for doc_dir in doc_entries.flatten() {
             let Some(doc_id) = doc_dir.file_name().to_str().map(str::to_owned) else {
+                warn!(
+                    path = %doc_dir.path().display(),
+                    "skipping non-UTF-8 intake document directory"
+                );
                 continue;
             };
-            let Ok(version_entries) = fs::read_dir(doc_dir.path()) else {
-                continue;
+            let version_entries = match fs::read_dir(doc_dir.path()) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    warn!(
+                        path = %doc_dir.path().display(),
+                        error = %error,
+                        "failed to scan document intake for garbage collection"
+                    );
+                    continue;
+                }
             };
             for version_dir in version_entries.flatten() {
                 let Some(version_id) = version_dir.file_name().to_str().map(str::to_owned) else {
+                    warn!(
+                        path = %version_dir.path().display(),
+                        "skipping non-UTF-8 intake version directory"
+                    );
                     continue;
                 };
-                let still_pending = self
-                    .is_version_pending(&doc_id, &version_id)
-                    .unwrap_or(false);
+                // A failed pending check must preserve intake: treating the
+                // row as non-pending would delete the only durable copy.
+                let still_pending = match self.is_version_pending(&doc_id, &version_id) {
+                    Ok(pending) => pending,
+                    Err(error) => {
+                        warn!(
+                            document_id = %doc_id,
+                            version_id = %version_id,
+                            error = %error,
+                            "failed to check intake version state; preserving intake"
+                        );
+                        continue;
+                    }
+                };
                 if !still_pending && let Err(error) = fs::remove_dir_all(version_dir.path()) {
                     warn!(
                         path = %version_dir.path().display(),
@@ -382,11 +419,24 @@ impl VaultStorage {
                 }
             }
             // Drop the per-document intake dir once it is empty.
-            if fs::read_dir(doc_dir.path())
-                .map(|mut entries| entries.next().is_none())
-                .unwrap_or(false)
-            {
-                let _ = fs::remove_dir(doc_dir.path());
+            let is_empty = match fs::read_dir(doc_dir.path()) {
+                Ok(mut entries) => entries.next().is_none(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    warn!(
+                        path = %doc_dir.path().display(),
+                        error = %error,
+                        "failed to check whether document intake is empty"
+                    );
+                    false
+                }
+            };
+            if is_empty && let Err(error) = fs::remove_dir(doc_dir.path()) {
+                warn!(
+                    path = %doc_dir.path().display(),
+                    error = %error,
+                    "failed to remove empty document intake directory"
+                );
             }
         }
     }

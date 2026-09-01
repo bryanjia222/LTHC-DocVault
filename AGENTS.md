@@ -675,6 +675,53 @@ tracing::error!
 
 ---
 
+## 6.3 Error Boundary Logging
+
+Every failure that becomes a user-visible message must be durably logged at the
+boundary that produced it, before the error is returned or displayed:
+
+* Rust command boundaries log the error before returning `Err` to the caller.
+* Job runners log start, terminal status, and failure context.
+* CLI and tooling entry points log the top-level command failure before
+  printing to stderr.
+* Bridges log backend response errors at the Rust side; browser/host-local
+  failures are reported through the bridge's log endpoint.
+
+---
+
+## 6.4 Frontend Error Reporting
+
+Browser-side failures (file access, drag-drop setup, local rendering,
+serialization, transport) must route through the shared frontend error reporter
+to the backend's persistent log. This deduplication rule applies to the
+single-process desktop app, where the WebView and Rust backend share one log
+stream; in a true client-server web app, frontend and backend logs are separate
+channels and both are normally kept. Backend command rejections are already
+logged at the Rust boundary and MUST NOT be re-reported from the frontend.
+Global uncaught error and unhandled-rejection handlers must report through the
+same channel.
+
+---
+
+## 6.5 Log Destinations
+
+* Desktop: rolling files under the app config directory (`logs/docvault.log*`).
+* CLI: rolling files under the vault root (`logs/docvault-cli.log*`).
+* Office add-in installer: rolling files under `%LOCALAPPDATA%\DocVault\logs`.
+* Add-in task pane: local errors are posted to the desktop bridge and persisted
+  there.
+
+---
+
+## 6.6 No Silent Catches
+
+An empty or swallowing catch is acceptable only when the failure is already
+durably logged elsewhere (for example, at the Rust command boundary).
+Otherwise, the catch must report the error. If a catch intentionally ignores a
+best-effort failure, it must carry a comment naming where the error is recorded.
+
+---
+
 # 7. Performance Guidelines
 
 * Prefer streaming over full file loading.

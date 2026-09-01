@@ -17,6 +17,10 @@ import {
   setPreviewCache,
 } from "../../utils/previewCache";
 import { detectPreviewKind } from "../../utils/previewDispatch";
+import {
+  reportBackendCommandError,
+  reportError,
+} from "../../utils/reportError";
 import { createPreviewRenderer, type RenderGuard } from "./renderers";
 
 export interface DocumentPreviewSource {
@@ -99,7 +103,12 @@ export function useDocumentPreview(
     }
 
     if (!skipCache) {
-      const diskHit = await readPreviewCache(key);
+      let diskHit: string | null = null;
+      try {
+        diskHit = await readPreviewCache(key);
+      } catch (caught) {
+        reportBackendCommandError("preview.cache-read", caught);
+      }
       if (guard.cancelled) return;
       if (diskHit) {
         setPreviewCache(key, diskHit);
@@ -128,7 +137,10 @@ export function useDocumentPreview(
       if (guard.cancelled) return;
       await renderAndShow(bytes, key, kind, guard);
     } catch (caught) {
-      if (!guard.cancelled) error.value = String(caught);
+      if (!guard.cancelled) {
+        error.value = String(caught);
+        reportBackendCommandError("preview.load", caught);
+      }
     } finally {
       if (!guard.cancelled) loading.value = false;
     }
@@ -149,7 +161,8 @@ export function useDocumentPreview(
       const bytes = await fetchBytes(wantsWorkingCopy);
       if (!guard.cancelled && bytes) await refreshAndSwap(bytes, key, guard);
     } catch (caught) {
-      if (!guard.cancelled) console.error("preview refresh failed", caught);
+      if (!guard.cancelled)
+        reportBackendCommandError("preview.refresh", caught);
     } finally {
       if (!guard.cancelled) refreshing.value = false;
     }
@@ -189,10 +202,10 @@ export function useDocumentPreview(
       if (guard.cancelled) return;
       setPreviewCache(key, html);
       void writePreviewCache(key, html).catch((caught) =>
-        console.error("preview cache write failed", caught),
+        reportBackendCommandError("preview.cache-write", caught),
       );
     } catch (caught) {
-      console.error("preview capture failed", caught);
+      reportError("preview.capture", caught);
     }
   }
 
@@ -219,7 +232,7 @@ export function useDocumentPreview(
       if (container.value) container.value.innerHTML = html;
       setPreviewCache(key, html);
       void writePreviewCache(key, html).catch((caught) =>
-        console.error("preview cache write failed", caught),
+        reportBackendCommandError("preview.cache-write", caught),
       );
       if (scrollEl) {
         await nextTick();

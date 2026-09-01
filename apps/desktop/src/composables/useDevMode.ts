@@ -1,4 +1,5 @@
 import { ref, watch } from "vue";
+import { reportError } from "../utils/reportError";
 
 /*
  * Developer-mode toggle, persisted in localStorage. Frontend-only authority: it
@@ -14,12 +15,20 @@ const STORAGE_KEY = "docvault.devMode";
 const isDevMode = ref(false);
 
 if (import.meta.env.DEV) {
-  isDevMode.value =
-    typeof localStorage !== "undefined" &&
-    localStorage.getItem(STORAGE_KEY) === "true";
+  if (typeof localStorage !== "undefined") {
+    try {
+      isDevMode.value = localStorage.getItem(STORAGE_KEY) === "true";
+    } catch (error) {
+      reportError("devMode.read", error);
+    }
+  }
   watch(isDevMode, (value) => {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, String(value));
+      try {
+        localStorage.setItem(STORAGE_KEY, String(value));
+      } catch (error) {
+        reportError("devMode.persist", error);
+      }
     }
   });
 }

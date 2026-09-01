@@ -39,7 +39,9 @@ fn ext_from_filename(filename: &str) -> Result<String, String> {
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
-        .ok_or_else(|| format!("no extension in original filename: {filename}"))
+        .ok_or_else(|| {
+            crate::logging::log_warn(format!("no extension in original filename: {filename}"))
+        })
 }
 
 /// The extension of a document's current version (lowercased), derived from the
@@ -48,8 +50,10 @@ fn ext_from_filename(filename: &str) -> Result<String, String> {
 fn ext_for_doc(vault: &DocVault, doc_id: &str) -> Result<String, String> {
     let version = vault
         .current_version(&DocumentRef::IdPrefix(doc_id.to_owned()))
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no current version for document {doc_id}"))?;
+        .map_err(crate::logging::log_error)?
+        .ok_or_else(|| {
+            crate::logging::log_warn(format!("no current version for document {doc_id}"))
+        })?;
     ext_from_filename(&version.original_filename)
 }
 
@@ -96,11 +100,11 @@ fn library_filename(doc_name: &str, doc_id: &str, ext: &str) -> String {
 fn doc_name_for(vault: &DocVault, doc_id: &str) -> Result<String, String> {
     vault
         .list_documents()
-        .map_err(|e| e.to_string())?
+        .map_err(crate::logging::log_error)?
         .into_iter()
         .find(|d| d.id.as_str() == doc_id)
         .map(|d| d.name)
-        .ok_or_else(|| format!("document {doc_id} not found"))
+        .ok_or_else(|| crate::logging::log_warn(format!("document {doc_id} not found")))
 }
 
 /// The deterministic library path for a document:
@@ -128,7 +132,7 @@ fn materialize_at(
             path,
             cancel,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::logging::log_error)?;
     Ok(())
 }
 
@@ -146,7 +150,7 @@ pub(crate) fn ensure_library_copies_for(
     vault: &DocVault,
     slice: &mut DesktopStateSlice,
 ) -> Result<(), String> {
-    let docs = vault.list_documents().map_err(|e| e.to_string())?;
+    let docs = vault.list_documents().map_err(crate::logging::log_error)?;
     for doc in &docs {
         let doc_id = doc.id.as_str();
         // Build the path from the already-available doc name + ext rather than
@@ -162,9 +166,18 @@ pub(crate) fn ensure_library_copies_for(
         let legacy = library_dir(vault).join(format!("{doc_id}.{ext}"));
         if legacy != lib_path && legacy.exists() {
             if lib_path.exists() {
-                let _ = fs::remove_file(&legacy);
+                if let Err(error) = fs::remove_file(&legacy) {
+                    warn!(legacy = %legacy.display(), %error, "failed to remove legacy library copy");
+                }
             } else {
-                let _ = fs::rename(&legacy, &lib_path);
+                if let Err(error) = fs::rename(&legacy, &lib_path) {
+                    warn!(
+                        legacy = %legacy.display(),
+                        target = %lib_path.display(),
+                        %error,
+                        "failed to migrate legacy library copy"
+                    );
+                }
             }
         }
         let needs_baseline = !lib_path.exists();
@@ -212,17 +225,24 @@ pub(crate) fn ensure_library_copies_for(
 /// an `AppHandle`.
 pub(crate) fn remove_library_copy_at(library_dir: &Path, doc_id: &str) -> Result<(), String> {
     let suffix = format!("-{doc_id}");
-    if let Ok(entries) = fs::read_dir(library_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // Match both the legacy `<docId>.<ext>` name (stem == doc_id) and the
-            // current `<docName>-<docId>.<ext>` name (stem ends with `-<docId>`).
-            let belongs = path
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .is_some_and(|stem| stem == doc_id || stem.ends_with(&suffix));
-            if belongs {
-                let _ = fs::remove_file(&path);
+    let entries = match fs::read_dir(library_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            warn!(dir = %library_dir.display(), %error, "failed to list library copies");
+            return Ok(());
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Match both the legacy `<docId>.<ext>` name (stem == doc_id) and the
+        // current `<docName>-<docId>.<ext>` name (stem ends with `-<docId>`).
+        let belongs = path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .is_some_and(|stem| stem == doc_id || stem.ends_with(&suffix));
+        if belongs {
+            if let Err(error) = fs::remove_file(&path) {
+                warn!(path = %path.display(), %error, "failed to remove library copy");
             }
         }
     }
@@ -239,7 +259,7 @@ fn open_current_copy(vault: &DocVault, doc_id: &str) -> Result<(), String> {
     }
     open::that(&path)
         .map(|_| ())
-        .map_err(|e| format!("failed to open editor: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("failed to open editor: {e}")))
 }
 
 /// Look up a specific version by id within a document.
@@ -250,10 +270,14 @@ fn version_for(
 ) -> Result<docvault_types::Version, String> {
     vault
         .list_versions(&DocumentRef::IdPrefix(doc_id.to_owned()))
-        .map_err(|e| e.to_string())?
+        .map_err(crate::logging::log_error)?
         .into_iter()
         .find(|v| v.id == version_id)
-        .ok_or_else(|| format!("version {version_id} not found for document {doc_id}"))
+        .ok_or_else(|| {
+            crate::logging::log_warn(format!(
+                "version {version_id} not found for document {doc_id}"
+            ))
+        })
 }
 
 /// Clear the read-only attribute from `path` so it can be overwritten/deleted.
@@ -264,9 +288,11 @@ fn version_for(
 /// the original mode), hence the clippy allow.
 #[allow(clippy::permissions_set_readonly_false)]
 fn clear_readonly(path: &Path) -> Result<(), String> {
-    let mut perms = fs::metadata(path).map_err(|e| e.to_string())?.permissions();
+    let mut perms = fs::metadata(path)
+        .map_err(crate::logging::log_error)?
+        .permissions();
     perms.set_readonly(false);
-    fs::set_permissions(path, perms).map_err(|e| e.to_string())
+    fs::set_permissions(path, perms).map_err(crate::logging::log_error)
 }
 
 /// Export a non-current version to a read-only temp file and return its path,
@@ -294,7 +320,7 @@ fn materialize_readonly_temp(
     let temp_path = std::env::temp_dir().join(filename);
     if temp_path.exists() {
         clear_readonly(&temp_path)?;
-        fs::remove_file(&temp_path).map_err(|e| e.to_string())?;
+        fs::remove_file(&temp_path).map_err(crate::logging::log_error)?;
     }
     vault
         .export_version(
@@ -303,12 +329,12 @@ fn materialize_readonly_temp(
             &temp_path,
             &NEVER_CANCELLED,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::logging::log_error)?;
     let mut perms = fs::metadata(&temp_path)
-        .map_err(|e| e.to_string())?
+        .map_err(crate::logging::log_error)?
         .permissions();
     perms.set_readonly(true);
-    fs::set_permissions(&temp_path, perms).map_err(|e| e.to_string())?;
+    fs::set_permissions(&temp_path, perms).map_err(crate::logging::log_error)?;
     Ok(temp_path)
 }
 
@@ -318,7 +344,7 @@ fn open_version_readonly(vault: &DocVault, doc_id: &str, version_id: &str) -> Re
     let temp_path = materialize_readonly_temp(vault, doc_id, version_id)?;
     open::that(&temp_path)
         .map(|_| ())
-        .map_err(|e| format!("failed to open editor: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("failed to open editor: {e}")))
 }
 
 /// Copy the document's library working copy - the file that mirrors the current
@@ -340,7 +366,7 @@ fn export_working_copy_at(
     }
     fs::copy(&lib_path, output_path)
         .map(|_| ())
-        .map_err(|e| format!("failed to export working copy: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("failed to export working copy: {e}")))
 }
 
 // --- AppHandle-bound commands ---
@@ -351,7 +377,9 @@ fn export_working_copy_at(
 #[tauri::command(rename_all = "snake_case")]
 pub fn library_path(document_id: String, state: State<AppState>) -> Result<String, String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     let path = library_path_for_doc(vault, &document_id)?;
     Ok(path.display().to_string())
 }
@@ -370,12 +398,16 @@ pub fn open_library_copy(
     state: State<AppState>,
 ) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     let doc_ref = DocumentRef::IdPrefix(document_id.clone());
     let current = vault
         .current_version(&doc_ref)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no current version for document {document_id}"))?;
+        .map_err(crate::logging::log_error)?
+        .ok_or_else(|| {
+            crate::logging::log_warn(format!("no current version for document {document_id}"))
+        })?;
     match version.as_deref() {
         None | Some("current") => open_current_copy(vault, &document_id),
         Some(v) if v == current.id => open_current_copy(vault, &document_id),
@@ -388,7 +420,9 @@ pub fn open_library_copy(
 #[tauri::command(rename_all = "snake_case")]
 pub fn remove_library_copy(document_id: String, state: State<AppState>) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     remove_library_copy_at(&library_dir(vault), &document_id)
 }
 
@@ -403,7 +437,9 @@ pub fn export_working_copy(
     state: State<AppState>,
 ) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     export_working_copy_at(vault, &document_id, Path::new(&output_path))
 }
 
@@ -423,16 +459,18 @@ pub async fn preview_working_copy(
     let vault = state.vault.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<Response, String> {
         let guard = state::lock_vault(&vault);
-        let vault = guard.as_ref().ok_or("vault not initialized")?;
+        let vault = guard
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
         let lib_path = library_path_for_doc(vault, &document_id)?;
         if !lib_path.exists() {
             materialize_at(vault, &document_id, &lib_path, &NEVER_CANCELLED)?;
         }
-        let bytes = std::fs::read(&lib_path).map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&lib_path).map_err(crate::logging::log_error)?;
         Ok(Response::new(bytes))
     })
     .await
-    .map_err(|e| format!("preview working copy task failed: {e}"))?
+    .map_err(|e| crate::logging::log_error(format!("preview working copy task failed: {e}")))?
 }
 
 /// Ensure every document has a library copy and a tracked entry pointing at it.
@@ -442,7 +480,9 @@ pub async fn preview_working_copy(
 #[tauri::command(rename_all = "snake_case")]
 pub fn ensure_library_copies(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let vault = state::lock_vault(&state.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     let root_key = canonical_key(&vault.paths().root_dir);
     let Some(state_file) = state_path(&app) else {
         return Ok(()); // no app config dir - nothing to persist (best-effort)

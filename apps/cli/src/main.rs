@@ -1,6 +1,10 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use anyhow::{Result, bail};
+use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use docvault_core::DocVault;
 use docvault_storage::{
@@ -8,7 +12,8 @@ use docvault_storage::{
 };
 use docvault_types::CommitMetadata;
 use serde_json::json;
-use tracing::error;
+use tracing::{error, warn};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::LevelFilter;
 
 #[derive(Debug, Parser)]
@@ -160,25 +165,105 @@ enum OutputFormat {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    init_tracing(&cli.global.log_level);
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(parse_error)
+            if matches!(
+                parse_error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            return match parse_error.print() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    let _guard = init_tracing("warn", &root_for_parse_failure());
+                    error!(error = %error, "failed to print CLI diagnostic");
+                    eprintln!("{error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
+        Err(parse_error) => {
+            let _guard = init_tracing("warn", &root_for_parse_failure());
+            error!(error = %parse_error, "command-line parse failed");
+            let print_result = parse_error.print();
+            if let Err(print_error) = print_result {
+                eprintln!("failed to print command-line error: {print_error}");
+            }
+            return ExitCode::from(2);
+        }
+    };
+
+    let _guard = init_tracing(&cli.global.log_level, &cli.global.root());
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            error!(%error, "docvault command failed");
-            eprintln!("{error}");
+        Err(command_error) => {
+            error!(error = %command_error, "docvault command failed");
+            eprintln!("{command_error}");
             ExitCode::from(2)
         }
     }
 }
 
-fn init_tracing(level: &str) {
-    let level = level.parse::<LevelFilter>().unwrap_or(LevelFilter::WARN);
-    tracing_subscriber::fmt()
+/// Honor an explicit `--root-dir` even when a later token makes parsing fail.
+/// Other parse errors use the default root, so diagnostics are still durable.
+fn root_for_parse_failure() -> PathBuf {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    for index in 0..args.len() {
+        if args[index] == "--root-dir" {
+            if let Some(root) = args.get(index + 1) {
+                return PathBuf::from(root);
+            }
+        } else if let Some(root) = args[index].strip_prefix("--root-dir=") {
+            return PathBuf::from(root);
+        }
+    }
+    VaultPaths::default_root()
+}
+
+/// Install a rolling file logger under `<root>/logs`. Keep stderr as the
+/// user-facing channel; the file is the durable audit trail. If the vault
+/// root or logs directory cannot be prepared, fall back to stderr rather than
+/// turning a logging setup failure into a command failure.
+fn init_tracing(level: &str, root_dir: &Path) -> Option<WorkerGuard> {
+    let level = match level.parse::<LevelFilter>() {
+        Ok(level) => level,
+        Err(_) => {
+            // Install WARN first so the fallback itself is recorded.
+            let guard = init_file_tracing(LevelFilter::WARN, root_dir);
+            warn!(level = %level, "invalid --log-level; using warn");
+            return guard;
+        }
+    };
+    init_file_tracing(level, root_dir)
+}
+
+fn init_file_tracing(level: LevelFilter, root_dir: &Path) -> Option<WorkerGuard> {
+    let log_dir = root_dir.join("logs");
+    if let Err(create_error) = std::fs::create_dir_all(&log_dir) {
+        tracing_subscriber::fmt()
+            .with_max_level(level)
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .init();
+        eprintln!(
+            "warning: could not create CLI log directory ({}); logging to stderr: {create_error}",
+            log_dir.display()
+        );
+        return None;
+    }
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "docvault-cli.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    if let Err(init_error) = tracing_subscriber::fmt()
         .with_max_level(level)
-        .with_writer(std::io::stderr)
+        .with_writer(non_blocking)
         .with_target(false)
-        .init();
+        .try_init()
+    {
+        eprintln!("warning: could not install CLI file logger: {init_error}");
+    }
+    Some(guard)
 }
 
 fn run(cli: Cli) -> Result<()> {

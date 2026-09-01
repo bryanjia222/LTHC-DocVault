@@ -3,6 +3,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { confirm as confirmNative } from "@tauri-apps/plugin-dialog";
 import { ref, type Ref } from "vue";
 
+import { reportError } from "../utils/reportError";
+import { isTauri } from "../utils/runtime";
+
 import {
   documents as mockDocuments,
   jobs as mockJobs,
@@ -41,10 +44,7 @@ const TERMINAL_STATUSES: ReadonlySet<RawJob["status"]> = new Set([
   "cancelled",
 ]);
 
-/** True when running inside a Tauri window (IPC available). */
-export function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
+export { isTauri };
 
 /**
  * Reliable confirmation dialog. Under Tauri uses the native OS dialog
@@ -64,7 +64,8 @@ export async function confirmDialog(
         return await confirmNative(message);
       }
       return await confirmNative(message, options);
-    } catch {
+    } catch (error) {
+      reportError("dialog.confirm", error);
       return false;
     }
   }

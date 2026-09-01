@@ -29,6 +29,7 @@ import {
   deriveModificationStatus,
 } from "../utils/tracking";
 import { isTauri } from "./useVault";
+import { reportBackendCommandError } from "../utils/reportError";
 
 /*
  * Desktop-local annotations: tags + tracked source files. Backed by the
@@ -112,7 +113,7 @@ async function loadDesktopState(): Promise<void> {
     trashed.value = state.trashed;
     trashedVersions.value = state.trashedVersions;
   } catch (e) {
-    console.error("loadDesktopState failed", e);
+    reportBackendCommandError("desktop-state.load", e);
   } finally {
     loaded.value = true;
   }
@@ -159,7 +160,7 @@ async function saveDesktopState(): Promise<void> {
       trashed_versions: trashedVersions.value.map(toRawTrashedVersion),
     });
   } catch (e) {
-    console.error("saveDesktopState failed", e);
+    reportBackendCommandError("desktop-state.save", e);
   }
 }
 

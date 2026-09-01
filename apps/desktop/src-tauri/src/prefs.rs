@@ -17,16 +17,32 @@ struct Prefs {
 }
 
 fn prefs_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .app_config_dir()
-        .ok()
-        .map(|dir| dir.join("desktop-prefs.json"))
+    match app.path().app_config_dir() {
+        Ok(dir) => Some(dir.join("desktop-prefs.json")),
+        Err(error) => {
+            tracing::warn!(%error, "desktop preference directory unavailable");
+            None
+        }
+    }
 }
 
 pub fn load_root(app: &AppHandle) -> Option<PathBuf> {
     let path = prefs_path(app)?;
-    let text = fs::read_to_string(&path).ok()?;
-    let prefs: Prefs = serde_json::from_str(&text).ok()?;
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "failed to read desktop preferences");
+            return None;
+        }
+    };
+    let prefs = match serde_json::from_str::<Prefs>(&text) {
+        Ok(prefs) => prefs,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "invalid desktop preferences file");
+            return None;
+        }
+    };
     prefs
         .vault_root
         .filter(|value| !value.is_empty())

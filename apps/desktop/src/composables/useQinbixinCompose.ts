@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 
+import { reportError } from "../utils/reportError";
 import { useQinbixin, type QinbixinMedia } from "./useQinbixin";
 import type { QinbixinView } from "./useQinbixinMailbox";
 import { sanitizeQinbixinRichContent } from "../components/qinbixin/content";
@@ -72,11 +73,15 @@ export function useQinbixinCompose(activeView: Ref<QinbixinView>) {
     };
     const recipientId = sendRecipientId.value;
     if (!recipientId) {
-      sendFeedback.value = t("qinbixin.recipientRequired");
+      const message = t("qinbixin.recipientRequired");
+      sendFeedback.value = message;
+      reportError("qinbixin.compose.recipient", new Error(message));
       return;
     }
     if (!sendTitle.value.trim()) {
-      sendFeedback.value = t("qinbixin.titleRequired");
+      const message = t("qinbixin.titleRequired");
+      sendFeedback.value = message;
+      reportError("qinbixin.compose.title", new Error(message));
       return;
     }
 

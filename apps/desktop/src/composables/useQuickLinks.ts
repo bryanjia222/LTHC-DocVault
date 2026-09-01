@@ -1,4 +1,5 @@
 import { ref, watch } from "vue";
+import { reportError } from "../utils/reportError";
 
 /*
  * Sidebar "常用链接" (quick links): user-pinned web bookmarks, persisted in
@@ -39,8 +40,9 @@ function readInitial(): QuickLink[] {
           favicon: typeof link.favicon === "string" ? link.favicon : undefined,
         }));
       }
-    } catch {
+    } catch (error) {
       // Corrupt / unreadable stored value - start fresh.
+      reportError("quickLinks.read", error);
     }
   }
   return [];
@@ -52,7 +54,11 @@ watch(
   quickLinks,
   (value) => {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+      } catch (error) {
+        reportError("quickLinks.persist", error);
+      }
     }
   },
   { deep: true },

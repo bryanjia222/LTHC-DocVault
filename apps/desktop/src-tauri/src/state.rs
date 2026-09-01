@@ -216,28 +216,42 @@ pub fn connect_vault_core(
         .iter()
         .any(|record| record.status == JobStatus::Running);
     if running {
+        tracing::warn!(root_dir = %root_dir, "vault connect refused: a job is running");
         return Err(ConnectError::JobsRunning);
     }
 
     let root = PathBuf::from(root_dir);
     let paths = VaultPaths::from_root(&root);
-    let empty = is_empty_dir(&root)?;
+    let empty = is_empty_dir(&root).map_err(|error| {
+        tracing::error!(root_dir = %root_dir, %error, "vault connect: probing directory failed");
+        error
+    })?;
     let config_path = paths.config_path.clone();
 
     let (mode, resolved_backend) = if empty {
-        write_config(&paths, backend, restic_password.as_deref())?;
+        write_config(&paths, backend, restic_password.as_deref()).map_err(|error| {
+            tracing::error!(root_dir = %root_dir, %error, "vault connect: writing config failed");
+            error
+        })?;
         let storage = VaultStorage::init_with_overrides(paths, &restic_override(state))
-            .map_err(|e| ConnectError::Other(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!(root_dir = %root_dir, error = %e, "vault connect: initialization failed");
+                ConnectError::Other(e.to_string())
+            })?;
         let backend = backend.to_owned();
         *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("initialized", backend)
     } else if is_recognized_vault(&paths) {
-        let storage = VaultStorage::open_with_overrides(paths, &restic_override(state))
-            .map_err(|e| ConnectError::Other(e.to_string()))?;
+        let storage =
+            VaultStorage::open_with_overrides(paths, &restic_override(state)).map_err(|e| {
+                tracing::error!(root_dir = %root_dir, error = %e, "vault connect: opening failed");
+                ConnectError::Other(e.to_string())
+            })?;
         let backend = storage.backend().as_str().to_owned();
         *lock_vault(&state.vault) = Some(DocVault::new(storage));
         ("opened", backend)
     } else {
+        tracing::warn!(root_dir = %root_dir, "vault connect refused: unrecognized directory");
         return Err(ConnectError::Unrecognized);
     };
 
@@ -275,7 +289,14 @@ pub fn probe_vault(root_dir: &str) -> VaultProbe {
             backend: existing_backend(&paths),
         };
     }
-    let empty = is_empty_dir(&root).unwrap_or(false);
+    let empty = is_empty_dir(&root).unwrap_or_else(|error| {
+        warn!(
+            root_dir = %root_dir,
+            %error,
+            "vault probe: directory classification failed"
+        );
+        false
+    });
     VaultProbe {
         status: if empty { "empty" } else { "unrecognized" }.to_owned(),
         backend: None,
@@ -284,10 +305,34 @@ pub fn probe_vault(root_dir: &str) -> VaultProbe {
 
 /// The backend recorded in an existing vault's `config.toml`, or `None` if the
 /// file can't be read or parsed (the caller treats that as unrecognized).
+fn read_vault_config(paths: &VaultPaths) -> Option<VaultConfig> {
+    let text = match fs::read_to_string(&paths.config_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            warn!(
+                path = %paths.config_path.display(),
+                %error,
+                "vault config read failed"
+            );
+            return None;
+        }
+    };
+    match toml::from_str::<VaultConfig>(&text) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            warn!(
+                path = %paths.config_path.display(),
+                %error,
+                "vault config parse failed"
+            );
+            None
+        }
+    }
+}
+
 fn existing_backend(paths: &VaultPaths) -> Option<String> {
-    let text = fs::read_to_string(&paths.config_path).ok()?;
-    let config: VaultConfig = toml::from_str(&text).ok()?;
-    Some(config.storage.backend)
+    read_vault_config(paths).map(|config| config.storage.backend)
 }
 
 /// `true` when `root` does not exist or has no entries.
@@ -303,10 +348,7 @@ fn is_empty_dir(root: &Path) -> Result<bool, ConnectError> {
 /// that parses as a `VaultConfig`. Unknown/invalid backends are then rejected by
 /// `VaultStorage::open`, which surfaces a clear error.
 fn is_recognized_vault(paths: &VaultPaths) -> bool {
-    let Ok(text) = fs::read_to_string(&paths.config_path) else {
-        return false;
-    };
-    toml::from_str::<VaultConfig>(&text).is_ok()
+    read_vault_config(paths).is_some()
 }
 
 /// Write a fresh `config.toml` for a newly initialized vault. For restic the

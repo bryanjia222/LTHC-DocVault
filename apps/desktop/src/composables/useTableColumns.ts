@@ -1,5 +1,6 @@
 import { computed, reactive, watch } from "vue";
 import { SORT_KEYS, type SortKey } from "../utils/sort";
+import { reportError } from "../utils/reportError";
 
 /*
  * Persisted table-column layout for the document list: each column's pixel
@@ -86,7 +87,8 @@ function readInitial(): Record<ColumnId, ColumnState> {
     // name is always visible regardless of stored state.
     out.name.visible = true;
     return out;
-  } catch {
+  } catch (error) {
+    reportError("tableColumns.read", error);
     return fallback();
   }
 }
@@ -101,7 +103,11 @@ watch(
     for (const id of ALL_COLUMN_IDS) {
       out[id] = { width: value[id].width, visible: value[id].visible };
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
+    } catch (error) {
+      reportError("tableColumns.persist", error);
+    }
   },
   { deep: true },
 );

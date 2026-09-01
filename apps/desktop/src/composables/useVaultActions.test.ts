@@ -189,22 +189,26 @@ describe("useVaultActions - checkout", () => {
     expect(invoke).not.toHaveBeenCalledWith("library_path", expect.anything());
   });
 
-  it("does not invoke when no document is selected", async () => {
+  it("does not invoke backend commands when no document is selected", async () => {
     asTauri();
     documents.value = [];
     actions.runAction("actionLogs.checkout");
     await flush();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "log_frontend_error",
+    ]);
   });
 
-  it("does not invoke when the selected document has no versions", async () => {
+  it("does not invoke backend commands when the selected document has no versions", async () => {
     asTauri();
     const noVersions: Document = { ...docA, id: "docNoVer", versions: [] };
     documents.value = [noVersions];
     docs.selectedDocumentId.value = "docNoVer";
     actions.runAction("actionLogs.checkout");
     await flush();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "log_frontend_error",
+    ]);
   });
 });
 
@@ -311,12 +315,14 @@ describe("useVaultActions - commit", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("does not invoke when no document is selected", async () => {
+  it("does not invoke backend commands when no document is selected", async () => {
     asTauri();
     documents.value = [];
     actions.runAction("actionLogs.commit");
     await flush();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "log_frontend_error",
+    ]);
   });
 
   it("baselines the library copy immediately and registers no pending track", async () => {
@@ -411,12 +417,14 @@ describe("useVaultActions - commit modified document", () => {
     expect(tracked?.path).toBe("/tracked.docx");
   });
 
-  it("does not invoke when no source file is tracked for the document", async () => {
+  it("does not invoke backend commands when no source file is tracked for the document", async () => {
     asTauri();
     vi.mocked(invoke).mockResolvedValue("job-mod");
     await actions.commitModifiedDocument(docA.id);
     await flush();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "log_frontend_error",
+    ]);
   });
 
   it("does not invoke when not running under Tauri", async () => {
@@ -509,12 +517,14 @@ describe("useVaultActions - open document", () => {
     });
   });
 
-  it("does not invoke when no document is selected", async () => {
+  it("does not invoke backend commands when no document is selected", async () => {
     asTauri();
     documents.value = [];
     await actions.openDocument();
     await flush();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      "log_frontend_error",
+    ]);
   });
 
   it("does not invoke when not running under Tauri", async () => {

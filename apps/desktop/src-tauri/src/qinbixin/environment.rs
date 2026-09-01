@@ -14,20 +14,30 @@ pub(super) fn environment_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
         .map(|dir| dir.join(ENVIRONMENT_FILE))
-        .map_err(|e| format!("unable to resolve app config dir: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("unable to resolve app config dir: {e}")))
 }
 
 pub(super) fn load_environment(app: &AppHandle) -> QinbixinEnvironment {
     let Ok(path) = environment_path(app) else {
         return QinbixinEnvironment::default();
     };
-    let Ok(text) = fs::read_to_string(path) else {
-        return QinbixinEnvironment::default();
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return QinbixinEnvironment::default()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "failed to read qinbixin environment");
+            return QinbixinEnvironment::default();
+        }
     };
-    if let Ok(value) = serde_json::from_str::<QinbixinEnvironmentFile>(&text) {
-        return value.environment;
+    match serde_json::from_str::<QinbixinEnvironmentFile>(&text) {
+        Ok(value) => value.environment,
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "invalid qinbixin environment file");
+            QinbixinEnvironment::default()
+        }
     }
-    QinbixinEnvironment::default()
 }
 
 #[cfg(debug_assertions)]
@@ -37,23 +47,38 @@ pub(super) fn save_environment(
 ) -> Result<(), String> {
     let path = environment_path(app)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("unable to create config dir: {e}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| crate::logging::log_error(format!("unable to create config dir: {e}")))?;
     }
     let text = serde_json::to_string(&QinbixinEnvironmentFile { environment })
-        .map_err(|e| format!("unable to encode environment: {e}"))?;
-    fs::write(path, text).map_err(|e| format!("unable to save environment: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("unable to encode environment: {e}")))?;
+    fs::write(path, text)
+        .map_err(|e| crate::logging::log_error(format!("unable to save environment: {e}")))
 }
 
 pub(super) fn state_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
         .map(|dir| dir.join(load_environment(app).state_file()))
-        .map_err(|e| format!("unable to resolve app config dir: {e}"))
+        .map_err(|e| crate::logging::log_error(format!("unable to resolve app config dir: {e}")))
 }
 
 pub(super) fn read_session(path: &Path) -> Option<QinbixinSession> {
-    let text = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "failed to read qinbixin session");
+            return None;
+        }
+    };
+    match serde_json::from_str(&text) {
+        Ok(value) => Some(value),
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "invalid qinbixin session file");
+            None
+        }
+    }
 }
 
 pub fn load_session(app: &AppHandle, session: &Mutex<QinbixinSession>) {
@@ -68,11 +93,13 @@ pub fn load_session(app: &AppHandle, session: &Mutex<QinbixinSession>) {
 pub(super) fn save_session(app: &AppHandle, session: &QinbixinSession) -> Result<(), String> {
     let path = state_path(app)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("unable to create config dir: {e}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| crate::logging::log_error(format!("unable to create config dir: {e}")))?;
     }
-    let text =
-        serde_json::to_string(session).map_err(|e| format!("unable to encode session: {e}"))?;
-    fs::write(path, text).map_err(|e| format!("unable to save session: {e}"))
+    let text = serde_json::to_string(session)
+        .map_err(|e| crate::logging::log_error(format!("unable to encode session: {e}")))?;
+    fs::write(path, text)
+        .map_err(|e| crate::logging::log_error(format!("unable to save session: {e}")))
 }
 
 pub(super) fn store_new_token(

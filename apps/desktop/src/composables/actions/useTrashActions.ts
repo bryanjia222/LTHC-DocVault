@@ -4,6 +4,7 @@ import { useActivityLog } from "../useActivityLog";
 import { useDocuments } from "../useDocuments";
 import { useDesktopState } from "../useDesktopState";
 import { confirmDialog, useVault } from "../useVault";
+import { reportBackendCommandError } from "../../utils/reportError";
 import { ancestorsOf, descendantsOf } from "../../utils/versionTree";
 
 /*
@@ -15,7 +16,7 @@ import { ancestorsOf, descendantsOf } from "../../utils/versionTree";
 
 export function useTrashActions() {
   const { t } = useI18n();
-  const { log } = useActivityLog();
+  const { log, logBlocked } = useActivityLog();
   const {
     selectedDocument,
     selectedDocumentId,
@@ -51,7 +52,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!(await confirmDialog(t("confirm.moveToTrash", { name: doc.name })))) {
@@ -76,7 +77,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     desktop.restoreDoc(docId);
@@ -102,7 +103,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
@@ -128,7 +129,7 @@ export function useTrashActions() {
       try {
         await removeLibraryCopy({ document_id: doc.id });
       } catch (e) {
-        console.warn("removeLibraryCopy failed", e);
+        reportBackendCommandError("library-copy.remove", e);
       }
       log(t("log.jobStarted", { action: t(actionKey), id }));
     } catch (e) {
@@ -193,7 +194,7 @@ export function useTrashActions() {
         try {
           await removeLibraryCopy({ document_id: id });
         } catch (e) {
-          console.warn("removeLibraryCopy failed", e);
+          reportBackendCommandError("library-copy.remove", e);
         }
       } catch (e) {
         const doc = documents.value.find((d) => d.id === id);
@@ -250,7 +251,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc || !ver) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     // Subtree-together: this version plus every descendant moves as one unit.
@@ -261,21 +262,21 @@ export function useTrashActions() {
     // deleting an ancestor would trash the current version too.
     const current = doc.versions.find((v) => v.status === "current");
     if (current && subtreeIds.includes(current.id)) {
+      logBlocked(t("versionMenu.deleteBlockedCurrent"));
       await message(t("versionMenu.deleteBlockedCurrent"), {
         title: t("versionMenu.deleteBlockedTitle"),
         kind: "warning",
       });
-      log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
     // Refuse to empty the document via version delete - if the subtree is the
     // whole history, delete the document instead.
     if (subtreeIds.length >= doc.versions.length) {
+      logBlocked(t("versionMenu.deleteBlockedLast"));
       await message(t("versionMenu.deleteBlockedLast"), {
         title: t("versionMenu.deleteBlockedTitle"),
         kind: "warning",
       });
-      log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
     let confirmed: boolean;
@@ -334,7 +335,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc || !ver) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     // Ancestors still in the bin: restoring without them would orphan this
@@ -396,7 +397,7 @@ export function useTrashActions() {
       }),
     );
     if (!doc || !ver) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;

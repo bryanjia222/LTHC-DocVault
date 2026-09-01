@@ -32,9 +32,11 @@ pub async fn fetch_url_meta(url: String) -> Result<UrlMeta, String> {
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
     if !is_openable_url(&url) {
-        return Err("only http/https URLs can be opened".to_string());
+        return Err(crate::logging::log_warn(
+            "only http/https URLs can be opened",
+        ));
     }
-    open::that(&url).map_err(|e| e.to_string())
+    open::that(&url).map_err(crate::logging::log_error)
 }
 
 fn is_openable_url(url: &str) -> bool {
@@ -48,6 +50,7 @@ const MAX_META_REFRESH_HOPS: usize = 3;
 
 async fn fetch_meta(url: &str) -> UrlMeta {
     if !is_openable_url(url) {
+        tracing::warn!(url, "quick link metadata unavailable: unsupported URL");
         return UrlMeta::default();
     }
     let Ok(client) = reqwest::Client::builder()
@@ -55,15 +58,18 @@ async fn fetch_meta(url: &str) -> UrlMeta {
         .user_agent(USER_AGENT)
         .build()
     else {
+        tracing::warn!(url, "quick link metadata unavailable: HTTP client failed");
         return UrlMeta::default();
     };
     let mut current = url.to_string();
     let mut visited = std::collections::HashSet::new();
     for _ in 0..MAX_META_REFRESH_HOPS {
         if !visited.insert(current.clone()) {
-            return UrlMeta::default(); // refresh loop
+            tracing::warn!(url, "quick link metadata unavailable: refresh loop");
+            return UrlMeta::default();
         }
         let Ok(resp) = client.get(&current).send().await else {
+            tracing::warn!(url, current_url = %current, "quick link metadata unavailable: fetch failed");
             return UrlMeta::default();
         };
         if resp
@@ -71,10 +77,12 @@ async fn fetch_meta(url: &str) -> UrlMeta {
             .map(|l| l as usize > PAGE_BODY_LIMIT)
             .unwrap_or(false)
         {
+            tracing::warn!(url, current_url = %current, "quick link metadata unavailable: page too large");
             return UrlMeta::default();
         }
         let final_url = resp.url().clone();
         let Ok(bytes) = resp.bytes().await else {
+            tracing::warn!(url, current_url = %current, "quick link metadata unavailable: body read failed");
             return UrlMeta::default();
         };
         let bytes = &bytes[..bytes.len().min(PAGE_BODY_LIMIT)];
@@ -98,6 +106,10 @@ async fn fetch_meta(url: &str) -> UrlMeta {
             favicon: None,
         };
     }
+    tracing::warn!(
+        url,
+        "quick link metadata unavailable: refresh hop limit reached"
+    );
     UrlMeta::default()
 }
 
@@ -138,6 +150,7 @@ fn extract_url_from_refresh_content(content: &str) -> Option<String> {
 
 async fn fetch_favicon(client: &reqwest::Client, href: &str) -> Option<String> {
     let Ok(resp) = client.get(href).send().await else {
+        tracing::warn!(url = %href, "quick link favicon unavailable: fetch failed");
         return None;
     };
     if resp
@@ -145,6 +158,7 @@ async fn fetch_favicon(client: &reqwest::Client, href: &str) -> Option<String> {
         .map(|l| l as usize > ICON_BODY_LIMIT)
         .unwrap_or(false)
     {
+        tracing::warn!(url = %href, "quick link favicon unavailable: too large");
         return None;
     }
     let declared = resp
@@ -160,10 +174,12 @@ async fn fetch_favicon(client: &reqwest::Client, href: &str) -> Option<String> {
         })
         .unwrap_or_default();
     let Ok(bytes) = resp.bytes().await else {
+        tracing::warn!(url = %href, "quick link favicon unavailable: body read failed");
         return None;
     };
     let bytes = &bytes[..bytes.len().min(ICON_BODY_LIMIT)];
     if bytes.is_empty() {
+        tracing::warn!(url = %href, "quick link favicon unavailable: empty response");
         return None;
     }
     let mime = sniff_mime(bytes)

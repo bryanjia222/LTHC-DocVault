@@ -35,12 +35,27 @@ pub fn log_dir(app: &AppHandle) -> Option<PathBuf> {
 /// `info` when the file or `[logging]` section is absent or unparseable, so a
 /// pre-logging config (or a corrupt one) never blocks startup.
 pub fn read_level(config_path: &Path) -> String {
-    let Ok(text) = std::fs::read_to_string(config_path) else {
-        return "info".to_owned();
-    };
-    match toml::from_str::<docvault_types::VaultConfig>(&text) {
-        Ok(config) => config.logging.level,
-        Err(_) => "info".to_owned(),
+    match std::fs::read_to_string(config_path) {
+        Ok(text) => match toml::from_str::<docvault_types::VaultConfig>(&text) {
+            Ok(config) => config.logging.level,
+            Err(error) => {
+                tracing::warn!(
+                    path = %config_path.display(),
+                    %error,
+                    "invalid vault log-level config; using info"
+                );
+                "info".to_owned()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "info".to_owned(),
+        Err(error) => {
+            tracing::warn!(
+                path = %config_path.display(),
+                %error,
+                "failed to read vault log-level config; using info"
+            );
+            "info".to_owned()
+        }
     }
 }
 
@@ -83,5 +98,26 @@ pub fn set_level(logger: &Logger, level: &str) -> Result<(), String> {
     logger
         .filter_handle
         .reload(filter)
-        .map_err(|e| e.to_string())
+        .map_err(crate::logging::log_error)
+}
+
+/// Log an error at the boundary where it is about to become a user-visible
+/// message. `Location::caller` points at the exact `map_err`/error construction
+/// site, so the file log keeps the origin even though the caller only sees the
+/// flattened message.
+#[track_caller]
+pub(crate) fn log_error<E: std::fmt::Display>(error: E) -> String {
+    let caller = std::panic::Location::caller();
+    tracing::error!(caller = %caller, %error, "error returned to caller");
+    error.to_string()
+}
+
+/// Same boundary logging for expected user-state failures (expired auth,
+/// invalid input). These are still recorded, but should not flood error-level
+/// diagnostics the way an unexpected backend failure would.
+#[track_caller]
+pub(crate) fn log_warn<E: std::fmt::Display>(error: E) -> String {
+    let caller = std::panic::Location::caller();
+    tracing::warn!(caller = %caller, %error, "expected failure returned to caller");
+    error.to_string()
 }

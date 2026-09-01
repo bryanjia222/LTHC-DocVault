@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import { useDevMode } from "../composables/useDevMode";
 import { useContextMenu } from "../composables/useContextMenu";
 import { useVaultActions } from "../composables/useVaultActions";
+import { reportBackendCommandError } from "../utils/reportError";
 
 /*
  * Global custom context menu. Replaces the native webview menu (so the native
@@ -43,7 +44,8 @@ async function inspect() {
   close();
   try {
     await invoke("open_devtools");
-  } catch {
+  } catch (error) {
+    reportBackendCommandError("devtools.open", error);
     // devtools unavailable (e.g. not under Tauri) - ignore
   }
 }

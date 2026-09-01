@@ -3,7 +3,7 @@ use tauri::AppHandle;
 
 use super::{
     environment::{load_environment, store_new_token},
-    http::{absolute_url, request_json},
+    http::{absolute_url, mapped_error, request_json},
     types::{QinbixinComment, QinbixinResult, RawComment},
 };
 use crate::state::AppState;
@@ -17,7 +17,7 @@ pub async fn qinbixin_message_comments(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let path =
         format!("/API/Web/Comment/GetCommentPageList?PageIndex=1&PageSize=50&WorksId={message_id}");
@@ -29,10 +29,7 @@ pub async fn qinbixin_message_comments(
         None,
     )
     .await?;
-    if !envelope.success.unwrap_or_default() {
-        return Err(envelope.msg.unwrap_or_else(|| "request failed".to_owned()));
-    }
-    let comments = envelope.data.unwrap_or_default();
+    let comments = mapped_error(envelope)?;
     store_new_token(&app, &state.qinbixin, &new_token)?;
     let base_url = environment.base_url();
     Ok(comments
@@ -69,7 +66,7 @@ pub async fn qinbixin_add_comment(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let body = json!({
         "WorksId": message_id,
@@ -85,8 +82,12 @@ pub async fn qinbixin_add_comment(
     )
     .await?;
     store_new_token(&app, &state.qinbixin, &new_token)?;
+    let message = envelope.msg.clone().unwrap_or_default();
+    if !envelope.success.unwrap_or_default() {
+        tracing::warn!(message = %message, "qinbixin comment rejected");
+    }
     Ok(QinbixinResult {
         success: envelope.success.unwrap_or_default(),
-        message: envelope.msg.unwrap_or_default(),
+        message,
     })
 }

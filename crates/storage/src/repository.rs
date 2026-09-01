@@ -135,15 +135,32 @@ impl VaultStorage {
 fn dir_size(path: &Path) -> u64 {
     fn walk(path: &Path) -> u64 {
         let mut total = 0u64;
-        let Ok(entries) = fs::read_dir(path) else {
-            return 0;
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) => {
+                warn!(
+                    path = %path.display(),
+                    %error,
+                    "repo size read failed"
+                );
+                return 0;
+            }
         };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 total += walk(&path);
-            } else if let Ok(meta) = entry.metadata() {
-                total += meta.len();
+            } else {
+                match entry.metadata() {
+                    Ok(meta) => total += meta.len(),
+                    Err(error) => {
+                        warn!(
+                            path = %path.display(),
+                            %error,
+                            "repo size entry read failed"
+                        );
+                    }
+                }
             }
         }
         total

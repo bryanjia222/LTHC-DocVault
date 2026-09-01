@@ -21,7 +21,7 @@ import {
 
 export function useDocumentActions() {
   const { t } = useI18n();
-  const { log } = useActivityLog();
+  const { log, logBlocked } = useActivityLog();
   const { selectedDocument, selectedVersion, documents, activeProjectId } =
     useDocuments();
   const {
@@ -139,7 +139,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t("actionLogs.commit") }));
+      logBlocked(t("log.noSelection", { action: t("actionLogs.commit") }));
       return;
     }
     if (!isTauri()) return;
@@ -182,7 +182,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     // Export the document's working copy - the library file that mirrors the
@@ -201,7 +201,7 @@ export function useDocumentActions() {
     const actionKey = "actionLogs.export" as const;
     const doc = selectedDocument.value;
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
@@ -239,7 +239,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
@@ -276,7 +276,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc || !ver) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     // Checkout switches the current-version pointer. Switching to the version
@@ -326,7 +326,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     const trimmed = newName.trim();
@@ -363,7 +363,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc || !ver) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     const trimmed = note.trim();
@@ -405,11 +405,11 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!path) {
-      log(t("log.noTrackedFile", { action: t(actionKey) }));
+      logBlocked(t("log.noTrackedFile", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
@@ -456,7 +456,7 @@ export function useDocumentActions() {
       }),
     );
     if (!doc) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;
@@ -473,6 +473,13 @@ export function useDocumentActions() {
     }
     const picked = extOf(path);
     if (expected !== picked) {
+      logBlocked(
+        t("source.replaceCommitTypeMismatch", {
+          name: doc.name,
+          expected: expected ?? "",
+          picked: picked ?? "",
+        }),
+      );
       await message(
         t("source.replaceCommitTypeMismatch", {
           name: doc.name,
@@ -481,7 +488,6 @@ export function useDocumentActions() {
         }),
         { title: t("source.replaceCommitTypeMismatchTitle"), kind: "error" },
       );
-      log(t("log.actionCancelled", { action: t(actionKey) }));
       return;
     }
     // Precondition: don't silently drop uncommitted working-copy changes. If the
@@ -551,7 +557,7 @@ export function useDocumentActions() {
       }),
     );
     if (!id) {
-      log(t("log.noSelection", { action: t(actionKey) }));
+      logBlocked(t("log.noSelection", { action: t(actionKey) }));
       return;
     }
     if (!isTauri()) return;

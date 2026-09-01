@@ -199,6 +199,12 @@ impl JobRegistry {
             inner.cancels.insert(id.clone(), Arc::clone(&cancel));
             prune(&mut inner);
         }
+        tracing::info!(
+            job_id = %id,
+            kind = ?record.kind,
+            target = %record.target_label,
+            "background job started"
+        );
         on_event(record);
 
         let inner = Arc::clone(&self.inner);
@@ -232,6 +238,13 @@ impl JobRegistry {
                     match outcome {
                         JobOutcome::Succeeded => rec.status = JobStatus::Succeeded,
                         JobOutcome::Failed(err) => {
+                            tracing::error!(
+                                job_id = %rec.id,
+                                kind = ?rec.kind,
+                                target = %rec.target_label,
+                                %err,
+                                "background job failed"
+                            );
                             rec.status = JobStatus::Failed;
                             rec.error = Some(err);
                         }
@@ -245,6 +258,13 @@ impl JobRegistry {
                 prune(&mut inner);
                 terminal
             };
+            tracing::info!(
+                job_id = %terminal.id,
+                kind = ?terminal.kind,
+                target = %terminal.target_label,
+                status = ?terminal.status,
+                "background job finished"
+            );
             on_event(terminal);
         });
 

@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { reportError } from "./utils/reportError";
 
 /*
  * App-wide theme state. A module-level singleton so every component that calls
@@ -76,8 +77,8 @@ export function useTheme() {
     theme.value = value;
     try {
       window.localStorage.setItem(STORAGE_KEY, value);
-    } catch {
-      // Ignore storage failures (private mode, quota, etc.).
+    } catch (error) {
+      reportError("theme.persist", error);
     }
     applyTheme();
   }

@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { computed, ref, watch } from "vue";
 
 import { isTauri } from "./useVault";
+import { reportError } from "../utils/reportError";
 
 export interface QinbixinProfile {
   id: number;
@@ -128,8 +129,9 @@ function loadCommentWatermarks(): void {
         .map(([key, value]) => [key, Number(value)] as const)
         .filter(([, value]) => Number.isFinite(value) && value >= 0),
     );
-  } catch {
+  } catch (error) {
     readWatermarks.value = {};
+    reportError("qinbixin.commentWatermarks.read", error);
   }
 }
 
@@ -140,8 +142,9 @@ function saveCommentWatermarks(): void {
       `${COMMENT_WATERMARK_STORAGE_KEY}:${commentWatermarkScope}`,
       JSON.stringify(readWatermarks.value),
     );
-  } catch {
+  } catch (error) {
     // Local notification state is best-effort and must not break mailbox loading.
+    reportError("qinbixin.commentWatermarks.persist", error);
   }
 }
 

@@ -97,7 +97,15 @@ pub async fn qinbixin_status(
         }),
         Err(e) if e == "AUTH_EXPIRED" => {
             let path = state_path(&app)?;
-            let _ = fs::remove_file(path);
+            if let Err(e) = fs::remove_file(&path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(
+                        error = %e,
+                        path = %path.display(),
+                        "failed to clear expired qinbixin session"
+                    );
+                }
+            }
             *state.qinbixin.lock().unwrap() = QinbixinSession::default();
             Ok(QinbixinStatusDto {
                 logged_in: false,
@@ -128,17 +136,34 @@ pub async fn qinbixin_logout(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if !token.is_empty() {
-        let _ = request_json::<serde_json::Value>(
+        let Ok((envelope, _)) = request_json::<serde_json::Value>(
             environment.base_url(),
             &token,
             reqwest::Method::GET,
             "/API/Web/Exit?app=0",
             None,
         )
-        .await;
+        .await
+        else {
+            return Ok(());
+        };
+        if !envelope.success.unwrap_or_default() {
+            tracing::warn!(
+                message = %envelope.msg.clone().unwrap_or_default(),
+                "qinbixin remote logout rejected"
+            );
+        }
     }
     let path = state_path(&app)?;
-    let _ = fs::remove_file(path);
+    if let Err(e) = fs::remove_file(&path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                error = %e,
+                path = %path.display(),
+                "failed to clear qinbixin session"
+            );
+        }
+    }
     *state.qinbixin.lock().unwrap() = QinbixinSession::default();
     Ok(())
 }
@@ -160,7 +185,7 @@ pub async fn qinbixin_messages(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let raw =
         fetch_raw_messages(&environment, &app, &state.qinbixin, &token, relationship_id).await?;
@@ -183,7 +208,7 @@ pub async fn qinbixin_inbox(
     for conversation in conversations {
         let token = state.qinbixin.lock().unwrap().token.clone();
         if token.is_empty() {
-            return Err("AUTH_EXPIRED".to_owned());
+            return Err(crate::logging::log_warn("AUTH_EXPIRED"));
         }
         let raw_messages =
             fetch_raw_messages(&environment, &app, &state.qinbixin, &token, conversation.id)
@@ -208,7 +233,7 @@ pub async fn qinbixin_outbox(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let path =
         "/API/Web/Works/GetSelfWorksPageList?PageIndex=1&PageSize=50&WorkType=5&WorkAuditType=15"
@@ -238,7 +263,7 @@ pub async fn qinbixin_send(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let media = media.unwrap_or_default();
     let body = json!({
@@ -260,10 +285,12 @@ pub async fn qinbixin_send(
     )
     .await?;
     store_new_token(&app, &state.qinbixin, &new_token)?;
-    Ok(QinbixinResult {
-        success: envelope.success.unwrap_or_default(),
-        message: envelope.msg.unwrap_or_default(),
-    })
+    let success = envelope.success.unwrap_or_default();
+    let message = envelope.msg.unwrap_or_default();
+    if !success {
+        tracing::warn!(message = %message, "qinbixin send rejected");
+    }
+    Ok(QinbixinResult { success, message })
 }
 
 #[tauri::command]
@@ -275,7 +302,7 @@ pub async fn qinbixin_mark_read(
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     let body = json!({ "Id": relationship_id, "IsGroup": false });
     let (_envelope, new_token) = request_json::<serde_json::Value>(
@@ -286,6 +313,13 @@ pub async fn qinbixin_mark_read(
         Some(body),
     )
     .await?;
+    if !_envelope.success.unwrap_or_default() {
+        tracing::warn!(
+            relationship_id,
+            message = %_envelope.msg.clone().unwrap_or_default(),
+            "qinbixin mark read rejected"
+        );
+    }
     store_new_token(&app, &state.qinbixin, &new_token)?;
     Ok(())
 }

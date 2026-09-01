@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde_json::Value;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{ResticError, StorageError, StorageResult, VaultStorage};
 
@@ -197,7 +197,13 @@ impl VaultStorage {
             return Err(restic_failed("stats", output.stderr));
         }
         let value: Value = serde_json::from_slice(&output.stdout)?;
-        Ok(value.get("total_size").and_then(Value::as_u64).unwrap_or(0))
+        match value.get("total_size").and_then(Value::as_u64) {
+            Some(size) => Ok(size),
+            None => {
+                warn!("restic stats response missing total_size; reporting zero");
+                Ok(0)
+            }
+        }
     }
 
     fn run_restic<const N: usize>(
@@ -303,12 +309,20 @@ impl VaultStorage {
     /// is unavailable or exits non-zero. Cached once per vault session by
     /// `VaultStorage::init`/`open` rather than re-spawned on every config read.
     pub(crate) fn capture_restic_version(&self) -> String {
-        let Ok(output) =
-            self.run_restic(["version"], &crate::NEVER_CANCELLED, RESTIC_SHORT_TIMEOUT)
-        else {
-            return String::new();
-        };
+        let output =
+            match self.run_restic(["version"], &crate::NEVER_CANCELLED, RESTIC_SHORT_TIMEOUT) {
+                Ok(output) => output,
+                Err(error) => {
+                    error!(%error, "failed to read restic version");
+                    return String::new();
+                }
+            };
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!(
+                stderr = %stderr.trim(),
+                "failed to read restic version"
+            );
             return String::new();
         }
         String::from_utf8_lossy(&output.stdout)

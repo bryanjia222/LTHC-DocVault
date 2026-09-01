@@ -6,6 +6,7 @@ import { useDesktopState } from "./useDesktopState";
 import { useDocuments } from "./useDocuments";
 import { useNavigation } from "./useNavigation";
 import { confirmDialog } from "./useVault";
+import { reportError } from "../utils/reportError";
 
 /** A project is visible only while every ancestor is expanded. */
 export type ProjectVisibility = Record<string, boolean>;
@@ -77,9 +78,11 @@ export function useProjectTree() {
   function commitCreate() {
     const id = desktop.createProject(createParentId.value, newName.value);
     if (!id) {
-      createError.value = newName.value.trim()
+      const message = newName.value.trim()
         ? t("sidebar.projectNameTaken")
         : t("sidebar.projectNameEmpty");
+      createError.value = message;
+      reportError("project.validation", new Error(message));
       return;
     }
     creating.value = false;
@@ -113,9 +116,11 @@ export function useProjectTree() {
     if (!editingId.value) return;
     const ok = desktop.renameProject(editingId.value, editName.value);
     if (!ok) {
-      editError.value = editName.value.trim()
+      const message = editName.value.trim()
         ? t("sidebar.projectNameTaken")
         : t("sidebar.projectNameEmpty");
+      editError.value = message;
+      reportError("project.validation", new Error(message));
       return;
     }
     editingId.value = null;

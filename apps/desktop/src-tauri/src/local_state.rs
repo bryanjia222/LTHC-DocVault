@@ -24,6 +24,7 @@ use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
+use tracing::warn;
 
 use crate::dto::{
     DesktopStateSlice, FileProbe, FileStat, ProjectDef, SortPref, TrackedFile, TrashedVersion,
@@ -46,19 +47,19 @@ pub(crate) struct DesktopStateFile {
 /// an empty (default) state, so first run is transparent.
 pub(crate) fn load_file_at(path: &Path) -> Result<DesktopStateFile, String> {
     match fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| e.to_string()),
+        Ok(text) => serde_json::from_str(&text).map_err(crate::logging::log_error),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DesktopStateFile::default()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(crate::logging::log_error(e)),
     }
 }
 
 /// Serialize & write the state file, creating the parent dir if needed.
 pub(crate) fn save_file_at(path: &Path, file: &DesktopStateFile) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent).map_err(crate::logging::log_error)?;
     }
-    let text = serde_json::to_string_pretty(file).map_err(|e| e.to_string())?;
-    fs::write(path, text).map_err(|e| e.to_string())
+    let text = serde_json::to_string_pretty(file).map_err(crate::logging::log_error)?;
+    fs::write(path, text).map_err(crate::logging::log_error)
 }
 
 /// The slice for `root` in `file`, or an empty default when absent. Pure: takes
@@ -87,12 +88,21 @@ fn stat_at(path: &Path) -> FileStat {
             size: meta.len(),
             mtime_ms: mtime_ms(&meta),
         },
-        Err(_) => FileStat {
-            path: path.display().to_string(),
-            exists: false,
-            size: 0,
-            mtime_ms: 0,
-        },
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                warn!(
+                    path = %path.display(),
+                    %error,
+                    "tracked file stat failed; reporting as missing"
+                );
+            }
+            FileStat {
+                path: path.display().to_string(),
+                exists: false,
+                size: 0,
+                mtime_ms: 0,
+            }
+        }
     }
 }
 
@@ -103,13 +113,20 @@ fn stat_at(path: &Path) -> FileStat {
 pub(crate) fn probe_at(path: &Path, max_bytes: u64) -> FileProbe {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
-        Err(_) => {
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                warn!(
+                    path = %path.display(),
+                    %error,
+                    "tracked file probe failed; reporting as missing"
+                );
+            }
             return FileProbe {
                 exists: false,
                 size: 0,
                 mtime_ms: 0,
                 sha256: None,
-            }
+            };
         }
     };
     let size = meta.len();
@@ -139,11 +156,23 @@ fn mtime_ms(meta: &fs::Metadata) -> u64 {
 /// Hex sha256 of a file's contents, streamed through a 64 KB buffer. `None` on
 /// any read error.
 fn compute_sha256(path: &Path) -> Option<String> {
-    let mut file = fs::File::open(path).ok()?;
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            warn!(path = %path.display(), %error, "failed to open tracked file for hashing");
+            return None;
+        }
+    };
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
-        let n = file.read(&mut buf).ok()?;
+        let n = match file.read(&mut buf) {
+            Ok(n) => n,
+            Err(error) => {
+                warn!(path = %path.display(), %error, "failed to read tracked file for hashing");
+                return None;
+            }
+        };
         if n == 0 {
             break;
         }
@@ -172,13 +201,15 @@ pub(crate) fn current_vault_root(state: &State<AppState>) -> Option<String> {
 
 /// Read the whole state file from disk.
 fn load_file(app: &AppHandle) -> Result<DesktopStateFile, String> {
-    let path = state_path(app).ok_or_else(|| "app config directory unavailable".to_owned())?;
+    let path = state_path(app)
+        .ok_or_else(|| crate::logging::log_warn("app config directory unavailable"))?;
     load_file_at(&path)
 }
 
 /// Write the whole state file to disk.
 fn save_file(app: &AppHandle, file: &DesktopStateFile) -> Result<(), String> {
-    let path = state_path(app).ok_or_else(|| "app config directory unavailable".to_owned())?;
+    let path = state_path(app)
+        .ok_or_else(|| crate::logging::log_warn("app config directory unavailable"))?;
     save_file_at(&path, file)
 }
 
@@ -210,7 +241,8 @@ pub fn set_desktop_state(
     trashed: Vec<String>,
     trashed_versions: Vec<TrashedVersion>,
 ) -> Result<(), String> {
-    let root = current_vault_root(&state).ok_or_else(|| "vault not initialized".to_owned())?;
+    let root = current_vault_root(&state)
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
     let mut file = load_file(&app)?;
     file.vaults.insert(
         root,

@@ -36,6 +36,11 @@ use crate::state::{self, AppState};
 /// Fixed loopback address so the add-in manifests can point at a stable URL.
 /// Loopback-only: never bound to a network interface.
 pub const BRIDGE_ADDR: &str = "127.0.0.1:8765";
+/// Upper bound on a task-pane-local diagnostic message so a malformed client
+/// cannot flood the persistent log.
+const MAX_LOG_MESSAGE_BYTES: usize = 4_096;
+/// The scope is a short fixed label from the add-in, so bound it as well.
+const MAX_LOG_SCOPE_BYTES: usize = 128;
 /// Upper bound on a single uploaded document. Defensive - Office.js already
 /// caps at ~20MB, and the WPS add-in (Phase 2) will send a path instead of
 /// bytes, so nothing legitimate approaches this.
@@ -79,6 +84,13 @@ enum Route {
         ext: Option<String>,
         note: Option<String>,
     },
+    /// POST `/api/log` - reports a task-pane-local error back to the desktop's
+    /// persistent file log. Backend responses are already logged at their own
+    /// boundary; this covers browser/host failures that never reach the API.
+    Log {
+        scope: String,
+        message: String,
+    },
     /// GET "/" - the task-pane entry page.
     TaskPane,
     /// GET of any other non-API path - a static asset of the task-pane build
@@ -120,6 +132,22 @@ fn parse_route(method: &str, url: &str) -> Route {
             }
         }
         "/" if method == "GET" => Route::TaskPane,
+        "/api/log" if method == "POST" => {
+            let scope = query_value(query, "scope")
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty());
+            let message = query_value(query, "message");
+            match (scope, message) {
+                (Some(scope), Some(message))
+                    if scope.len() <= MAX_LOG_SCOPE_BYTES
+                        && !message.is_empty()
+                        && message.len() <= MAX_LOG_MESSAGE_BYTES =>
+                {
+                    Route::Log { scope, message }
+                }
+                _ => Route::NotFound,
+            }
+        }
         _ if method == "POST" => {
             if let Some(doc_id) = path
                 .strip_prefix("/api/documents/")
@@ -183,10 +211,12 @@ fn read_limited_body(reader: &mut dyn Read, limit: u64) -> Result<Vec<u8>, ReadE
 /// temp file the upload is written to carries this extension so the OOXML
 /// manifest sniffing downstream recognizes the format.
 fn normalize_ext(ext: Option<&str>) -> Result<String, String> {
-    let raw = ext.ok_or("missing ext query parameter")?;
+    let raw = ext.ok_or_else(|| crate::logging::log_warn("missing ext query parameter"))?;
     let raw = raw.trim().trim_start_matches('.');
     if raw.is_empty() || raw.len() > 16 || !raw.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        return Err(format!("invalid document extension: {raw}"));
+        return Err(crate::logging::log_warn(format!(
+            "invalid document extension: {raw}"
+        )));
     }
     Ok(raw.to_ascii_lowercase())
 }
@@ -210,7 +240,7 @@ struct Bridge {
 pub fn start(app: AppHandle, state: &AppState) -> Result<(), String> {
     let token = generate_token();
     *state.bridge_token.lock().unwrap_or_else(|e| e.into_inner()) = Some(token.clone());
-    let server = Server::http(BRIDGE_ADDR).map_err(|e| e.to_string())?;
+    let server = Server::http(BRIDGE_ADDR).map_err(crate::logging::log_error)?;
     let bridge = Bridge {
         on_event: make_emitter(app),
         vault: state.vault.clone(),
@@ -221,7 +251,7 @@ pub fn start(app: AppHandle, state: &AppState) -> Result<(), String> {
     std::thread::Builder::new()
         .name("docvault-bridge".to_owned())
         .spawn(move || accept_loop(server, bridge))
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::logging::log_error)?;
     tracing::info!(addr = BRIDGE_ADDR, "add-in bridge listening");
     Ok(())
 }
@@ -268,13 +298,20 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
         ),
         Route::TaskPane => serve_taskpane("/", &bridge.token),
         Route::Asset(path) => serve_taskpane(&path, &bridge.token),
+        Route::Log { scope, message } => {
+            if !check_bearer(auth, &bridge.token) {
+                return json_error_response(401, "log", "unauthorized");
+            }
+            tracing::warn!(source = %scope, %message, "task-pane local error");
+            json_response(200, &serde_json::json!({ "ok": true }))
+        }
         Route::Documents => {
             if !check_bearer(auth, &bridge.token) {
-                return json_response(401, &serde_json::json!({ "error": "unauthorized" }));
+                return json_error_response(401, "documents", "unauthorized");
             }
             match list_documents(bridge) {
                 Ok(documents) => json_response(200, &serde_json::json!({ "documents": documents })),
-                Err(message) => json_response(503, &serde_json::json!({ "error": message })),
+                Err(message) => json_error_response(503, "documents", &message),
             }
         }
         Route::Import {
@@ -283,56 +320,52 @@ fn dispatch(route: Route, request: &mut tiny_http::Request, bridge: &Bridge) -> 
             author,
         } => {
             if !check_bearer(auth, &bridge.token) {
-                return json_response(401, &serde_json::json!({ "error": "unauthorized" }));
+                return json_error_response(401, "import", "unauthorized");
             }
             let ext = match normalize_ext(ext.as_deref()) {
                 Ok(ext) => ext,
-                Err(message) => {
-                    return json_response(400, &serde_json::json!({ "error": message }))
-                }
+                Err(message) => return json_error_response(400, "import", &message),
             };
             let bytes = match read_body(request) {
                 Ok(bytes) => bytes,
-                Err(error) => return body_error_response(error),
+                Err(error) => return body_error_response("import", error),
             };
             match commit_import(bridge, &bytes, &file_name, &ext, author.as_deref()) {
                 Ok(payload) => json_response(200, &payload),
-                Err(message) => json_response(400, &serde_json::json!({ "error": message })),
+                Err(message) => json_error_response(400, "import", &message),
             }
         }
         Route::CommitVersion { doc_id, ext, note } => {
             if !check_bearer(auth, &bridge.token) {
-                return json_response(401, &serde_json::json!({ "error": "unauthorized" }));
+                return json_error_response(401, "commit_version", "unauthorized");
             }
             let ext = match normalize_ext(ext.as_deref()) {
                 Ok(ext) => ext,
-                Err(message) => {
-                    return json_response(400, &serde_json::json!({ "error": message }))
-                }
+                Err(message) => return json_error_response(400, "commit_version", &message),
             };
             let bytes = match read_body(request) {
                 Ok(bytes) => bytes,
-                Err(error) => return body_error_response(error),
+                Err(error) => return body_error_response("commit_version", error),
             };
             match commit_version(bridge, &bytes, &doc_id, &ext, note.as_deref()) {
                 Ok(payload) => json_response(200, &payload),
-                Err(message) => json_response(400, &serde_json::json!({ "error": message })),
+                Err(message) => json_error_response(400, "commit_version", &message),
             }
         }
-        Route::NotFound => json_response(404, &serde_json::json!({ "error": "not found" })),
+        Route::NotFound => json_error_response(404, "unknown", "not found"),
     }
 }
 
-fn body_error_response(error: ReadError) -> ResponseBox {
+fn body_error_response(route: &str, error: ReadError) -> ResponseBox {
     match error {
-        ReadError::TooLarge => {
-            json_response(413, &serde_json::json!({ "error": "document too large" }))
-        }
-        ReadError::Io => json_response(
-            400,
-            &serde_json::json!({ "error": "failed to read request body" }),
-        ),
+        ReadError::TooLarge => json_error_response(413, route, "document too large"),
+        ReadError::Io => json_error_response(400, route, "failed to read request body"),
     }
+}
+
+fn json_error_response(status: u16, route: &str, error: &str) -> ResponseBox {
+    tracing::warn!(route, status, error, "bridge request failed");
+    json_response(status, &serde_json::json!({ "error": error }))
 }
 
 fn read_body(request: &mut tiny_http::Request) -> Result<Vec<u8>, ReadError> {
@@ -381,8 +414,12 @@ fn commit_version(
     let (source_path, _temp_dir) = write_upload(bytes, ext)?;
     let target_label = {
         let vault = state::lock_vault(&bridge.vault);
-        let vault = vault.as_ref().ok_or("vault not initialized")?;
-        vault.document_name(doc_id).map_err(|e| e.to_string())?
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
+        vault
+            .document_name(doc_id)
+            .map_err(crate::logging::log_error)?
     };
     let metadata = CommitMetadata {
         author: None,
@@ -402,9 +439,9 @@ fn write_upload(
     bytes: &[u8],
     ext: &str,
 ) -> Result<(std::path::PathBuf, tempfile::TempDir), String> {
-    let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let temp_dir = tempfile::tempdir().map_err(crate::logging::log_error)?;
     let source_path = temp_dir.path().join(format!("upload.{ext}"));
-    std::fs::write(&source_path, bytes).map_err(|e| e.to_string())?;
+    std::fs::write(&source_path, bytes).map_err(crate::logging::log_error)?;
     // The caller keeps the `TempDir` alive until `phase_a_commit` has durably
     // copied the source into the vault intake, then it drops and the temp file
     // is cleaned up.
@@ -427,8 +464,10 @@ fn spawn_archive(bridge: &Bridge, target_label: String, version: Version) -> Str
 
 fn list_documents(bridge: &Bridge) -> Result<Vec<serde_json::Value>, String> {
     let vault = state::lock_vault(&bridge.vault);
-    let vault = vault.as_ref().ok_or("vault not initialized")?;
-    let documents = vault.list_documents().map_err(|e| e.to_string())?;
+    let vault = vault
+        .as_ref()
+        .ok_or_else(|| crate::logging::log_warn("vault not initialized"))?;
+    let documents = vault.list_documents().map_err(crate::logging::log_error)?;
     Ok(documents
         .iter()
         .map(|d| {
@@ -447,20 +486,25 @@ fn list_documents(bridge: &Bridge) -> Result<Vec<serde_json::Value>, String> {
 /// checkout without `npm run build` in `shared/addin-web`).
 fn serve_taskpane(request_path: &str, token: &str) -> ResponseBox {
     let Some(dist) = taskpane_dist() else {
+        if request_path == "/" {
+            crate::logging::log_warn(
+                "task-pane build directory is missing; showing the placeholder page",
+            );
+        }
         return placeholder_response(token);
     };
     let relative = request_path.trim_start_matches('/');
     let file_path = dist.join(relative);
     if !file_path.starts_with(&dist) {
         // Path-traversal guard: never serve anything outside the build dir.
-        return json_response(404, &serde_json::json!({ "error": "not found" }));
+        return json_error_response(404, "asset", "not found");
     }
     if relative.is_empty() || relative == "index.html" {
         return serve_index(&dist.join("index.html"), token);
     }
     match std::fs::read(&file_path) {
         Ok(bytes) => text_response(200, bytes, content_type(&file_path)),
-        Err(_) => json_response(404, &serde_json::json!({ "error": "not found" })),
+        Err(_) => json_error_response(404, "asset", "not found"),
     }
 }
 
@@ -476,6 +520,10 @@ fn taskpane_dist() -> Option<PathBuf> {
 /// bridge client.
 fn serve_index(index_path: &Path, token: &str) -> ResponseBox {
     let Ok(html) = std::fs::read_to_string(index_path) else {
+        crate::logging::log_warn(format!(
+            "failed to read task-pane index: {}",
+            index_path.display()
+        ));
         return placeholder_response(token);
     };
     text_response(
@@ -608,6 +656,39 @@ mod tests {
             parse_route("POST", "/api/documents//versions"),
             Route::NotFound
         );
+    }
+
+    #[test]
+    fn route_log_parses_and_bounds_diagnostic_payload() {
+        assert_eq!(
+            parse_route(
+                "POST",
+                "/api/log?scope=document.current&message=%E8%AF%BB%E5%8F%96%E5%A4%B1%E8%B4%A5"
+            ),
+            Route::Log {
+                scope: "document.current".to_owned(),
+                message: "读取失败".to_owned(),
+            }
+        );
+
+        let long_scope = "s".repeat(MAX_LOG_SCOPE_BYTES + 1);
+        assert_eq!(
+            parse_route("POST", &format!("/api/log?scope={long_scope}&message=x")),
+            Route::NotFound
+        );
+
+        let long_message = "m".repeat(MAX_LOG_MESSAGE_BYTES + 1);
+        assert_eq!(
+            parse_route("POST", &format!("/api/log?scope=ui&message={long_message}")),
+            Route::NotFound
+        );
+
+        for query in ["", "scope=ui", "message=x", "scope=ui&message="] {
+            assert_eq!(
+                parse_route("POST", &format!("/api/log?{query}")),
+                Route::NotFound
+            );
+        }
     }
 
     #[test]

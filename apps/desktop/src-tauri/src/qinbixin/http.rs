@@ -50,7 +50,7 @@ pub(super) async fn request_json<T: DeserializeOwned>(
 ) -> Result<(RawEnvelope<T>, Option<String>), String> {
     let uri = format!("{base_url}{path}")
         .parse::<hyper::Uri>()
-        .map_err(|e| format!("invalid request URL: {e}"))?;
+        .map_err(|e| crate::logging::log_error(format!("invalid request URL: {e}")))?;
     let request = hyper::Request::builder()
         .method(method)
         .uri(uri)
@@ -58,8 +58,8 @@ pub(super) async fn request_json<T: DeserializeOwned>(
         .header("accept", "*/*")
         .header("user-agent", "DocVault/0.2");
     let request = if let Some(body) = body {
-        let text =
-            serde_json::to_vec(&body).map_err(|e| format!("unable to encode request: {e}"))?;
+        let text = serde_json::to_vec(&body)
+            .map_err(|e| crate::logging::log_error(format!("unable to encode request: {e}")))?;
         request.header("content-type", "application/json").body(
             http_body_util::combinators::BoxBody::new(Full::new(Bytes::from(text))),
         )
@@ -68,38 +68,45 @@ pub(super) async fn request_json<T: DeserializeOwned>(
             Bytes::new(),
         )))
     }
-    .map_err(|e| format!("unable to create request: {e}"))?;
+    .map_err(|e| crate::logging::log_error(format!("unable to create request: {e}")))?;
     let response = tokio::time::timeout(Duration::from_secs(10), HTTP_CLIENT.request(request))
         .await
-        .map_err(|_| "request timed out".to_owned())?
-        .map_err(|e| format!("request failed: {}", format_error_chain(e)))?;
+        .map_err(|_| crate::logging::log_error("request timed out"))?
+        .map_err(|e| {
+            crate::logging::log_error(format!("request failed: {}", format_error_chain(e)))
+        })?;
     let new_token = response
         .headers()
         .get("NewToken")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let status = response.status();
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| format!("unable to read response: {}", format_error_chain(e)))?;
+    let bytes = response.into_body().collect().await.map_err(|e| {
+        crate::logging::log_error(format!(
+            "unable to read response: {}",
+            format_error_chain(e)
+        ))
+    })?;
     let text = String::from_utf8_lossy(bytes.to_bytes().as_ref()).into_owned();
     if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     serde_json::from_str(&text)
         .map(|envelope| (envelope, new_token))
-        .map_err(|e| format!("invalid response: {e}; body: {text}"))
+        .map_err(|e| crate::logging::log_error(format!("invalid response: {e}; body: {text}")))
 }
 
 pub(super) fn mapped_error<T>(envelope: RawEnvelope<T>) -> Result<T, String> {
     if envelope.success.unwrap_or_default() {
         envelope
             .data
-            .ok_or_else(|| "missing response data".to_owned())
+            .ok_or_else(|| crate::logging::log_error("missing response data"))
     } else {
-        Err(envelope.msg.unwrap_or_else(|| "request failed".to_owned()))
+        let message = envelope
+            .msg
+            .unwrap_or_else(|| crate::logging::log_error("request failed"));
+        tracing::warn!(message = %message, "qinbixin request rejected");
+        Err(message)
     }
 }
 
@@ -199,7 +206,7 @@ pub(super) async fn request_multipart<T: DeserializeOwned>(
 ) -> Result<(RawEnvelope<T>, Option<String>), String> {
     let uri = format!("{base_url}{path}")
         .parse::<hyper::Uri>()
-        .map_err(|e| format!("invalid upload URL: {e}"))?;
+        .map_err(|e| crate::logging::log_error(format!("invalid upload URL: {e}")))?;
     let content_type = format!("multipart/form-data; boundary={UPLOAD_BOUNDARY}");
     let body = multipart_file_body(file_name, mime_for_file(file_name), bytes);
     let request = hyper::Request::builder()
@@ -214,29 +221,34 @@ pub(super) async fn request_multipart<T: DeserializeOwned>(
             Some(cb) => http_body_util::combinators::BoxBody::new(ProgressBody::new(body, cb)),
             None => http_body_util::combinators::BoxBody::new(Full::new(body)),
         })
-        .map_err(|e| format!("unable to create upload request: {e}"))?;
+        .map_err(|e| crate::logging::log_error(format!("unable to create upload request: {e}")))?;
     let response = tokio::time::timeout(Duration::from_secs(120), HTTP_CLIENT.request(request))
         .await
-        .map_err(|_| "upload timed out".to_owned())?
-        .map_err(|e| format!("upload failed: {}", format_error_chain(e)))?;
+        .map_err(|_| crate::logging::log_error("upload timed out"))?
+        .map_err(|e| {
+            crate::logging::log_error(format!("upload failed: {}", format_error_chain(e)))
+        })?;
     let new_token = response
         .headers()
         .get("NewToken")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let status = response.status();
-    let response_bytes = response
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| format!("unable to read upload response: {}", format_error_chain(e)))?;
+    let response_bytes = response.into_body().collect().await.map_err(|e| {
+        crate::logging::log_error(format!(
+            "unable to read upload response: {}",
+            format_error_chain(e)
+        ))
+    })?;
     let text = String::from_utf8_lossy(response_bytes.to_bytes().as_ref()).into_owned();
     if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     serde_json::from_str(&text)
         .map(|envelope| (envelope, new_token))
-        .map_err(|e| format!("invalid upload response: {e}; body: {text}"))
+        .map_err(|e| {
+            crate::logging::log_error(format!("invalid upload response: {e}; body: {text}"))
+        })
 }
 
 pub(super) fn absolute_url(base_url: &str, url: String) -> String {

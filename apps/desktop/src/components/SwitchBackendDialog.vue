@@ -6,6 +6,7 @@ import BaseModal from "./BaseModal.vue";
 import { useDialogs } from "../composables/useDialogs";
 import { useVault, type VaultProbe } from "../composables/useVault";
 import { useDesktopState } from "../composables/useDesktopState";
+import { reportError } from "../utils/reportError";
 
 /*
  * Switch-backend / connect dialog. Drives the same `connect()` contract whether
@@ -75,7 +76,8 @@ watch(dir, async (d) => {
   }
   try {
     probe.value = await probeVault(d);
-  } catch {
+  } catch (error) {
+    reportError("connect.probe", error);
     probe.value = { status: "empty" };
   }
   if (probe.value.status === "existing" && probe.value.backend) {
@@ -95,7 +97,9 @@ async function submit() {
   error.value = "";
   status.value = "";
   if (!dir.value) {
-    error.value = t("connect.chooseDir");
+    const message = t("connect.chooseDir");
+    error.value = message;
+    reportError("connect.validation", new Error(message));
     return;
   }
   // The password is typed twice so a typo can't silently lock a new vault.
@@ -104,7 +108,9 @@ async function submit() {
     !backendLocked.value &&
     password.value !== confirmPassword.value
   ) {
-    error.value = t("connect.passwordMismatch");
+    const message = t("connect.passwordMismatch");
+    error.value = message;
+    reportError("connect.validation", new Error(message));
     return;
   }
   switching.value = true;

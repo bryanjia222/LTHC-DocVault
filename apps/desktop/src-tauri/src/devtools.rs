@@ -65,17 +65,17 @@ fn example_docs_dir() -> PathBuf {
 /// open vault before calling so the DB file is not locked on Windows.
 fn purge_vault_root(root: &Path) -> Result<(), String> {
     if root.exists() {
-        for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(root).map_err(crate::logging::log_error)? {
+            let entry = entry.map_err(crate::logging::log_error)?;
             let path = entry.path();
             if path.is_dir() {
-                fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                fs::remove_dir_all(&path).map_err(crate::logging::log_error)?;
             } else {
-                fs::remove_file(&path).map_err(|e| e.to_string())?;
+                fs::remove_file(&path).map_err(crate::logging::log_error)?;
             }
         }
     } else {
-        fs::create_dir_all(root).map_err(|e| e.to_string())?;
+        fs::create_dir_all(root).map_err(crate::logging::log_error)?;
     }
     Ok(())
 }
@@ -94,7 +94,10 @@ fn seed_three_docs(
     for (file, name) in SEED_ENTRIES {
         let path = example_docs.join(file);
         if !path.exists() {
-            return Err(format!("example doc not found: {}", path.display()));
+            return Err(crate::logging::log_warn(format!(
+                "example doc not found: {}",
+                path.display()
+            )));
         }
         let metadata = CommitMetadata {
             author: Some("seed".to_owned()),
@@ -107,7 +110,7 @@ fn seed_three_docs(
                 metadata,
                 cancel,
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(crate::logging::log_error)?;
         out.push(document);
     }
     Ok(out)
@@ -164,7 +167,9 @@ fn connect_err_to_string(e: ConnectError) -> String {
 // --- AppHandle-bound wrappers + commands ---
 
 fn app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| e.to_string())
+    app.path()
+        .app_config_dir()
+        .map_err(crate::logging::log_error)
 }
 
 /// Core stage reset. Drops the open vault (releases the DB file on Windows),
@@ -193,7 +198,7 @@ fn reset_to_stage_core(
         "fresh" => {
             // No vault: clear the saved root pref so the next status read is
             // uninitialized and the app shows onboarding (repo + backend pick).
-            prefs::clear_root(app).map_err(|e| e.to_string())?;
+            prefs::clear_root(app).map_err(crate::logging::log_error)?;
             if let Some(state_file) = state_file {
                 clear_slice_at(&state_file, &canonical_key(root))?;
             }
@@ -220,7 +225,7 @@ fn reset_to_stage_core(
                 effective_password,
             )
             .map_err(connect_err_to_string)?;
-            prefs::save_root(app, root).map_err(|e| e.to_string())?;
+            prefs::save_root(app, root).map_err(crate::logging::log_error)?;
             if let Some(state_file) = state_file {
                 clear_slice_at(&state_file, &canonical_key(root))?;
             }
@@ -229,7 +234,9 @@ fn reset_to_stage_core(
             }
             Ok(())
         }
-        other => Err(format!("unknown reset stage: {other}")),
+        other => Err(crate::logging::log_warn(format!(
+            "unknown reset stage: {other}"
+        ))),
     }
 }
 
@@ -238,20 +245,24 @@ fn reset_to_stage_core(
 fn seed_sample_docs(state: &AppState, app: &AppHandle, root: &Path) -> Result<(), String> {
     let example_docs = example_docs_dir();
     if !example_docs.is_dir() {
-        return Err(format!(
+        return Err(crate::logging::log_warn(format!(
             "example docs not found at {} (seed requires the repo's example_docs)",
             example_docs.display()
-        ));
+        )));
     }
     let cancel = AtomicBool::new(false);
     let docs = {
         let vault = state::lock_vault(&state.vault);
-        let vault = vault.as_ref().ok_or("vault not initialized after reset")?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_error("vault not initialized after reset"))?;
         seed_three_docs(vault, &example_docs, &cancel)?
     };
     if let Some(state_file) = state_path(app) {
         let vault = state::lock_vault(&state.vault);
-        let vault = vault.as_ref().ok_or("vault not initialized after reset")?;
+        let vault = vault
+            .as_ref()
+            .ok_or_else(|| crate::logging::log_error("vault not initialized after reset"))?;
         write_seed_slice(vault, &state_file, &canonical_key(root), &docs)?;
     }
     Ok(())

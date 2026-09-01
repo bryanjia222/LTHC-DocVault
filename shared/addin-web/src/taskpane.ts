@@ -1,5 +1,5 @@
 import "./taskpane.css";
-import { bridge, BridgeError } from "./bridge";
+import { bridge, BridgeError, logTaskPaneError } from "./bridge";
 import { HostAdapter, MAX_BYTES, TooLargeError } from "./host";
 
 export interface TaskPaneOptions {
@@ -67,6 +67,10 @@ export async function mountTaskPane(
     const health = await bridge.health();
     if (!health.ok || !health.vaultOpen) {
       setStatus("DocVault 未运行或尚未打开仓库。请先打开 DocVault 并连接仓库。", "error");
+      logTaskPaneError(
+        "taskpane.health",
+        "DocVault is not running or the vault is not open",
+      );
       return;
     }
     setStatus(`已连接 DocVault v${health.version}`, "ok");
@@ -81,6 +85,7 @@ export async function mountTaskPane(
     form.hidden = false;
   } catch (e) {
     setStatus(friendly(e), "error");
+    if (!(e instanceof BridgeError)) logTaskPaneError("taskpane.initialize", e);
     return;
   }
 
@@ -91,7 +96,7 @@ export async function mountTaskPane(
     try {
       const doc = await host.getCurrentDocument();
       if (isVersionMode()) {
-        if (!target.value) throw new BridgeError("请选择目标文档");
+        if (!target.value) throw new Error("请选择目标文档");
         result.textContent = "正在保存为文档新版本…";
         const noteText = note.value.trim() || undefined;
         const { jobId } = await bridge.commitVersion(target.value, doc.ext, doc.bytes, noteText);
@@ -108,6 +113,9 @@ export async function mountTaskPane(
       setStatus("保存成功", "ok");
     } catch (e) {
       result.textContent = friendly(e);
+      if (e instanceof TooLargeError || !(e instanceof BridgeError)) {
+        logTaskPaneError("taskpane.save", e);
+      }
     } finally {
       save.disabled = false;
     }

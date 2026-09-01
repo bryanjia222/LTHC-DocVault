@@ -80,6 +80,17 @@ pub enum ConnectError {
     Other(String),
 }
 
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::JobsRunning => write!(f, "jobs running"),
+            Self::Unrecognized => write!(f, "unrecognized vault"),
+            Self::ResticPasswordRequired => write!(f, "restic password required"),
+            Self::Other(message) => write!(f, "{message}"),
+        }
+    }
+}
+
 /// A user-created project folder for grouping documents in the sidebar. The
 /// DocVault backend has no folder concept, so projects are desktop-local
 /// annotations (like tags): each vault root owns its own project list. `id` is a

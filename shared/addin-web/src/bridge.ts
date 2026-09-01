@@ -93,3 +93,46 @@ export const bridge = {
     );
   },
 };
+
+/** Send a task-pane-local error to the desktop's persistent log. Backend
+ *  `BridgeError`s are already logged by the Rust bridge, so callers should not
+ *  duplicate-report them; this path covers browser/host failures that never
+ *  reached an API response. If the bridge itself is unreachable, keep a
+ *  console copy so the failure is still visible while troubleshooting.
+ */
+export function logTaskPaneError(scope: string, error: unknown): void {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  // Match the bridge's byte bound so oversized diagnostics are preserved in
+  // the persistent log instead of silently rejected.
+  const encoded = new TextEncoder().encode(rawMessage);
+  const message =
+    encoded.length <= 4096 ? rawMessage : new TextDecoder().decode(encoded.slice(0, 4096));
+  void (async () => {
+    const query = new URLSearchParams({ scope, message });
+    const response = await fetch(`/api/log?${query}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!response.ok) {
+      console.error(`[${scope}] bridge log request failed: HTTP ${response.status}`);
+    }
+  })().catch((cause: unknown) => {
+    console.error(`[${scope}] bridge log request failed`, cause);
+  });
+}
+
+/** Catch failures that never reach an explicit task-pane catch block. The
+ *  marker prevents nested/refreshed mounts from installing duplicate handlers.
+ */
+export function installGlobalErrorReporting(): void {
+  const marker = "__docvaultAddinErrorReportingInstalled";
+  if (marker in window) return;
+  Object.defineProperty(window, marker, { value: true });
+
+  window.addEventListener("error", (event) => {
+    logTaskPaneError("global.error", event.error ?? event.message ?? "unknown error");
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    logTaskPaneError("global.unhandledRejection", event.reason);
+  });
+}

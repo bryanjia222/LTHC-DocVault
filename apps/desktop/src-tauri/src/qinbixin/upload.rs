@@ -52,15 +52,16 @@ pub async fn qinbixin_thumbnail(path: String, kind: String) -> Result<Option<Str
         return Ok(None);
     }
     let file = PathBuf::from(&path);
-    let metadata = fs::metadata(&file).map_err(|e| format!("unable to stat media file: {e}"))?;
+    let metadata = fs::metadata(&file)
+        .map_err(|e| crate::logging::log_error(format!("unable to stat media file: {e}")))?;
     if metadata.len() > THUMBNAIL_MAX_BYTES {
         return Ok(None);
     }
     let read_path = file.clone();
     let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(read_path))
         .await
-        .map_err(|e| format!("unable to read media file: {e}"))?
-        .map_err(|e| format!("unable to read media file: {e}"))?;
+        .map_err(|e| crate::logging::log_error(format!("unable to read media file: {e}")))?
+        .map_err(|e| crate::logging::log_error(format!("unable to read media file: {e}")))?;
     let mime = mime_for_file(&file_name(&file));
     let data_url = format!("data:{mime};base64,{}", base64_encode(&bytes));
     Ok(Some(data_url))
@@ -87,10 +88,14 @@ async fn upload_media_bytes(
         token,
     } = context;
     if bytes.is_empty() {
-        return Err(format!("文件 {file_name} 容量为0KB"));
+        return Err(crate::logging::log_warn(format!(
+            "文件 {file_name} 容量为0KB"
+        )));
     }
     if bytes.len() as u64 > MAX_UPLOAD_BYTES {
-        return Err(format!("文件 {file_name} 超过上传大小限制"));
+        return Err(crate::logging::log_warn(format!(
+            "文件 {file_name} 超过上传大小限制"
+        )));
     }
     let upload_path = format!("/API/Web/Upload?uploadType={upload_type}");
     let app_for_progress = app.clone();
@@ -101,14 +106,21 @@ async fn upload_media_bytes(
         } else {
             ((sent as u64 * 100) / total as u64) as i32
         };
-        let _ = app_for_progress.emit(
+        if let Err(error) = app_for_progress.emit(
             "qinbixin-upload-progress",
             json!({
                 "index": index,
                 "fileName": file_for_progress,
                 "percent": percent,
             }),
-        );
+        ) {
+            tracing::warn!(
+                index,
+                file_name = %file_for_progress,
+                error = %error,
+                "failed to emit qinbixin upload progress"
+            );
+        }
     };
     let (envelope, new_token) = request_multipart::<RawUploadedFile>(
         environment.base_url(),
@@ -136,12 +148,12 @@ pub async fn qinbixin_upload(
     upload_type: u8,
 ) -> Result<Vec<QinbixinUploadedFile>, String> {
     if !matches!(upload_type, 0..=2) {
-        return Err("invalid media type".to_owned());
+        return Err(crate::logging::log_warn("invalid media type"));
     }
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     if paths.is_empty() {
         return Ok(Vec::new());
@@ -153,13 +165,13 @@ pub async fn qinbixin_upload(
         let file_name = path
             .file_name()
             .and_then(|value| value.to_str())
-            .ok_or_else(|| "invalid media file".to_owned())?
+            .ok_or_else(|| crate::logging::log_warn("invalid media file"))?
             .to_owned();
         let read_path = path.clone();
         let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(read_path))
             .await
-            .map_err(|e| format!("unable to read media file: {e}"))?
-            .map_err(|e| format!("unable to read media file: {e}"))?;
+            .map_err(|e| crate::logging::log_error(format!("unable to read media file: {e}")))?
+            .map_err(|e| crate::logging::log_error(format!("unable to read media file: {e}")))?;
         uploaded.push(
             upload_media_bytes(
                 QinbixinUploadContext {
@@ -188,18 +200,18 @@ pub async fn qinbixin_upload_bytes(
     upload_type: u8,
 ) -> Result<QinbixinUploadedFile, String> {
     if !matches!(upload_type, 0..=2) {
-        return Err("invalid media type".to_owned());
+        return Err(crate::logging::log_warn("invalid media type"));
     }
     let file_name = std::path::Path::new(&file_name)
         .file_name()
         .and_then(|value| value.to_str())
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "invalid media file".to_owned())?
+        .ok_or_else(|| crate::logging::log_warn("invalid media file"))?
         .to_owned();
     let environment = load_environment(&app);
     let token = state.qinbixin.lock().unwrap().token.clone();
     if token.is_empty() {
-        return Err("AUTH_EXPIRED".to_owned());
+        return Err(crate::logging::log_warn("AUTH_EXPIRED"));
     }
     upload_media_bytes(
         QinbixinUploadContext {

@@ -6,9 +6,7 @@ import { useI18n } from "vue-i18n";
 
 import QinbixinMessageCard from "../QinbixinMessageCard.vue";
 import { openUrl } from "../../composables/useVault";
-import type {
-  QinbixinMailboxController,
-} from "../../composables/useQinbixinMailbox";
+import type { QinbixinMailboxController } from "../../composables/useQinbixinMailbox";
 
 const props = defineProps<{ mailbox: QinbixinMailboxController }>();
 const { t } = useI18n();
