@@ -95,6 +95,7 @@ function openCompare() {
       <button
         class="toolbar-btn"
         type="button"
+        :disabled="!selectedDocument"
         :title="t('actions.compare')"
         @click="openCompare"
       >

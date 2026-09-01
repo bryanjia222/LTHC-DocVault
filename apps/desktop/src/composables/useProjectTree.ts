@@ -28,7 +28,8 @@ export type SidebarMenuTarget =
 export function useProjectTree() {
   const { t } = useI18n();
   const desktop = useDesktopState();
-  const { activeProjectId, selectAll, selectProject } = useDocuments();
+  const { activeProjectId, selectAll, selectProject, clearSelection } =
+    useDocuments();
   const { activeSection, setSection } = useNavigation();
 
   const projects = computed(() => desktop.projects.value);
@@ -90,6 +91,7 @@ export function useProjectTree() {
     newName.value = "";
     createError.value = "";
     selectProject(id);
+    clearSelection();
     setSection("documents");
   }
 
@@ -170,11 +172,13 @@ export function useProjectTree() {
 
   function onDocumentsClick() {
     selectAll();
+    clearSelection();
     setSection("documents");
   }
 
   function onProjectClick(id: string) {
     selectProject(id);
+    clearSelection();
     setSection("documents");
   }
 

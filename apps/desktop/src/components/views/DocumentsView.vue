@@ -44,7 +44,7 @@ const DocumentCompare = defineAsyncComponent(
 );
 
 const { t } = useI18n();
-const { filteredDocuments, activeProjectId } = useDocuments();
+const { filteredDocuments, activeProjectId, clearSelection } = useDocuments();
 const desktop = useDesktopState();
 const { openNoteEdit } = useDialogs();
 const { log, logBlocked } = useActivityLog();
@@ -100,6 +100,12 @@ function onDocumentSelected(_document: Document) {
   panelCollapsed.value = false;
   versionViewMode.value = "list";
   isGraphMaximized.value = false;
+}
+
+/** A click landed on a non-document table entry (divider / empty area): drop
+ *  the selection so the toolbar's document actions arm only on a real pick. */
+function onSelectNone() {
+  clearSelection();
 }
 
 const {
@@ -244,6 +250,7 @@ onBeforeUnmount(() => {
         :grouped-documents="groupedDocuments"
         :show-group-headers="showGroupHeaders"
         @select="chooseDocument"
+        @select-none="onSelectNone"
         @dblclick="onDocDoubleClick"
         @dragstart="onDragStartDoc"
         @contextmenu="openDocMenu"

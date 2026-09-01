@@ -22,7 +22,7 @@ export function useAppActions() {
   const { log } = useActivityLog();
   const { setSection, openSettingsTab } = useNavigation();
   const { toggleTheme, isDark } = useTheme();
-  const { selectedDocument } = useDocuments();
+  const { selectedDocument, clearSelection } = useDocuments();
   const { loadDocuments, resetToStage } = useVault();
   const desktop = useDesktopState();
   const { flash } = useFlash();
@@ -99,6 +99,9 @@ export function useAppActions() {
   }
 
   function navigate(sectionId: NavigationId) {
+    // The bin/settings views have no meaningful selected document; a stale
+    // selection must not keep the toolbar's document actions armed there.
+    if (sectionId !== "documents") clearSelection();
     setSection(sectionId);
     const labelKey = `nav.${sectionId}`;
     log(t("actionLogs.navigate", { section: t(labelKey) }));
@@ -106,6 +109,7 @@ export function useAppActions() {
 
   /** Open Settings on the 状态 (status) tab - the unified tasks/archive view. */
   function openStatus() {
+    clearSelection();
     openSettingsTab("status");
     log(t("actionLogs.navigate", { section: t("settings.tabs.status") }));
   }

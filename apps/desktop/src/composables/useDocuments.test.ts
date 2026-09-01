@@ -289,9 +289,16 @@ describe("useDocuments - selection", () => {
     expect(docs.selectedDocumentId.value).toBe("docA");
   });
 
-  it("falls back to the first document when the selected id is missing", () => {
+  it("does not fall back to another document when the selected id is missing", () => {
     docs.selectedDocumentId.value = "gone";
-    expect(docs.selectedDocument.value?.id).toBe("docA");
+    expect(docs.selectedDocument.value).toBeUndefined();
+  });
+
+  it("clears the whole selection and keeps it cleared", () => {
+    docs.selectDocument(docA);
+    docs.clearSelection();
+    expect(docs.selectedDocument.value).toBeUndefined();
+    expect(docs.selectedVersion.value).toBeUndefined();
   });
 
   it("falls back to the first version when the selected version id is missing", () => {

@@ -41,7 +41,8 @@ const { log } = useActivityLog();
 const desktop = useDesktopState();
 const { onJobUpdate } = useToasts();
 const { openSwitchBackend, openAddDocument, anyDialogOpen } = useDialogs();
-const { activeProjectId } = useDocuments();
+const { activeProjectId, selectedDocumentId, selectFirstVisible } =
+  useDocuments();
 const {
   documents,
   initialized,
@@ -169,6 +170,10 @@ async function runPostConnectSetup(): Promise<void> {
   await ensureLibraryCopies();
   await desktop.loadDesktopState();
   await desktop.refreshModifications();
+  // Boot auto-picks the first document so the detail panel opens with content,
+  // like the previous implicit fallback did - but only once, and only when the
+  // user has not already (de)selected something.
+  if (!selectedDocumentId.value) selectFirstVisible();
   if (!unsubJobs) {
     unsubJobs = await subscribeJobs(onJobTerminal, onJobUpdate);
   }

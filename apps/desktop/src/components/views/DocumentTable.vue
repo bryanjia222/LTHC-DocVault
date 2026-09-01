@@ -24,6 +24,7 @@ const emit = defineEmits<{
   dblclick: [document: Document];
   dragstart: [event: DragEvent, document: Document];
   contextmenu: [event: MouseEvent, document: Document];
+  selectNone: [];
   open: [document: Document];
   preview: [document: Document];
   commit: [document: Document];
@@ -58,10 +59,24 @@ function sortIndicator(key: SortKey): string {
   if (sortKey.value !== key) return "";
   return sortDirection.value === "asc" ? "▲" : "▼";
 }
+
+/** Clicking anything that is not a document row (group dividers, the filler
+ *  strip, the empty state) drops the selection; header sorts and buttons stay. */
+function onBackgroundClick(event: MouseEvent) {
+  const target = event.target as Element;
+  if (
+    target.closest("button") ||
+    target.closest("th") ||
+    target.closest("tr[role='button']")
+  ) {
+    return;
+  }
+  emit("selectNone");
+}
 </script>
 
 <template>
-  <div ref="tableWrapRef" class="table-wrap">
+  <div ref="tableWrapRef" class="table-wrap" @click="onBackgroundClick">
     <table ref="tableRef" :style="{ width: tableWidth + 'px' }">
       <colgroup>
         <col

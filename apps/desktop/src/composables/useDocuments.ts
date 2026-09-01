@@ -85,14 +85,8 @@ const documents = computed<Document[]>(() =>
   })),
 );
 
-const selectedDocument = computed<Document | undefined>(
-  () =>
-    documents.value.find(
-      (document) => document.id === selectedDocumentId.value,
-    ) ??
-    // Fall back to the first non-trashed document so the detail panel never
-    // parks on a recycle-bin document after a soft-delete.
-    documents.value.find((document) => !desktop.isTrashed(document.id)),
+const selectedDocument = computed<Document | undefined>(() =>
+  documents.value.find((document) => document.id === selectedDocumentId.value),
 );
 
 const selectedVersion = computed<Version | undefined>(() => {
@@ -190,6 +184,14 @@ export function useDocuments() {
     selectedVersionId.value = version.id;
   }
 
+  /** Drop the selection entirely: toolbar actions + the detail panel become
+   *  empty until the user picks a document again (clicked a non-document
+   *  entry, switched to the bin/settings, or clicked outside the table). */
+  function clearSelection() {
+    selectedDocumentId.value = "";
+    selectedVersionId.value = "";
+  }
+
   function toggleType(category: TypeCategory) {
     const next = new Set(typeFilter.value);
     if (next.has(category)) next.delete(category);
@@ -253,6 +255,7 @@ export function useDocuments() {
     selectedDocumentId,
     selectedVersion,
     selectedVersionId,
+    clearSelection,
     totalVersions,
     // filters
     searchQuery,
