@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  ArrowRightLeft,
   Download,
   ExternalLink,
   Eye,
@@ -30,6 +31,7 @@ const { runAction, openDocument, toggleCurrentTheme } = useVaultActions();
 const { openCommitModified } = useDialogs();
 const { open: openPalette } = useCommandPalette();
 const { log } = useActivityLog();
+const { openCompareDialog } = useDialogs();
 const { openPreview } = usePreview();
 const { isDark } = useTheme();
 
@@ -63,6 +65,18 @@ function commit() {
 function exportDoc() {
   runAction("actionLogs.export");
 }
+
+/** Open the two-sided compare-selection dialog (old vs new doc + version). */
+function openCompare() {
+  log(
+    t("log.actionRequested", {
+      action: t("actionLogs.compare"),
+      name: selectedDocument.value?.name ?? t("log.noDocument"),
+      version: t("log.latest"),
+    }),
+  );
+  openCompareDialog();
+}
 </script>
 
 <template>
@@ -77,6 +91,15 @@ function exportDoc() {
       >
         <Eye aria-hidden="true" />
         <span>{{ t("actions.preview") }}</span>
+      </button>
+      <button
+        class="toolbar-btn"
+        type="button"
+        :title="t('actions.compare')"
+        @click="openCompare"
+      >
+        <ArrowRightLeft aria-hidden="true" />
+        <span>{{ t("actions.compare") }}</span>
       </button>
       <button
         class="toolbar-btn"

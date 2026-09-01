@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev": "node scripts/fetch-restic.mjs --host --best-effort",
+    "predev": "node scripts/copy-docxodus-wasm.mjs && node scripts/fetch-restic.mjs --host --best-effort",
     "build": "vue-tsc --noEmit && vite build",
-    "prebuild": "node scripts/fetch-restic.mjs --host --best-effort",
+    "prebuild": "node scripts/copy-docxodus-wasm.mjs && node scripts/fetch-restic.mjs --host --best-effort",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.cjs",
     "preversion": "node scripts/check-clean-tree.mjs",
@@ -19,14 +19,14 @@
     "lint": "eslint . --ext .ts,.vue",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "node scripts/fetch-restic.mjs --host --best-effort"
+    "postinstall": "node scripts/copy-docxodus-wasm.mjs && node scripts/fetch-restic.mjs --host --best-effort"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
     "@lucide/vue": "^1.24.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "docx-preview": "^0.4.0",
+    "docxodus": "^10.0.0",
     "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
     "marked": "^18.0.6",

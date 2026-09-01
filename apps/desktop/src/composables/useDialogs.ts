@@ -14,6 +14,7 @@ const documentStatusOpen = ref(false);
 const renameOpen = ref(false);
 const noteEditOpen = ref(false);
 const newDocumentOpen = ref(false);
+const compareDialogOpen = ref(false);
 // Which project the "新建文件" kebab action originated from (null = the
 // all-documents root - the new doc is created with no project membership).
 // Unlike the other open flags (which carry no payload), this one needs a
@@ -34,7 +35,8 @@ const anyDialogOpen = computed(
     documentStatusOpen.value ||
     renameOpen.value ||
     noteEditOpen.value ||
-    newDocumentOpen.value,
+    newDocumentOpen.value ||
+    compareDialogOpen.value,
 );
 
 export function useDialogs() {
@@ -90,6 +92,12 @@ export function useDialogs() {
   function closeNewDocument() {
     newDocumentOpen.value = false;
   }
+  function openCompareDialog() {
+    compareDialogOpen.value = true;
+  }
+  function closeCompareDialog() {
+    compareDialogOpen.value = false;
+  }
 
   return {
     addDocumentOpen,
@@ -99,6 +107,7 @@ export function useDialogs() {
     renameOpen,
     noteEditOpen,
     newDocumentOpen,
+    compareDialogOpen,
     newDocumentProjectId,
     addDocumentFiles,
     addDocumentProjectId,
@@ -117,5 +126,7 @@ export function useDialogs() {
     closeNoteEdit,
     openNewDocument,
     closeNewDocument,
+    openCompareDialog,
+    closeCompareDialog,
   };
 }

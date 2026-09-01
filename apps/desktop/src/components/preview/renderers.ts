@@ -1,4 +1,5 @@
 import type { PreviewKind } from "../../utils/previewDispatch";
+import { getDocxodus } from "../../composables/useDocxodus";
 
 // Bundled worker URL (Vite copies the file to assets and hands back its URL).
 // Static so it ships with this (lazy) chunk; pdfjs only spawns the worker when
@@ -136,12 +137,16 @@ export function createPreviewRenderer(): PreviewRenderer {
     el: HTMLDivElement,
     guard: RenderGuard,
   ) {
-    const { renderAsync } = await import("docx-preview");
+    const docxodus = await getDocxodus();
     if (guard.cancelled) return;
-    await renderAsync(bytes, el, undefined, {
-      className: "preview-docx",
-      inWrapper: true,
+    const html = await docxodus.convertDocxToHtml(new Uint8Array(bytes), {
+      renderTrackedChanges: true,
     });
+    if (guard.cancelled) return;
+    const article = document.createElement("div");
+    article.className = "preview-docx";
+    article.innerHTML = html;
+    el.appendChild(article);
   }
 
   async function renderXlsx(

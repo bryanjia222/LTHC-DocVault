@@ -126,6 +126,7 @@ export const enUS = {
     normalCommit: "Commit modified",
     commitVersion: "Commit modified",
     checkout: "Checkout",
+    compare: "Compare",
     checkoutAlreadyCurrent: "Already the current version",
     open: "Open",
     preview: "Preview",
@@ -249,6 +250,7 @@ export const enUS = {
     deleteVersion: "Delete version",
     restoreVersion: "Restore version from recycle bin",
     preview: "Preview document",
+    compare: "Compare documents",
     navigate: "Switch view: {section}",
     toggleTheme: "Switch to {theme} theme",
     resetToStage: "Reset to {stage}",
@@ -342,6 +344,9 @@ export const enUS = {
     preview: "Preview version {label}",
     checkout: "Switch to version {label}",
     export: "Export version {label}",
+    compareLatest: "Compare with latest version",
+    compareLatestCurrent:
+      "The selected version is already the latest - nothing to compare",
     delete: "Delete version {label}",
     deleteBlockedTitle: "Cannot delete version",
     deleteBlockedCurrent:
@@ -403,6 +408,27 @@ export const enUS = {
     close: "Close preview",
     refreshing: "Loading latest preview…",
     reload: "Reload preview",
+  },
+  compare: {
+    title: "Document comparison",
+    dialogSubtitle:
+      "Pick the old and new document versions to generate a Word redline.",
+    oldDoc: "Old document",
+    newDoc: "New document",
+    docLabel: "Document",
+    versionLabel: "Version",
+    latest: "latest",
+    run: "Run comparison",
+    loading: "Fetching documents and generating the redline…",
+    error: "Comparison failed: {error}",
+    close: "Close comparison",
+    resultSubtitle: "Old: {old} · {oldVersion}　New: {new} · {newVersion}",
+    noBytes: "Could not read the selected versions' document content.",
+    selectMissing: "Select the documents and versions to compare first.",
+    docxOnly: "Only Word (.docx) documents support comparison",
+    docxOnlyHint:
+      "Comparison requires both sides to be Word (.docx) documents; other formats are not supported yet.",
+    authorName: "DocVault",
   },
   jobs: {
     title: "Jobs",

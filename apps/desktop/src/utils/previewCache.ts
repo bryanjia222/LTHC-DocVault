@@ -32,6 +32,16 @@ export function isMutablePreview(version: Version | null): boolean {
   return version == null;
 }
 
+/** Cache key for a redline comparison between two (document, version) pairs. */
+export function compareCacheKey(
+  oldDocId: string,
+  oldVersionLabel: string,
+  newDocId: string,
+  newVersionLabel: string,
+): string {
+  return `compare|${oldDocId}:${oldVersionLabel}|${newDocId}:${newVersionLabel}`;
+}
+
 export function getPreviewCache(key: string): string | undefined {
   const value = cache.get(key);
   if (value === undefined) return undefined;

@@ -454,3 +454,23 @@ dd {
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--text-faint);
 }
+
+/* DOCX render host (Docxodus HTML). The engine styles its content for a white
+   page, so force a light surface even in the dark theme. */
+.preview-docx {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 18px 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #1f2430;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.preview-docx table {
+  border-collapse: collapse;
+}

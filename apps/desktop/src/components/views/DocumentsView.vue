@@ -17,6 +17,7 @@ import { useActivityLog } from "../../composables/useActivityLog";
 import { useDocumentSelection } from "../../composables/useDocumentSelection";
 import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
 import { usePreview } from "../../composables/usePreview";
+import { useCompare } from "../../composables/useCompare";
 import { useVersionPolling } from "../../composables/useVersionPolling";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { hasBranchingHistory } from "../../utils/versionTree";
@@ -30,11 +31,16 @@ import DocumentMetaSection from "./DocumentMetaSection.vue";
 import VersionHistoryPanel from "./VersionHistoryPanel.vue";
 import DocRowContextMenu from "./DocRowContextMenu.vue";
 import VersionContextMenu from "./VersionContextMenu.vue";
-// Lazy-loaded so the preview renderer libs (pdf.js / docx-preview / SheetJS /
+// Lazy-loaded so the preview renderer libs (pdf.js / Docxodus / SheetJS /
 // pptx-renderer / marked / DOMPurify) and the pdf.js worker stay out of the
 // app's initial bundle - they are only fetched when a preview is opened.
 const DocumentPreview = defineAsyncComponent(
   () => import("../DocumentPreview.vue"),
+);
+// Lazy-loaded so the Docxodus WASM redline engine is only fetched when a
+// comparison is actually opened.
+const DocumentCompare = defineAsyncComponent(
+  () => import("../DocumentCompare.vue"),
 );
 
 const { t } = useI18n();
@@ -88,6 +94,7 @@ const {
   previewVersionRef,
   openPreview: openPreviewOverlay,
 } = usePreview();
+const { compareOpen, openCompare } = useCompare();
 
 function onDocumentSelected(_document: Document) {
   panelCollapsed.value = false;
@@ -156,6 +163,42 @@ function setViewMode(mode: "list" | "tree") {
 
   versionViewMode.value = mode;
   log(t("log.versionViewChanged", { mode: t(`details.${mode}View`) }));
+}
+
+/** Right-click "与最新版本对比": diff the picked version against the
+ *  document's current version. The menu item is disabled for the same
+ *  guards, but the handler re-checks so an old cached menu cannot fire. */
+function onVersionMenuCompare() {
+  const document = selectedDocument.value;
+  const version = selectedVersion.value;
+  if (!document || !version) {
+    logBlocked(t("compare.selectMissing"));
+    return;
+  }
+  if (document.type !== "docx") {
+    logBlocked(t("compare.docxOnly"));
+    return;
+  }
+  if (version.status === "current") {
+    logBlocked(t("versionMenu.compareLatestCurrent"));
+    return;
+  }
+  const latest = document.versions.find((v) => v.status === "current");
+  if (!latest) {
+    logBlocked(t("compare.selectMissing"));
+    return;
+  }
+  log(
+    t("log.actionRequested", {
+      action: t("actionLogs.compare"),
+      name: document.name,
+      version: `${version.label} -> ${latest.label}`,
+    }),
+  );
+  openCompare({
+    old: { document, version },
+    new: { document, version: latest },
+  });
 }
 
 function setGraphMaximized(maximized: boolean) {
@@ -287,7 +330,11 @@ onBeforeUnmount(() => {
 
   <DocRowContextMenu ref="docMenuRef" @preview="onDocMenuPreview" />
 
-  <VersionContextMenu ref="versionMenuRef" @preview="onVersionMenuPreview" />
+  <VersionContextMenu
+    ref="versionMenuRef"
+    @preview="onVersionMenuPreview"
+    @compare="onVersionMenuCompare"
+  />
 
   <DocumentPreview
     v-if="previewOpen && selectedDocument"
@@ -295,6 +342,8 @@ onBeforeUnmount(() => {
     :version="previewVersionRef"
     @close="previewOpen = false"
   />
+
+  <DocumentCompare v-if="compareOpen" />
 </template>
 
 <style scoped>

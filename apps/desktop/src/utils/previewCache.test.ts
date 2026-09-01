@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   previewCacheKey,
   isMutablePreview,
+  compareCacheKey,
   getPreviewCache,
   setPreviewCache,
   bulkSetPreviewCache,
@@ -80,6 +81,21 @@ describe("previewCache", () => {
     it("a specific historical version is immutable", () => {
       // A committed snapshot never changes - its cache is authoritative.
       expect(isMutablePreview(version("v1"))).toBe(false);
+    });
+  });
+
+  describe("compareCacheKey", () => {
+    it("keys the comparison by both document/version pairs", () => {
+      expect(compareCacheKey("docA", "v2", "docB", "v5")).toBe(
+        "compare|docA:v2|docB:v5",
+      );
+    });
+    it("does not collide when the sides are swapped", () => {
+      // Old/new order is semantic (deletions vs insertions), so swapping the
+      // pairs must produce a different cache entry.
+      expect(compareCacheKey("docA", "v2", "docB", "v5")).not.toBe(
+        compareCacheKey("docB", "v5", "docA", "v2"),
+      );
     });
   });
 

@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArrowRightLeft, Download, Eye, RefreshCw, Trash2 } from "@lucide/vue";
+import {
+  ArrowRightLeft,
+  Download,
+  Eye,
+  GitCompare,
+  RefreshCw,
+  Trash2,
+} from "@lucide/vue";
 import { useDocuments } from "../../composables/useDocuments";
 import { useVaultActions } from "../../composables/useVaultActions";
 import { useContextMenu } from "../../composables/useContextMenu";
@@ -16,6 +23,7 @@ import { descendantsOf } from "../../utils/versionTree";
 
 const emit = defineEmits<{
   preview: [];
+  compare: [];
 }>();
 
 const { t } = useI18n();
@@ -59,6 +67,23 @@ function versionMenuExport() {
   const version = selectedVersion.value;
   close();
   if (version) void exportVersionAction(version.label);
+}
+
+/** Compare the right-clicked version against the document's latest version.
+ *  Displayed for every document but only enabled for .docx + non-current
+ *  versions; the disable reason is carried by the tooltip. */
+const compareLatestDisabledReason = computed<string | null>(() => {
+  const doc = selectedDocument.value;
+  const ver = selectedVersion.value;
+  if (!doc || !ver) return t("compare.selectMissing");
+  if (doc.type !== "docx") return t("compare.docxOnly");
+  if (ver.status === "current") return t("versionMenu.compareLatestCurrent");
+  return null;
+});
+
+function versionMenuCompareLatest() {
+  close();
+  emit("compare");
 }
 
 function versionMenuRefresh() {
@@ -131,6 +156,17 @@ onBeforeUnmount(() => {
           {{ t("versionMenu.export", { label: selectedVersion?.label ?? "" }) }}
         </button>
         <div class="ctx-divider"></div>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          :disabled="Boolean(compareLatestDisabledReason)"
+          :title="compareLatestDisabledReason ?? ''"
+          @click="versionMenuCompareLatest"
+        >
+          <GitCompare aria-hidden="true" />
+          {{ t("versionMenu.compareLatest") }}
+        </button>
         <button
           type="button"
           class="ctx-item"

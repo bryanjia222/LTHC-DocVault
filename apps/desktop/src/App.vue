@@ -14,6 +14,7 @@ import DocumentStatusDialog from "./components/DocumentStatusDialog.vue";
 import RenameDialog from "./components/RenameDialog.vue";
 import NoteEditDialog from "./components/NoteEditDialog.vue";
 import NewDocumentDialog from "./components/NewDocumentDialog.vue";
+import DocumentCompareDialog from "./components/DocumentCompareDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
 import DocumentsView from "./components/views/DocumentsView.vue";
 import SettingsView from "./components/views/SettingsView.vue";
@@ -252,6 +253,7 @@ onBeforeUnmount(() => {
     <RenameDialog />
     <NoteEditDialog />
     <NewDocumentDialog />
+    <DocumentCompareDialog />
     <AppContextMenu />
     <ToastHost />
     <!-- Refresh feedback: a brief full-surface fade so a manual 刷新 is felt

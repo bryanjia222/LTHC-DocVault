@@ -18,6 +18,9 @@ example_docs/
 /third_party/restic/**/restic
 /third_party/restic/**/restic.exe
 
+# Docxodus WASM runtime copied from node_modules by the desktop build scripts.
+/apps/desktop/public/docxodus/
+
 # Local agent tool state
 .claude/
 .codex/
