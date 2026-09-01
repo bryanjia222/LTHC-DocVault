@@ -206,17 +206,21 @@ export function mapDocument(raw: RawDocumentWithVersions): Document {
   const versions = [...raw.versions].sort(
     (a, b) => b.created_at - a.created_at,
   );
-  const latest = versions[0];
   const currentId = raw.document.current_version_id;
+  // Document-level fields describe the working content, so prefer the current
+  // version pointer; fall back to the newest row only when no pointer exists.
+  const current =
+    (currentId ? versions.find((version) => version.id === currentId) : null) ??
+    versions[0];
   return {
     id: raw.document.id,
     name: raw.document.name,
-    originalFilename: latest?.original_filename ?? raw.document.name,
-    type: deriveType(latest?.original_filename ?? raw.document.name),
-    owner: latest?.author ?? "",
-    updatedAt: formatEpoch(latest?.created_at ?? raw.document.created_at),
+    originalFilename: current?.original_filename ?? raw.document.name,
+    type: deriveType(current?.original_filename ?? raw.document.name),
+    owner: current?.author ?? "",
+    updatedAt: formatEpoch(current?.created_at ?? raw.document.created_at),
     versions: versions.map((version) => mapVersion(version, currentId)),
-    backend: (latest?.backup_backend as Backend) ?? "local-copy",
+    backend: (current?.backup_backend as Backend) ?? "local-copy",
     health: versions.length > 0 ? "synced" : "needsReview",
   };
 }

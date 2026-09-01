@@ -268,7 +268,34 @@ describe("mapDocument", () => {
     expect(doc.versions.every((v) => v.status === "archived")).toBe(true);
   });
 
-  it("derives originalFilename and type from the latest version", () => {
+  it("derives originalFilename and type from the current version", () => {
+    const doc = mapDocument(
+      mkDoc({
+        document: {
+          id: "d",
+          name: "D",
+          current_version_id: "v1",
+          created_at: 0,
+        },
+        versions: [
+          mkVersion({
+            id: "v1",
+            created_at: 1000,
+            original_filename: "old.docx",
+          }),
+          mkVersion({
+            id: "v2",
+            created_at: 2000,
+            original_filename: "new.xlsx",
+          }),
+        ],
+      }),
+    );
+    expect(doc.originalFilename).toBe("old.docx");
+    expect(doc.type).toBe("docx");
+  });
+
+  it("falls back to the newest version when no current pointer exists", () => {
     const doc = mapDocument(
       mkDoc({
         versions: [
@@ -289,16 +316,22 @@ describe("mapDocument", () => {
     expect(doc.type).toBe("xlsx");
   });
 
-  it("sets owner from the latest version author", () => {
+  it("sets owner from the current version author", () => {
     const doc = mapDocument(
       mkDoc({
+        document: {
+          id: "d",
+          name: "D",
+          current_version_id: "v1",
+          created_at: 0,
+        },
         versions: [
           mkVersion({ id: "v1", created_at: 1000, author: "Old" }),
           mkVersion({ id: "v2", created_at: 2000, author: "New" }),
         ],
       }),
     );
-    expect(doc.owner).toBe("New");
+    expect(doc.owner).toBe("Old");
   });
 
   it("sets health to synced when versions exist", () => {
@@ -308,7 +341,7 @@ describe("mapDocument", () => {
     expect(doc.health).toBe("synced");
   });
 
-  it("uses the latest backup_backend, defaulting to local-copy", () => {
+  it("uses the current backup_backend, defaulting to local-copy", () => {
     const withBackend = mapDocument(
       mkDoc({
         versions: [
@@ -340,7 +373,7 @@ describe("mapDocument", () => {
     expect(doc.versions).toEqual([]);
   });
 
-  it("formats updatedAt from the latest version, falling back to the document created_at", () => {
+  it("formats updatedAt from the current version, falling back to the document created_at", () => {
     const withVersions = mapDocument(
       mkDoc({
         versions: [mkVersion({ id: "v1", created_at: 1_700_000_000 })],
