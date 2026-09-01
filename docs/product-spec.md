@@ -30,7 +30,7 @@
 
 连接失败时显示 `boot.open-error`，并保留 `boot.connect-button` 进入连接流程。连接成功后进入 `documents.panel`。
 
-首次进入文档视图时，应用自动选中第一个可见文档；之后不再自动覆盖用户显式做出的选择或清空操作。
+首次进入文档视图时，应用自动选中第一个可见文档，并把 `term.selected-version` 重置为该文档的 `term.current-version`；之后不再自动覆盖用户显式做出的选择或清空操作。
 
 ### 仓库连接
 
@@ -50,7 +50,7 @@
 
 选中语义遵循显式选择：
 
-- 点击 `documents.document-row` 设置 `term.selected-document`。
+- 点击 `documents.document-row` 设置 `term.selected-document`，并把 `term.selected-version` 重置为该文档的 `term.current-version`。
 - 点击 `detail.version-row` 设置 `term.selected-version`。
 - 点击项目树、表格空白区、表头或其他非文档条目时清除 `term.selected-document` 和 `term.selected-version`。
 - 切换到 `nav.trash` 或 `nav.settings` 时清除文档和版本选中状态。
@@ -121,6 +121,7 @@
 - `documents.column.owner` 与 `documents.column.status` 默认隐藏。
 - `documents.col-resizer` 调整列宽，`documents.sort-indicator` 表示当前排序方向。
 - `documents.file-type-badge` 显示扩展名类别；`documents.row-tags` 显示文档标签；`documents.status-pill` 和 `documents.modification-pill` 显示健康与源文件状态。
+- 文档级元数据和 `documents.column.current-version` 描述当前工作内容；没有当前版本时回落到最新可见版本。
 
 ### 行内操作
 
@@ -131,7 +132,7 @@
 - `documents.row.commit-button` 只在 `state.modification.modified` 时可执行。
 - `documents.row.export-button` 导出当前工作内容。
 
-点击 `documents.non-document-area`、表头或分组线会清除选中状态；点击行内按钮不改变选中文档。
+点击 `documents.non-document-area`、表头或分组线会清除选中状态；点击行内按钮会设置 `term.selected-document`，并把 `term.selected-version` 重置为 `term.current-version`。
 
 ## 顶部工具栏与文档动作
 
@@ -449,7 +450,7 @@
 
 恢复版本会向上级联恢复所有被删除的 `term.ancestor-version`；用户拒绝时整个级联恢复取消。
 
-永久删除版本只删除该版本和当前处于回收站中的衍生版本；仍可见的衍生版本保留。
+永久删除版本只删除该版本和当前处于回收站中的衍生版本。该版本仍有可见衍生版本时禁止永久删除；用户必须先恢复或删除这些衍生版本。
 
 ### 清空回收站
 
@@ -459,6 +460,7 @@
 - 版本删除按所属文档分组执行。
 - 单项失败记录错误，不中断剩余项。
 - 属于已删除文档的版本跳过单独删除，因为文档删除已包含其版本。
+- 仍有可见衍生版本的回收站版本不会被单独删除，并保留在回收站中。
 
 `trash.restore-button` 恢复软删除条目；`trash.delete-button` 永久删除条目。回收站为空时显示 `trash.empty-state`。
 
@@ -608,3 +610,4 @@
 8. 文档软删除可恢复，永久删除必须两次确认。
 9. 版本删除和恢复的级联确认被拒绝时完全取消。
 10. 后端任务失败不会破坏已有仓库数据或用户原始源文件。
+11. 永久删除版本时，该版本不能仍有可见衍生版本。
