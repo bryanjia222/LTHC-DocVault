@@ -412,19 +412,21 @@ export const enUS = {
   compare: {
     title: "Document comparison",
     dialogSubtitle:
-      "Pick the old and new document versions to generate a Word redline.",
+      "Pick the old and new document versions to generate a Word comparison.",
     oldDoc: "Old document",
     newDoc: "New document",
     docLabel: "Document",
     versionLabel: "Version",
     latest: "latest",
     run: "Run comparison",
-    loading: "Fetching documents and generating the redline…",
+    loading: "Fetching documents and generating the comparison…",
     error: "Comparison failed: {error}",
     close: "Close comparison",
     resultSubtitle: "Old: {old} · {oldVersion}　New: {new} · {newVersion}",
     noBytes: "Could not read the selected versions' document content.",
     selectMissing: "Select the documents and versions to compare first.",
+    identicalSelection:
+      "Both sides select the same document and version - nothing to compare.",
     docxOnly: "Only Word (.docx) documents support comparison",
     docxOnlyHint:
       "Comparison requires both sides to be Word (.docx) documents; other formats are not supported yet.",

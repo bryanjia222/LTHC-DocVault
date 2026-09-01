@@ -57,11 +57,20 @@ const newVersions = computed(() =>
   newDocument.value ? visibleVersions(newDocument.value) : [],
 );
 
+/** The same document + the same version has no diff, so it must not run. */
+const identicalSelection = computed(
+  () =>
+    Boolean(oldVersionId.value) &&
+    oldDocId.value === newDocId.value &&
+    oldVersionId.value === newVersionId.value,
+);
+
 /** Comparable only when both sides are Word documents with picked versions. */
 const canRun = computed(() => {
   const oldVersion = oldVersions.value.find((v) => v.id === oldVersionId.value);
   const newVersion = newVersions.value.find((v) => v.id === newVersionId.value);
   return (
+    !identicalSelection.value &&
     oldDocument.value?.type === "docx" &&
     newDocument.value?.type === "docx" &&
     Boolean(oldVersion) &&
@@ -114,6 +123,10 @@ function submit() {
   const newVersion = newVersions.value.find((v) => v.id === newVersionId.value);
   if (!oldDoc || !newDoc || !oldVersion || !newVersion) {
     logBlocked(t("compare.selectMissing"));
+    return;
+  }
+  if (identicalSelection.value) {
+    logBlocked(t("compare.identicalSelection"));
     return;
   }
   log(
@@ -194,7 +207,10 @@ function close() {
         </label>
       </div>
 
-      <p v-if="!canRun" class="form-hint">
+      <p v-if="identicalSelection" class="form-hint">
+        {{ t("compare.identicalSelection") }}
+      </p>
+      <p v-else-if="!canRun" class="form-hint">
         {{ t("compare.docxOnlyHint") }}
       </p>
     </form>

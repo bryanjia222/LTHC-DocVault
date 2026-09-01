@@ -203,7 +203,10 @@ onBeforeUnmount(() => {
 
         <div class="preview-body">
           <div v-if="loading" class="preview-status">
-            {{ t("compare.loading") }}
+            <div class="compare-loading" role="status">
+              <span class="preview-spinner" aria-hidden="true" />
+              {{ t("compare.loading") }}
+            </div>
           </div>
           <div v-else-if="error" class="preview-status preview-error">
             {{ t("compare.error", { error }) }}
@@ -285,6 +288,27 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   font-size: 14px;
   background: var(--bg-surface);
+}
+
+.compare-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: preview-spin 0.7s linear infinite;
+}
+
+@keyframes preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .preview-error {
