@@ -353,6 +353,8 @@ export const enUS = {
       "The current version is in this version's history. Switch to another version outside of it before deleting.",
     deleteBlockedLast:
       "This is the document's only version - delete the document instead to remove it.",
+    deleteBlockedLiveDescendants:
+      '"{name}" still has visible descendants of version {version}. Restore or delete those descendants first.',
   },
   trash: {
     title: "Recycle bin",

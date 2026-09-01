@@ -1328,6 +1328,25 @@ describe("useVaultActions - permanently delete version", () => {
     vi.mocked(message).mockClear();
   });
 
+  it("blocks deletion while a visible descendant remains", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+    // v3 is in the bin, but its child v3a was restored / never trashed.
+    desktop.trashVersion(docTree.id, "v3");
+
+    await actions.permanentlyDeleteVersion(docTree.id, "v3");
+    await flush();
+
+    expect(vi.mocked(message)).toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
+    // The blocked ancestor stays in the bin rather than breaking the history.
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
+  });
+
   it("deletes the version + its trashed descendants, then clears + reloads", async () => {
     asTauri();
     vi.mocked(confirm).mockResolvedValue(true);
@@ -1426,6 +1445,24 @@ describe("useVaultActions - empty recycle bin (versions)", () => {
       "delete_versions",
       expect.anything(),
     );
+  });
+
+  it("skips a trashed version that still has a visible descendant", async () => {
+    asTauri();
+    vi.mocked(confirm).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue("job-del");
+    // v3 cannot be removed without orphaning the still-visible v3a.
+    desktop.trashVersion(docTree.id, "v3");
+
+    await actions.emptyTrash();
+    await flush();
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      "delete_versions",
+      expect.anything(),
+    );
+    expect(desktop.isVersionTrashed(docTree.id, "v3")).toBe(true);
+    expect(desktop.isVersionTrashed(docTree.id, "v3a")).toBe(false);
   });
 });
 

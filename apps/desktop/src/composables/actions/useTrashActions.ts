@@ -6,6 +6,7 @@ import { useDesktopState } from "../useDesktopState";
 import { confirmDialog, useVault } from "../useVault";
 import { reportBackendCommandError } from "../../utils/reportError";
 import { ancestorsOf, descendantsOf } from "../../utils/versionTree";
+import type { Document, Version } from "../../data/mock";
 
 /*
  * Recycle-bin actions: soft-delete (desktop-local hide) and the irreversible
@@ -31,6 +32,13 @@ export function useTrashActions() {
     isTauri,
   } = useVault();
   const desktop = useDesktopState();
+
+  /** A permanent version delete must not break a still-visible history tree. */
+  function liveDescendants(doc: Document, versionId: string): Version[] {
+    return descendantsOf(doc.versions, versionId).filter(
+      (version) => !desktop.isVersionTrashed(doc.id, version.id),
+    );
+  }
 
   /**
    * Soft-delete the selected document: move it to the recycle bin (a
@@ -156,6 +164,17 @@ export function useTrashActions() {
     const versionsByDoc = new Map<string, string[]>();
     for (const entry of desktop.trashedVersionList()) {
       if (trashedDocSet.has(entry.documentId)) continue;
+      const doc = documents.value.find((d) => d.id === entry.documentId);
+      if (doc && liveDescendants(doc, entry.versionId).length > 0) {
+        const version = doc.versions.find((v) => v.id === entry.versionId);
+        logBlocked(
+          t("versionMenu.deleteBlockedLiveDescendants", {
+            name: doc.name,
+            version: version?.label ?? entry.versionId,
+          }),
+        );
+        continue;
+      }
       const list = versionsByDoc.get(entry.documentId);
       if (list) list.push(entry.versionId);
       else versionsByDoc.set(entry.documentId, [entry.versionId]);
@@ -378,12 +397,10 @@ export function useTrashActions() {
    * Permanently delete a version (and the descendants that were trashed with
    * it) from the recycle bin: this is the irreversible step that removes the DB
    * row(s), forgets restic snapshots, and deletes the local archive directory.
-   * Double-confirmed. Only trashed versions are removed - a descendant that was
-   * restored (still live) is left in place, so a visible version is never
-   * deleted by surprise (it may end up with a dangling parent reference, which
-   * the tree view surfaces cosmetically). Desktop bin membership is cleared
-   * once the job reports success; the truthful state arrives later via
-   * `job:update`.
+   * Double-confirmed. A delete is refused while any visible descendant remains:
+   * deleting its ancestor would otherwise leave a broken history reference.
+   * Desktop bin membership is cleared once the job reports success; the truthful
+   * state arrives later via `job:update`.
    */
   async function permanentlyDeleteVersion(docId: string, versionId: string) {
     const actionKey = "actionLogs.deleteVersion" as const;
@@ -401,6 +418,25 @@ export function useTrashActions() {
       return;
     }
     if (!isTauri()) return;
+    if (liveDescendants(doc, versionId).length > 0) {
+      logBlocked(
+        t("versionMenu.deleteBlockedLiveDescendants", {
+          name: doc.name,
+          version: ver.label,
+        }),
+      );
+      await message(
+        t("versionMenu.deleteBlockedLiveDescendants", {
+          name: doc.name,
+          version: ver.label,
+        }),
+        {
+          title: t("versionMenu.deleteBlockedTitle"),
+          kind: "warning",
+        },
+      );
+      return;
+    }
     // Remove this version plus any of its descendants that are still in the bin
     // (they were trashed together). Non-trashed descendants are left alive.
     const descendants = descendantsOf(doc.versions, versionId);

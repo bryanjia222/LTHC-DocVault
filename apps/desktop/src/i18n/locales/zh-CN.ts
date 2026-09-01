@@ -346,6 +346,8 @@ export const zhCN = {
     deleteBlockedCurrent:
       "当前版本位于该版本的历史之中。请先切换到其历史之外的版本，再进行删除。",
     deleteBlockedLast: "这是该文档唯一的版本——如需移除，请直接删除整个文档。",
+    deleteBlockedLiveDescendants:
+      "「{name}」的 {version} 版本仍有可见的衍生版本。请先恢复或删除这些衍生版本。",
   },
   trash: {
     title: "回收站",
