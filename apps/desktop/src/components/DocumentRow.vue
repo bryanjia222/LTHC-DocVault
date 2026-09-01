@@ -260,13 +260,17 @@ td {
 }
 
 .row-action:disabled {
-  opacity: 0.4;
   cursor: not-allowed;
 }
 
 tr:hover .row-action,
 tr:focus-within .row-action {
   opacity: 1;
+}
+
+tr:hover .row-action:disabled,
+tr:focus-within .row-action:disabled {
+  opacity: 0.4;
 }
 
 .row-action svg {
