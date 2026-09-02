@@ -33,7 +33,7 @@ fn command_failure_is_persisted_to_cli_log() {
         ])
         .assert()
         .failure()
-        .stderr(contains("The system cannot find the file specified"));
+        .stderr(contains("OOXML error: I/O error:"));
 
     let log_dir = root.join("logs");
     let log_path = fs::read_dir(&log_dir)
