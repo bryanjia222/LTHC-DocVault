@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 # Focus the existing window when a second instance is launched instead of
 # opening a duplicate.
 tauri-plugin-single-instance = "2"

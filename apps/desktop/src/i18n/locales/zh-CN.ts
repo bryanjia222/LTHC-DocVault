@@ -77,6 +77,11 @@ export const zhCN = {
     commentSend: "发送",
     markAllRead: "全部已读",
     editorMoreTools: "更多工具",
+    systemNotificationTitle: "亲笔信",
+    systemNotificationMessages: "收到 {newMessages} 条新消息",
+    systemNotificationReplies: "收到 {newReplies} 条新回复",
+    systemNotificationUpdates:
+      "收到 {newMessages} 条新消息和 {newReplies} 条新回复",
   },
   sidebar: {
     vault: "仓库",
@@ -586,13 +591,17 @@ export const zhCN = {
     doubleClickPreview: "预览",
     doubleClickOpen: "打开",
     doubleClickHint: "双击文档行时执行的操作。",
+    notificationsSection: "通知",
+    systemNotifications: "系统通知",
+    systemNotificationsHint:
+      "收到新的亲笔信或回复时显示系统通知。首次通知时，系统可能会请求通知权限。",
     columnsSection: "表格列",
     columnsHint:
       "拖动表头右侧分隔线可调整列宽；拖到最小宽度以下松开即隐藏该列。勾选下方可显示该列。",
     columnsReset: "重置列宽与可见性",
     resetDefaults: "恢复到默认设置",
     resetDefaultsHint:
-      "将主题、开发者模式、双击行为、表格列与面板固定等设置恢复为默认值。不会删除文档或常用链接。",
+      "将主题、系统通知、开发者模式、双击行为、表格列与面板固定等设置恢复为默认值。不会删除文档或常用链接。",
     resetDefaultsConfirm: "确定恢复到默认设置吗？",
     columnsAlwaysOn: "始终显示",
   },

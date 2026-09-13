@@ -489,6 +489,8 @@
 - 终端状态通知在 4500ms 后自动消失。
 - 用户可使用 `toast.dismiss` 手动关闭。
 - `toast.status` 显示 `state.job.running`、`state.job.succeeded`、`state.job.failed` 或 `state.job.cancelled`。
+- 亲笔信后台轮询发现新的未读消息或回复时显示系统通知；首次成功轮询只建立基线，不重复提示启动前已有的未读内容。
+- 亲笔信窗口打开并正在把收件箱标记为已读时不显示系统通知。
 
 ### 活动日志
 
@@ -524,9 +526,10 @@
 - `appearance.theme-control` 支持 Light、System、Dark。
 - System 跟随操作系统主题实时变化。
 - `appearance.language` 切换界面语言；语言变化需要重启应用，因为编辑器组件在会话中绑定语言资源。
+- `appearance.system-notifications` 控制亲笔信系统通知，默认开启并持久化到客户端本地设置。
 - `appearance.double-click.preview` 和 `appearance.double-click.open` 控制双击动作。
 - `appearance.columns` 控制列可见性和宽度；`appearance.columns-always-on` 说明始终显示列；`appearance.columns-reset` 恢复列默认值。
-- `appearance.reset-defaults` 恢复主题、双击、开发者模式、列设置和详情面板固定状态。
+- `appearance.reset-defaults` 恢复主题、系统通知、双击、开发者模式、列设置和详情面板固定状态。
 
 ### 开发者专用
 

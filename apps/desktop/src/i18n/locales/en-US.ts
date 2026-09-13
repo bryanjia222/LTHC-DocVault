@@ -79,6 +79,11 @@ export const enUS = {
     commentSend: "Send",
     markAllRead: "Mark all read",
     editorMoreTools: "More tools",
+    systemNotificationTitle: "Qinbixin",
+    systemNotificationMessages: "You received {newMessages} new message(s)",
+    systemNotificationReplies: "You received {newReplies} new reply/replies",
+    systemNotificationUpdates:
+      "You received {newMessages} new message(s) and {newReplies} new reply/replies",
   },
   sidebar: {
     vault: "Vault",
@@ -606,13 +611,17 @@ export const enUS = {
     doubleClickPreview: "Preview",
     doubleClickOpen: "Open",
     doubleClickHint: "What double-clicking a document row does.",
+    notificationsSection: "Notifications",
+    systemNotifications: "System notifications",
+    systemNotificationsHint:
+      "Show a system notification for new Qinbixin messages or replies. The OS may ask for notification permission the first time.",
     columnsSection: "Table columns",
     columnsHint:
       "Drag a header's right edge to resize a column; drag below the minimum width and release to hide it. Tick below to show it.",
     columnsReset: "Reset widths & visibility",
     resetDefaults: "Restore default settings",
     resetDefaultsHint:
-      "Restores theme, developer mode, double-click behavior, table columns, and panel pinning to their defaults. Documents and quick links are not touched.",
+      "Restores theme, system notifications, developer mode, double-click behavior, table columns, and panel pinning to their defaults. Documents and quick links are not touched.",
     resetDefaultsConfirm: "Restore default settings?",
     columnsAlwaysOn: "Always shown",
   },

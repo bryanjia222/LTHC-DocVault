@@ -4,6 +4,9 @@ import { computed, ref, watch } from "vue";
 
 import { isTauri } from "./useVault";
 import { reportError } from "../utils/reportError";
+import { i18n } from "../i18n";
+import { showSystemNotification } from "../utils/systemNotification";
+import { updateQinbixinNotificationState } from "./qinbixinNotificationState";
 
 export interface QinbixinProfile {
   id: number;
@@ -324,6 +327,7 @@ async function refreshQinbixinMailbox(markRead = false): Promise<void> {
   await loadConversations(true);
   await loadInbox(true);
   await loadOutbox(true);
+  notifyForMailboxChanges(markRead);
   if (markRead) {
     for (const conversation of conversations.value.filter(
       (item) => item.unread,
@@ -331,6 +335,49 @@ async function refreshQinbixinMailbox(markRead = false): Promise<void> {
       await markConversationRead(conversation);
     }
   }
+}
+
+function notifyForMailboxChanges(suppress: boolean): void {
+  const profileId = status.value.profile?.id;
+  if (!profileId) return;
+
+  const unreadReplies = new Map<number, number>();
+  for (const message of [...messages.value, ...outboxMessages.value]) {
+    unreadReplies.set(
+      message.id,
+      Math.max(unreadReplies.get(message.id) ?? 0, unreadCommentCount(message)),
+    );
+  }
+  const change = updateQinbixinNotificationState(
+    `${status.value.environment}:${profileId}`,
+    conversations.value,
+    unreadReplies,
+  );
+  // Keep the baseline current while the inbox is open, but do not interrupt
+  // the user with a system notification for content already on screen.
+  if (suppress) return;
+  if (change.newMessages === 0 && change.newReplies === 0) return;
+
+  const notificationCounts = {
+    newMessages: change.newMessages,
+    newReplies: change.newReplies,
+  };
+  const body =
+    change.newMessages > 0 && change.newReplies > 0
+      ? i18n.global.t("qinbixin.systemNotificationUpdates", notificationCounts)
+      : change.newMessages > 0
+        ? i18n.global.t(
+            "qinbixin.systemNotificationMessages",
+            notificationCounts,
+          )
+        : i18n.global.t(
+            "qinbixin.systemNotificationReplies",
+            notificationCounts,
+          );
+  void showSystemNotification(
+    i18n.global.t("qinbixin.systemNotificationTitle"),
+    body,
+  );
 }
 
 async function loadOutbox(background = false): Promise<void> {

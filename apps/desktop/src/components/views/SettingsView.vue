@@ -13,6 +13,7 @@ import StageResetSlider from "../StageResetSlider.vue";
 import { useDevMode } from "../../composables/useDevMode";
 import { useDoubleClickPref } from "../../composables/useDoubleClickPref";
 import { useHistoryPinPref } from "../../composables/useHistoryPinPref";
+import { useSystemNotificationPref } from "../../composables/useSystemNotificationPref";
 import {
   useQinbixin,
   type QinbixinEnvironment,
@@ -42,6 +43,8 @@ const { config, setLogLevel } = useVault();
 const { settingsTab } = useNavigation();
 const { isDevMode } = useDevMode();
 const { doubleClickAction, setDoubleClickAction } = useDoubleClickPref();
+const { systemNotificationsEnabled, setSystemNotificationsEnabled } =
+  useSystemNotificationPref();
 const { columns, setVisible, resetColumns, isAlwaysVisible } =
   useTableColumns();
 const { setPinned } = useHistoryPinPref();
@@ -59,14 +62,15 @@ function onToggleColumn(id: ColumnId, event: Event) {
   setVisible(id, (event.target as HTMLInputElement).checked);
 }
 
-/** Restore every client UI setting (theme, dev mode, double-click, table
- *  columns, panel pinning) to its default. Documents and quick links are user
- *  data and are left untouched. */
+/** Restore every client UI setting (theme, notifications, dev mode,
+ *  double-click, table columns, panel pinning) to its default. Documents and
+ *  quick links are user data and are left untouched. */
 async function resetSettings() {
   if (!(await confirmDialog(t("settings.resetDefaultsConfirm")))) return;
   setTheme("system");
   isDevMode.value = false;
   setDoubleClickAction("preview");
+  setSystemNotificationsEnabled(true);
   resetColumns();
   setPinned(false);
 }
@@ -333,6 +337,36 @@ const tabs: { id: SettingsTab; labelKey: string }[] = [
             </div>
           </dl>
         </div>
+      </div>
+
+      <div class="surface settings-card">
+        <h3>{{ t("settings.notificationsSection") }}</h3>
+        <dl class="settings-dl">
+          <div>
+            <dt>{{ t("settings.systemNotifications") }}</dt>
+            <dd>
+              <div class="segmented-control">
+                <button
+                  type="button"
+                  :class="{ active: !systemNotificationsEnabled }"
+                  @click="setSystemNotificationsEnabled(false)"
+                >
+                  {{ t("settings.off") }}
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: systemNotificationsEnabled }"
+                  @click="setSystemNotificationsEnabled(true)"
+                >
+                  {{ t("settings.on") }}
+                </button>
+              </div>
+              <p class="field-hint">
+                {{ t("settings.systemNotificationsHint") }}
+              </p>
+            </dd>
+          </div>
+        </dl>
       </div>
 
       <div class="surface settings-card">

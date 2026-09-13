@@ -339,6 +339,7 @@
 | appearance.theme-control        | 主题分段控件     | Theme segmented control   | `SettingsView.vue` `.theme-control`                                             |
 | appearance.language             | 语言             | Language                  | `settings.language`                                                             |
 | appearance.language-restart     | 语言重启提示     | Language restart prompt   | `settings.languageRestartTitle`, `settings.restartApp`, `settings.restartLater` |
+| appearance.system-notifications | 系统通知         | System notifications      | `settings.systemNotifications`                                                  |
 | appearance.dev-mode             | 开发者模式       | Developer mode            | `settings.devMode`                                                              |
 | appearance.double-click         | 双击文档         | Double-click document     | `settings.doubleClick`                                                          |
 | appearance.double-click.preview | 双击后预览       | Double-click preview      | `settings.doubleClickPreview`                                                   |
